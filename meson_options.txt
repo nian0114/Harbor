@@ -1,0 +1,3 @@
+option('linux', type: 'boolean', value: true, description: 'Build the GTK4/libadwaita Linux client')
+option('server', type: 'boolean', value: true, description: 'Build the sync/relay server')
+option('tests', type: 'boolean', value: true, description: 'Build unit tests')
