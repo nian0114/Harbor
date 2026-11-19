@@ -69,13 +69,23 @@ static gboolean take_shot(gpointer ud)
     node = gtk_snapshot_free_to_node(snap);
     tex = node ? gsk_renderer_render_texture(r, node, &bounds) : NULL;
     ok = tex && gdk_texture_save_to_png(tex, hb_opt_screenshot);
-    g_printerr("harbor: screenshot %s -> %s\n",
-               ok ? "saved" : "FAILED", hb_opt_screenshot);
     g_clear_object(&tex);
-    gsk_render_node_unref(node);
+    if (node)
+        gsk_render_node_unref(node);
     gsk_renderer_unrealize(r);
     g_clear_object(&r);
     g_clear_object(&p);
+    if (!ok) {
+        static int retries;
+        if (++retries < 10) {
+            g_printerr("harbor: screenshot retry %d/10 -> %s\n",
+                       retries, hb_opt_screenshot);
+            g_timeout_add(500, take_shot, win);
+            return G_SOURCE_REMOVE;
+        }
+    }
+    g_printerr("harbor: screenshot %s -> %s\n",
+               ok ? "saved" : "FAILED", hb_opt_screenshot);
     g_application_quit(g_application_get_default());
     return G_SOURCE_REMOVE;
 }
