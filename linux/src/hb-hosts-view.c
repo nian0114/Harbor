@@ -273,6 +273,7 @@ static GtkWidget *tag_lbl(const char *txt, gboolean tun)
     GtkWidget *l = gtk_label_new(txt);
     gtk_widget_add_css_class(l, "hb-tag");
     if (tun) gtk_widget_add_css_class(l, "tun");
+    gtk_widget_set_valign(l, GTK_ALIGN_CENTER);
     return l;
 }
 
@@ -328,7 +329,6 @@ static GtkWidget *row_shell(void)
     gtk_widget_set_size_request(c1, COL_NAME_MIN, -1);
     gtk_widget_set_hexpand(c1, TRUE);
     gtk_widget_set_margin_start(c1, 14);
-    gtk_widget_set_margin_end(c1, 14);
     gtk_widget_add_css_class(name, "hb-h-name");
     gtk_widget_add_css_class(name, "hb-c0");
     gtk_label_set_xalign(GTK_LABEL(name), 0);
@@ -343,6 +343,7 @@ static GtkWidget *row_shell(void)
         GtkWidget *l = gtk_label_new("");
         gtk_label_set_xalign(GTK_LABEL(l), 0);
         gtk_widget_set_size_request(l, widths[i], -1);
+        gtk_widget_set_margin_start(l, 14);
         if (i == 1) gtk_widget_add_css_class(l, "mono");
         gtk_box_append(GTK_BOX(row), l);
         g_object_set_data(G_OBJECT(row), keys[i], l);
@@ -355,6 +356,7 @@ static GtkWidget *row_shell(void)
     g_object_set_data(G_OBJECT(row), "groupcell", gcell);
     act = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_size_request(act, COL_ACT_W, -1);
+    gtk_widget_set_margin_start(act, 14);
     gtk_box_append(GTK_BOX(row), act);
     return row;
 }
@@ -707,6 +709,7 @@ static GtkWidget *build_table_head(void)
     for (i = 0; i < 6; i++) {
         GtkWidget *l = gtk_label_new(cols[i].txt);
         gtk_label_set_xalign(GTK_LABEL(l), 0);
+        gtk_widget_set_margin_start(l, 14);
         if (cols[i].grow) gtk_widget_set_hexpand(l, TRUE);
         gtk_widget_set_size_request(l, cols[i].w, -1);
         gtk_box_append(GTK_BOX(row), l);

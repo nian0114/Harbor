@@ -278,9 +278,12 @@ GtkWidget *hb_os_avatar_new(const char *os_or_proto, int px)
     gtk_widget_set_vexpand_set(box, TRUE);
     gtk_widget_set_vexpand(box, FALSE);
 
-    if (!strcmp(key, "local"))
+    gtk_widget_set_overflow(box, GTK_OVERFLOW_HIDDEN);
+    if (!strcmp(key, "local")) {
         glyph = hb_mono_icon_new(">_");
-    else if (!strcmp(key, "vnc"))
+        if (px <= 26)
+            gtk_widget_add_css_class(glyph, "sm");
+    } else if (!strcmp(key, "vnc"))
         glyph = hb_icon_new("monitor", gpx);
     else if (!strcmp(key, "rdp") || !strcmp(key, "win"))
         glyph = hb_icon_new("win", gpx);
