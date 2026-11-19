@@ -1584,6 +1584,17 @@ static bool ssh_poll_exit_op(void *ctx, int *code)
         return false;
     if (!libssh2_channel_eof(hp->chan))
         return false;
+    /* exit-status 分组可能比 eof 晚几个包到达：EOF 后在非阻塞模式下
+     * 再 drain 一小段时间（≤500ms）等 channel close，保证
+     * get_exit_status 拿到的是真实退出码而非默认 0。 */
+    {
+        int64_t dl = hb_now_ms() + 500;
+        int rc;
+        while ((rc = libssh2_channel_wait_closed(hp->chan)) ==
+               LIBSSH2_ERROR_EAGAIN && hb_now_ms() < dl)
+            usleep(10000);
+        (void)rc;
+    }
     *code = libssh2_channel_get_exit_status(hp->chan);
     return true;
 }
