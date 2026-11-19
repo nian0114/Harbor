@@ -76,6 +76,10 @@ void hb_vt_resize(hb_vt *v, int rows, int cols);
 void hb_vt_size(hb_vt *v, int *rows, int *cols);
 
 int  hb_vt_scrollback_count(hb_vt *v);
+/* 推入 scrollback 的累计行数（resize 拉回会减）。配合 row 可得绝对行号：
+ * scrollback 行 -k → total_pushed - k；屏幕行 r → total_pushed + r。
+ * 同一行在 ring 内坐标稳定（满溢丢最旧行时其余行 abs 不变）。 */
+uint64_t hb_vt_total_pushed(hb_vt *v);
 /* row ∈ [-scrollback_count, rows-1]；负数 = scrollback（-1 为最新一行） */
 bool hb_vt_get_cell(hb_vt *v, int row, int col, hb_cell *out);
 /* 本行是否软换行续到下一行 */

@@ -7,6 +7,16 @@ extern int   hb_opt_screenshot_delay;
 extern char *hb_opt_section;
 extern char *hb_opt_filter;
 extern char *hb_opt_host_view;
+extern char *hb_opt_theme;
+extern char *hb_opt_open_local;
+
+static gboolean parse_open_local(const gchar *n, const gchar *v,
+                                 gpointer d, GError **e)
+{
+    (void)n; (void)d; (void)e;
+    hb_opt_open_local = g_strdup(v ? v : "");
+    return TRUE;
+}
 
 int main(int argc, char **argv)
 {
@@ -23,6 +33,12 @@ int main(int argc, char **argv)
           &hb_opt_filter, "preset hosts search text", "TEXT" },
         { "host-view", 0, G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_STRING,
           &hb_opt_host_view, "grid|list", "MODE" },
+        { "theme", 0, G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_STRING,
+          &hb_opt_theme, "terminal theme id", "ID" },
+        { "open-local", 0,
+          G_OPTION_FLAG_HIDDEN | G_OPTION_FLAG_OPTIONAL_ARG,
+          G_OPTION_ARG_CALLBACK, parse_open_local,
+          "open a Local terminal tab; =CMD injects CMD", "[CMD]" },
         { NULL },
     };
     GOptionContext *ctx;

@@ -10,6 +10,7 @@
 
 typedef struct {
     hb_cell *cells;
+    int      cols;    /* cells 分配的列数（ring 满时复用缓冲） */
     bool     wrapped; /* 本行软续到下一行 */
 } sb_line;
 
@@ -24,6 +25,7 @@ struct hb_vt {
     /* scrollback 环形缓冲：sb[sb_start] 最旧 */
     sb_line *sb;
     int      sb_cap, sb_len, sb_start;
+    uint64_t total_pushed; /* 见 hb_vt_total_pushed */
 
     pthread_mutex_t lock; /* 递归 */
 
@@ -132,16 +134,21 @@ static void sb_push(hb_vt *v, const VTermScreenCell *cells, int cols)
     int idx;
 
     if (v->sb_len == v->sb_cap) {
-        idx = v->sb_start;
-        free(v->sb[idx].cells);
+        /* 丢最旧行：其 cells 缓冲直接给新行复用（写 idx == 被丢槽位） */
         v->sb_start = (v->sb_start + 1) % v->sb_cap;
         v->sb_len--;
     }
     idx = (v->sb_start + v->sb_len) % v->sb_cap;
     l = &v->sb[idx];
-    l->cells = malloc((size_t)cols * sizeof *l->cells);
-    if (!l->cells)
-        return;
+    if (!l->cells || l->cols != cols) {
+        free(l->cells);
+        l->cells = malloc((size_t)cols * sizeof *l->cells);
+        if (!l->cells) {
+            l->cols = 0;
+            return;
+        }
+        l->cols = cols;
+    }
     for (int i = 0; i < cols; i++) {
         conv_cell(&cells[i], &l->cells[i]);
         if (i > 0 && cells[i - 1].width == 2)
@@ -152,6 +159,7 @@ static void sb_push(hb_vt *v, const VTermScreenCell *cells, int cols)
         li = vterm_state_get_lineinfo(v->state, 1);
     l->wrapped = li ? li->continuation != 0 : false;
     v->sb_len++;
+    v->total_pushed++;
 }
 
 static int sb_pop(hb_vt *v, VTermScreenCell *cells, int cols)
@@ -174,6 +182,7 @@ static int sb_pop(hb_vt *v, VTermScreenCell *cells, int cols)
     free(l->cells);
     l->cells = NULL;
     v->sb_len--;
+    v->total_pushed--;
     return 1;
 }
 
@@ -634,6 +643,15 @@ int hb_vt_scrollback_count(hb_vt *v)
     int n;
     lock(v);
     n = v->sb_len;
+    unlock(v);
+    return n;
+}
+
+uint64_t hb_vt_total_pushed(hb_vt *v)
+{
+    uint64_t n;
+    lock(v);
+    n = v->total_pushed;
     unlock(v);
     return n;
 }

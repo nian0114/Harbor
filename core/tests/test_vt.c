@@ -390,6 +390,38 @@ static void test_input(void)
     hb_vt_free(v);
 }
 
+static void test_total_pushed(void)
+{
+    hb_vt *v = mkvt(10, 20, 20);
+    char buf[64];
+    int i;
+    uint64_t t0, t1;
+
+    CHECK_EQ_INT(hb_vt_total_pushed(v), 0);
+    for (i = 0; i < 50; i++) {
+        int n = snprintf(buf, sizeof buf, "line%02d\r\n", i);
+        hb_vt_feed(v, buf, (size_t)n);
+    }
+    t0 = hb_vt_total_pushed(v);
+    /* ring 满后仍单调增长；绝对行号 abs = total_pushed + row 稳定 */
+    CHECK(t0 > 0);
+    CHECK(t0 >= (uint64_t)hb_vt_scrollback_count(v));
+    CHECK_EQ_INT(hb_vt_scrollback_count(v), 20);
+
+    for (i = 0; i < 5; i++) {
+        int n = snprintf(buf, sizeof buf, "more%02d\r\n", i);
+        hb_vt_feed(v, buf, (size_t)n);
+    }
+    t1 = hb_vt_total_pushed(v);
+    CHECK(t1 == t0 + 5);
+
+    /* resize 拉回 scrollback 行 → total 减少 */
+    hb_vt_resize(v, 15, 20);
+    CHECK(hb_vt_total_pushed(v) <= t1);
+    CHECK(hb_vt_scrollback_count(v) <= 20);
+    hb_vt_free(v);
+}
+
 static void test_generation(void)
 {
     hb_vt *v = mkvt(5, 20, 10);
@@ -405,6 +437,7 @@ int main(void)
     test_wide_and_wrap();
     test_scrollback();
     test_search();
+    test_total_pushed();
     test_osc_events();
     test_input();
     test_generation();

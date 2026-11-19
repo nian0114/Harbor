@@ -1289,6 +1289,8 @@ hb_err hb_vault_settings(hb_vault *v, hb_obj **out)
     hb_obj_set_bool(o, "close_to_tray", true);
     hb_obj_set_str(o, "notify_body", "full");
     hb_obj_set_bool(o, "watch_default_ssh", true);
+    hb_obj_set_bool(o, "osc52", false);
+    hb_obj_set_bool(o, "cursor_blink", true);
     *out = o;
     return HB_OK;
 }

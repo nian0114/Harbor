@@ -1,6 +1,7 @@
 gtk4_dep = dependency('gtk4', version: '>=4.10')
 adw_dep = dependency('libadwaita-1')
 secret_dep = dependency('libsecret-1')
+m_dep = cc.find_library('m', required: true)
 
 gnome = import('gnome')
 hb_res = gnome.compile_resources('hb-resources',
@@ -17,9 +18,12 @@ harbor_exe = executable('harbor',
     'src/hb-vault-page.c',
     'src/hb-hosts-view.c',
     'src/hb-notify.c',
+    'src/hb-term-theme.c',
+    'src/hb-terminal.c',
+    'src/hb-term-page.c',
     hb_res,
     include_directories: 'src',
-    dependencies: [gtk4_dep, adw_dep, secret_dep, harbor_core_dep],
+    dependencies: [gtk4_dep, adw_dep, secret_dep, m_dep, harbor_core_dep],
     install: true,
 )
 

@@ -2,6 +2,8 @@
 #include "hb-icons.h"
 #include "hb-notify.h"
 #include "hb-vault-page.h"
+#include "hb-term-page.h"
+#include "hb-store.h"
 
 #include <stdio.h>
 
@@ -370,6 +372,59 @@ static GtkWidget *build_bell(HbWindow *win)
     return btn;
 }
 
+/* --------------------------- Local 终端 --------------------------- */
+
+void hb_window_open_local(HbWindow *win, GtkWidget **page_out)
+{
+    static int seq;
+    char id[32];
+    GtkWidget *page;
+
+    page = hb_term_page_new_local(hb_store_default());
+    g_snprintf(id, sizeof id, "term-local-%d", ++seq);
+    hb_window_add_tab(win, id, "Local", "terminal", page, TRUE, TRUE);
+    if (page_out)
+        *page_out = page;
+}
+
+static void on_plus_local(GtkButton *b, gpointer ud)
+{
+    HbWindow *win = ud;
+    GtkWidget *pop = gtk_widget_get_ancestor(GTK_WIDGET(b), GTK_TYPE_POPOVER);
+    if (pop) gtk_popover_popdown(GTK_POPOVER(pop));
+    hb_window_open_local(win, NULL);
+}
+
+static GtkWidget *build_plus(HbWindow *win)
+{
+    GtkWidget *mb = gtk_menu_button_new();
+    GtkWidget *pop = gtk_popover_new();
+    GtkWidget *item = gtk_button_new_with_label("Local 终端");
+    GtkWidget *kbd = gtk_label_new("Ctrl+Shift+T");
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 24);
+    GtkWidget *name = gtk_label_new("Local 终端");
+
+    (void)item;
+    gtk_widget_add_css_class(mb, "hb-icobtn");
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(mb), hb_icon_new("plus", 16));
+    gtk_widget_set_tooltip_text(mb, "新建标签页");
+
+    gtk_label_set_xalign(GTK_LABEL(name), 0);
+    gtk_widget_set_hexpand(name, TRUE);
+    gtk_widget_add_css_class(kbd, "hb-kbd");
+    gtk_box_append(GTK_BOX(row), name);
+    gtk_box_append(GTK_BOX(row), kbd);
+    {
+        GtkWidget *btn = gtk_button_new();
+        gtk_widget_add_css_class(btn, "hb-menu-item");
+        gtk_button_set_child(GTK_BUTTON(btn), row);
+        g_signal_connect(btn, "clicked", G_CALLBACK(on_plus_local), win);
+        gtk_popover_set_child(GTK_POPOVER(pop), btn);
+    }
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(mb), pop);
+    return mb;
+}
+
 /* ------------------------------ 快捷键 ------------------------------ */
 
 static gboolean on_key(GtkEventControllerKey *kc, guint keyval,
@@ -380,6 +435,11 @@ static gboolean on_key(GtkEventControllerKey *kc, guint keyval,
     (void)kc; (void)code;
     if (!(state & GDK_CONTROL_MASK))
         return FALSE;
+    if ((state & GDK_SHIFT_MASK) &&
+        (keyval == GDK_KEY_T || keyval == GDK_KEY_t)) {
+        hb_window_open_local(win, NULL);
+        return TRUE;
+    }
     if (keyval == GDK_KEY_Tab || keyval == GDK_KEY_ISO_Left_Tab) {
         guint i = win->active
             ? g_list_index(win->tabs, win->active) : 0;
@@ -468,11 +528,7 @@ static void hb_window_init(HbWindow *win)
                                   win->tabstrip);
     gtk_box_append(GTK_BOX(titlebar), scroller);
 
-    plus = gtk_button_new();
-    gtk_widget_add_css_class(plus, "hb-icobtn");
-    gtk_button_set_child(GTK_BUTTON(plus), hb_icon_new("plus", 16));
-    gtk_widget_set_tooltip_text(plus, "新建标签页");
-    gtk_widget_set_visible(plus, FALSE);   /* 下一单元接线 */
+    plus = build_plus(win);
     gtk_box_append(GTK_BOX(titlebar), plus);
 
     side = gtk_button_new();

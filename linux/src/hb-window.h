@@ -23,6 +23,10 @@ void hb_window_switch_tab(HbWindow *win, const char *id);
 /* Vault 页指针：标题栏侧栏开关要翻转它的侧栏可见性 */
 void hb_window_set_vault_page(HbWindow *win, GtkWidget *vault_page);
 
+/* 打开一个 Local 终端页（标题 "Local"、terminal 图标、is_term）；
+ * 返回 HbTermPage widget（供 dev --open-local=CMD 注入输入）。 */
+void       hb_window_open_local(HbWindow *win, GtkWidget **page_out);
+
 /* signals: "tab-closed"(gchar *id) */
 
 G_END_DECLS

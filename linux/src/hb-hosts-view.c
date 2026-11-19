@@ -78,6 +78,34 @@ struct _HbHostsView {
 
 G_DEFINE_TYPE(HbHostsView, hb_hosts_view, GTK_TYPE_BOX)
 
+enum { SIG_CONNECT, N_SIGS };
+static guint sigs[N_SIGS];
+
+static void emit_connect(HbHostsView *hv, const char *hid)
+{
+    if (hid)
+        g_signal_emit(hv, sigs[SIG_CONNECT], 0, hid);
+}
+
+static void on_card_dblclick(GtkGestureClick *g, int n_press,
+                             double x, double y, gpointer ud)
+{
+    GtkWidget *card = gtk_event_controller_get_widget(
+        GTK_EVENT_CONTROLLER(g));
+    (void)x; (void)y; (void)ud;
+    if (n_press == 2)
+        emit_connect(g_object_get_data(G_OBJECT(card), "hv"),
+                     g_object_get_data(G_OBJECT(card), "hid"));
+}
+
+static void on_go_clicked(GtkButton *b, gpointer ud)
+{
+    GtkWidget *card = gtk_widget_get_parent(GTK_WIDGET(b));
+    (void)ud;
+    emit_connect(g_object_get_data(G_OBJECT(card), "hv"),
+                 g_object_get_data(G_OBJECT(card), "hid"));
+}
+
 /* ------------------------------ 过滤/排序 ------------------------------ */
 
 static char *fold(const char *s)
@@ -226,6 +254,7 @@ static GtkWidget *card_shell(void)
     GtkWidget *sub = gtk_label_new("");
     GtkWidget *go = gtk_button_new();
     GtkEventController *mo = gtk_event_controller_motion_new();
+    GtkGesture *dbl = gtk_gesture_click_new();
 
     gtk_widget_add_css_class(card, "hb-host-card");
     gtk_widget_set_size_request(card, 260, -1);
@@ -265,6 +294,9 @@ static GtkWidget *card_shell(void)
     g_signal_connect(mo, "enter", G_CALLBACK(on_card_motion), go);
     g_signal_connect(mo, "leave", G_CALLBACK(on_card_leave), go);
     gtk_widget_add_controller(card, mo);
+    g_signal_connect(dbl, "pressed", G_CALLBACK(on_card_dblclick), NULL);
+    gtk_widget_add_controller(card, GTK_EVENT_CONTROLLER(dbl));
+    g_signal_connect(go, "clicked", G_CALLBACK(on_go_clicked), NULL);
     return card;
 }
 
@@ -305,6 +337,8 @@ static void card_bind(HbHostsView *hv, GtkWidget *card, HbHostItem *h)
 
     host_sub(hv, h, subbuf, sizeof subbuf);
     gtk_label_set_label(GTK_LABEL(sub), subbuf);
+    g_object_set_data_full(G_OBJECT(card), "hid", g_strdup(h->id), g_free);
+    g_object_set_data(G_OBJECT(card), "hv", hv);
 }
 
 /* 列表行：名称(头像+名) / 用户 / 端口 / 协议 / 分组 / 操作（86px） */
@@ -325,7 +359,10 @@ static GtkWidget *row_shell(void)
     const char *keys[] = { "user", "port", "proto" };
     int widths[] = { COL_USER_W, COL_PORT_W, COL_PROTO_W };
     int i;
+    GtkGesture *dbl = gtk_gesture_click_new();
     gtk_widget_add_css_class(row, "hb-table-row");
+    g_signal_connect(dbl, "pressed", G_CALLBACK(on_card_dblclick), NULL);
+    gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(dbl));
     gtk_widget_set_size_request(c1, COL_NAME_MIN, -1);
     gtk_widget_set_hexpand(c1, TRUE);
     gtk_widget_set_margin_start(c1, 14);
@@ -408,9 +445,14 @@ static void grid_bind(GtkListItemFactory *f, GtkListItem *li, gpointer ud)
 static void list_setup(GtkListItemFactory *f, GtkListItem *li, gpointer ud)
 { (void)f; (void)ud; gtk_list_item_set_child(li, row_shell()); }
 static void list_bind(GtkListItemFactory *f, GtkListItem *li, gpointer ud)
-{ (void)f; (void)ud;
-  row_bind(gtk_list_item_get_child(li),
-           HB_HOST_ITEM(gtk_list_item_get_item(li))); }
+{
+    GtkWidget *row = gtk_list_item_get_child(li);
+    HbHostItem *h = HB_HOST_ITEM(gtk_list_item_get_item(li));
+    (void)f;
+    g_object_set_data_full(G_OBJECT(row), "hid", g_strdup(h->id), g_free);
+    g_object_set_data(G_OBJECT(row), "hv", ud);
+    row_bind(row, h);
+}
 
 /* ------------------------------ chips ------------------------------ */
 
@@ -733,7 +775,12 @@ static void hb_hosts_view_dispose(GObject *o)
 }
 
 static void hb_hosts_view_class_init(HbHostsViewClass *klass)
-{ G_OBJECT_CLASS(klass)->dispose = hb_hosts_view_dispose; }
+{
+    G_OBJECT_CLASS(klass)->dispose = hb_hosts_view_dispose;
+    sigs[SIG_CONNECT] = g_signal_new("connect", HB_TYPE_HOSTS_VIEW,
+        G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+        G_TYPE_NONE, 1, G_TYPE_STRING);
+}
 
 static void hb_hosts_view_init(HbHostsView *hv)
 {
