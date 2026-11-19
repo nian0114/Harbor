@@ -10,3 +10,7 @@ project('harbor', 'c',
 add_project_arguments('-D_GNU_SOURCE', language: 'c')
 
 subdir('core')
+
+if get_option('linux')
+    subdir('linux')
+endif

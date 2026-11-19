@@ -1,0 +1,264 @@
+/* ============ Harbor Linux chrome — tokens from prototype/styles.css ============ */
+
+@define-color hb_titlebar      #222939;
+@define-color hb_titlebar_tab  #39415a;
+@define-color hb_titlebar_text #cdd4e4;
+@define-color hb_page          #e9edf1;
+@define-color hb_content       #edf1f4;
+@define-color hb_sidebar       #f7f9fb;
+@define-color hb_sidebar_act   #e3e8ee;
+@define-color hb_card          #ffffff;
+@define-color hb_line          #dfe4ea;
+@define-color hb_text          #1c2333;
+@define-color hb_text_2        #5b6472;
+@define-color hb_text_3        #9aa3b0;
+@define-color hb_btn           #e4e8ed;
+@define-color hb_btn_hover     #d8dde4;
+@define-color hb_blue          #2f7cf6;
+@define-color hb_green         #22a06b;
+@define-color hb_red           #e5484d;
+@define-color hb_amber         #f0a13a;
+@define-color hb_ubuntu        #e95420;
+@define-color hb_term_bg       #0a0f1e;
+@define-color hb_term_text     #3fd97f;
+@define-color hb_term_dim      #8b96ad;
+
+* { font-family: "Ubuntu", "Cantarell", "Noto Sans", "Noto Sans CJK SC", sans-serif;
+    font-size: 14px; }
+
+window { background-color: @hb_content; }
+
+/* ---------- titlebar ---------- */
+.hb-titlebar {
+    background-color: @hb_titlebar;
+    color: @hb_titlebar_text;
+    min-height: 52px;
+    padding: 0 14px;
+}
+
+.hb-tab {
+    border-radius: 8px;
+    color: @hb_titlebar_text;
+    font-size: 13px;
+    border: 1px solid transparent;
+    margin: 9px 0;
+}
+.hb-tab:hover { background-color: alpha(white, .06); }
+.hb-tab.active {
+    background-color: @hb_titlebar_tab;
+    border-color: alpha(white, .08);
+}
+.hb-tab.term.active {
+    background-color: #12351f;
+    border-color: #1f5c33;
+    color: #7fe0a3;
+}
+.hb-tab > button.hb-tab-main {
+    background: none; border: none; box-shadow: none;
+    color: inherit; min-height: 34px; padding: 0 10px;
+    font-size: 13px;
+}
+.hb-tab > button.hb-tab-main:hover { background: none; }
+.hb-tab button.hb-tab-x {
+    background: none; border: none; box-shadow: none;
+    color: inherit; opacity: .5; min-width: 18px; min-height: 18px;
+    padding: 0; margin-right: 6px; border-radius: 4px;
+}
+.hb-tab button.hb-tab-x:hover { opacity: 1; background-color: alpha(white, .12); }
+.hb-tab-dot { border-radius: 50%; min-width: 8px; min-height: 8px; margin-right: 6px; }
+.hb-tab-dot.ok    { background-color: #2ecc71; }
+.hb-tab-dot.err   { background-color: #ff5f57; }
+.hb-tab-dot.share { background-color: #4aa3ff; animation: hb_pulse 1.6s infinite; }
+@keyframes hb_pulse { 50% { opacity: .45; } }
+
+button.hb-icobtn {
+    background: none; border: none; box-shadow: none;
+    color: @hb_titlebar_text; padding: 6px 8px; border-radius: 7px;
+    min-width: 0; min-height: 0;
+}
+button.hb-icobtn:hover { background-color: alpha(white, .08); }
+button.hb-icobtn.on { background-color: alpha(white, .14); }
+
+.hb-badge {
+    background-color: @hb_red; color: white;
+    font-size: 10px; font-weight: 600;
+    min-width: 16px; min-height: 16px; border-radius: 8px;
+    padding: 0 4px;
+}
+
+/* ---------- app body / sidebar ---------- */
+.hb-sidebar {
+    background-color: @hb_sidebar;
+    border-right: 1px solid @hb_line;
+    min-width: 200px;
+    padding: 14px 10px;
+}
+button.hb-side-item {
+    background: none; border: none; box-shadow: none;
+    color: @hb_text; font-size: 13.5px;
+    padding: 9px 12px; border-radius: 8px; min-height: 0;
+}
+button.hb-side-item:hover { background-color: #eef1f5; }
+button.hb-side-item.active { background-color: @hb_sidebar_act; font-weight: 600; }
+button.hb-side-item .s-ico { color: @hb_text_2; margin-right: 10px; }
+
+.hb-side-sep { background-color: @hb_line; min-height: 1px; margin: 10px 6px; }
+
+button.hb-account-chip {
+    background: none; border: none; box-shadow: none;
+    padding: 9px 12px; border-radius: 8px;
+}
+button.hb-account-chip:hover { background-color: #eef1f5; }
+.hb-avatar {
+    border-radius: 50%; min-width: 26px; min-height: 26px;
+    background-image: linear-gradient(135deg, #4aa3ff, #7b61ff);
+    color: white; font-size: 12px; font-weight: 700;
+}
+.hb-avatar label { color: white; padding: 0; }
+.hb-a-name { font-size: 12.5px; font-weight: 600; color: @hb_text; }
+.hb-a-sub  { font-size: 11px; color: @hb_text_3; }
+
+.hb-content { background-color: @hb_content; }
+
+/* ---------- quickbar / toolbar ---------- */
+.hb-quickbar {
+    background-color: #f4f6f8;
+    border: 1px solid @hb_line;
+    border-radius: 10px;
+    min-height: 40px;
+    margin: 14px 18px 0;
+    padding: 0 6px 0 14px;
+}
+.hb-quickbar:focus-within {
+    border-color: @hb_blue;
+    box-shadow: 0 0 0 3px alpha(@hb_blue, .15);
+}
+.hb-quickbar entry { background: none; border: none; box-shadow: none;
+    min-height: 0; padding: 0; font-size: 13.5px; }
+.hb-quickbar entry:focus { outline: none; box-shadow: none; }
+
+.hb-toolbar { padding: 12px 18px; }
+
+button.hb-btn {
+    background-color: @hb_btn; border: none; box-shadow: none;
+    color: @hb_text; font-size: 13px; font-weight: 500;
+    padding: 8px 14px; border-radius: 8px; min-height: 0;
+}
+button.hb-btn:hover { background-color: @hb_btn_hover; }
+button.hb-btn.primary { background-color: @hb_blue; color: white; }
+button.hb-btn.primary:hover { background-color: #2468d8; }
+button.hb-btn.ghost { background-color: transparent; }
+button.hb-btn.ghost:hover { background-color: @hb_btn; }
+button.hb-btn.danger { background-color: #fbe9ea; color: @hb_red; }
+button.hb-btn.sm { padding: 5px 10px; font-size: 12px; }
+
+button.hb-chip {
+    background-color: white; border: 1px solid @hb_line;
+    color: @hb_text_2; font-size: 12px; font-weight: 600;
+    padding: 5px 12px; border-radius: 20px; min-height: 0;
+}
+button.hb-chip.on { background-color: @hb_blue; border-color: @hb_blue; color: white; }
+
+.hb-chiprow { padding: 0 18px 4px; }
+
+.hb-sortsel {
+    border: 1px solid @hb_line; background-color: white;
+    border-radius: 8px; padding: 2px 10px;
+    font-size: 12.5px; color: @hb_text_2;
+}
+.hb-sortsel button { color: @hb_text_2; font-size: 12.5px; }
+
+button.hb-viewbtn {
+    background: none; border: none; box-shadow: none;
+    color: @hb_text_2; padding: 6px 8px; border-radius: 7px;
+}
+button.hb-viewbtn:hover { background-color: @hb_btn; }
+button.hb-viewbtn.on { color: @hb_blue; background-color: @hb_btn; }
+
+/* ---------- host cards / list ---------- */
+.hb-section-title { font-size: 13px; font-weight: 700; color: @hb_text;
+    margin: 10px 2px 10px; }
+
+.hb-host-card {
+    background-color: @hb_card; border-radius: 10px;
+    border: 1px solid transparent;
+    box-shadow: 0 1px 2px alpha(black, .05);
+    padding: 13px 15px;
+}
+.hb-host-card:hover { border-color: #c9d4e2;
+    box-shadow: 0 4px 14px rgba(25,35,60,.09); }
+.hb-h-name { font-weight: 600; font-size: 13.5px; color: @hb_text; }
+.hb-h-sub  { font-size: 12px; color: @hb_text_3; margin-top: 2px; }
+
+.hb-os-avatar { border-radius: 10px; color: white; }
+.hb-os-avatar.sm { border-radius: 6px; }
+.hb-os-avatar.ubuntu  { background-color: @hb_ubuntu; }
+.hb-os-avatar.generic { background-color: @hb_amber; }
+.hb-os-avatar.debian  { background-color: @hb_amber; }
+.hb-os-avatar.local   { background-color: #3b4559; }
+.hb-os-avatar.vnc     { background-color: #3f8cff; }
+.hb-os-avatar.rdp     { background-color: #0f6cbd; }
+.hb-os-avatar.win     { background-color: #0f6cbd; }
+.hb-os-avatar widget, .hb-os-avatar label { color: white; }
+
+.mono-ico {
+    font-family: "Ubuntu Mono", "DejaVu Sans Mono", Menlo, monospace;
+    font-weight: 600; font-size: 12px; letter-spacing: -.5px;
+}
+
+.hb-tag {
+    font-size: 10.5px; padding: 2px 7px; border-radius: 6px;
+    background-color: #e8f0fe; color: #2b6cd4; font-weight: 600;
+}
+.hb-tag.tun { background-color: #e6f6ee; color: @hb_green; }
+
+button.hb-card-go {
+    background-color: #f0f3f7; border: none; box-shadow: none;
+    color: @hb_text_3; border-radius: 8px;
+    min-width: 30px; min-height: 30px; padding: 0;
+}
+button.hb-card-go:hover { background-color: @hb_blue; color: white; }
+
+.hb-table { background-color: @hb_card; border-radius: 10px;
+    box-shadow: 0 1px 2px alpha(black, .05); }
+.hb-table-head { background-color: #fbfcfd; border-bottom: 1px solid @hb_line; }
+.hb-table-head label { font-size: 12px; color: @hb_text_2; font-weight: 600;
+    padding: 11px 14px; }
+.hb-table-row { border-bottom: 1px solid #eef1f4; }
+.hb-table-row:hover { background-color: #f6f9fc; }
+.hb-table-row label { font-size: 13px; padding: 11px 14px; }
+.hb-table-row .hb-c0 { padding: 11px 0; }
+.hb-toolbar { padding: 0 18px; margin-bottom: 2px; }
+.mono { font-family: "Ubuntu Mono", "DejaVu Sans Mono", Menlo, monospace;
+    font-size: 12.5px; }
+
+/* ---------- empty / misc ---------- */
+.hb-empty { color: @hb_text_2; }
+.hb-e-ico {
+    min-width: 58px; min-height: 58px; border-radius: 14px;
+    background-image: linear-gradient(180deg, #e7ebf0, #d9dee5);
+    color: @hb_text_2; margin-bottom: 8px;
+}
+.hb-e-title { font-size: 15px; font-weight: 700; color: @hb_text; }
+.hb-e-sub   { font-size: 12.5px; color: @hb_text_3; }
+
+.kbd {
+    font-size: 11px; color: @hb_text_3; border: 1px solid @hb_line;
+    border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px;
+    background-color: white;
+}
+
+/* ---------- notification panel ---------- */
+.hb-notif-panel { min-width: 360px; padding: 4px; }
+.hb-notif-head { font-weight: 700; font-size: 13.5px; color: @hb_text;
+    padding: 8px 10px; }
+.hb-notif-item { border-radius: 9px; padding: 10px; }
+.hb-notif-item:hover { background-color: #f2f5f9; }
+.hb-notif-item.unread { background-color: #f0f6ff; }
+.hb-n-ico { min-width: 30px; min-height: 30px; border-radius: 8px; color: white; }
+.hb-n-ico.ok   { background-color: @hb_green; }
+.hb-n-ico.err  { background-color: @hb_red; }
+.hb-n-ico.info { background-color: @hb_blue; }
+.hb-n-title { font-size: 12.5px; font-weight: 600; color: @hb_text; }
+.hb-n-body  { font-size: 12px; color: @hb_text_2; }
+.hb-n-time  { font-size: 11px; color: @hb_text_3; }
