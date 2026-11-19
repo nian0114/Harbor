@@ -3,5 +3,8 @@
 
 #include "common.h"
 #include "vault.h"
+#include "vt.h"
+#include "pty.h"
+#include "session.h"
 
 #endif
