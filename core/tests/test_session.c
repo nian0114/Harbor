@@ -16,13 +16,18 @@ static int drain_events(hb_session *s, hb_sess_event *evs, int max,
     for (;;) {
         struct pollfd pf = { .fd = hb_session_event_fd(s),
                              .events = POLLIN, .revents = 0 };
-        int r = poll(&pf, 1, 100);
+        int r = poll(&pf, 1, 100), i;
         if (r > 0 && (pf.revents & POLLIN)) {
             while (n < max && hb_session_next_event(s, &evs[n]))
                 n++;
         }
-        if (n > 0)
-            return n;
+        /* 子进程 exit 可能在 OUTPUT 之后才到达：见到 EXIT 再收尾 */
+        for (i = 0; i < n; i++)
+            if (evs[i].type == HB_SESS_EV_EXIT) {
+                while (n < max && hb_session_next_event(s, &evs[n]))
+                    n++;
+                return n;
+            }
         waited += 100;
         if (waited > timeout_ms)
             return n;
