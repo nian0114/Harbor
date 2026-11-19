@@ -1,5 +1,5 @@
-#ifndef HB_COMMON_H
-#define HB_COMMON_H
+#ifndef HARBOR_COMMON_H
+#define HARBOR_COMMON_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -43,4 +43,4 @@ void hb_strfreev(char **v, size_t n);
 }
 #endif
 
-#endif
+#endif /* HARBOR_COMMON_H */
