@@ -31,9 +31,11 @@ typedef struct {
     int      (*connect)(void *ctx, hb_session *s);
 } hb_session_transport;
 
-/* 构造通用 session：vt 尺寸 rows×cols + scrollback 行；立即起线程。 */
+/* 构造通用 session：vt 尺寸 rows×cols + scrollback 行；立即起线程。
+ * reuse_vt 非 NULL 时接管其所有权（尺寸改 rows×cols，scrollback 上限不变）。 */
 hb_session *hb_session_new_transport(hb_session_transport *tr,
-                                     int rows, int cols, int scrollback_lines);
+                                     int rows, int cols, int scrollback_lines,
+                                     hb_vt *reuse_vt);
 
 /* 供 transport 使用：推一个事件到 UI 队列（做字符串拷贝）。 */
 void hb__session_emit(hb_session *s, hb_sess_ev_type type, char mark, int code,

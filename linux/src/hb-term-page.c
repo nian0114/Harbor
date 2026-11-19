@@ -31,10 +31,10 @@ extern char *hb_opt_theme;      /* main.c dev 选项 */
 
 /* ------------------------------ 会话 ------------------------------ */
 
-static hb_session *spawn_local(HbTermPage *p)
+static hb_session *spawn_local(HbTermPage *p, hb_vt *reuse)
 {
     hb_pty_opts o = {0};
-    return hb_session_new_local(&o, p->sb_lines);
+    return hb_session_new_local_vt(&o, reuse, p->sb_lines);
 }
 
 static void set_status(HbTermPage *p, gboolean alive)
@@ -86,13 +86,19 @@ static gboolean on_dead_key(GtkEventControllerKey *kc, guint keyval,
 {
     HbTermPage *p = ud;
     hb_session *ns;
+    hb_vt *reuse = NULL;
     (void)kc; (void)code;
     if (!p->dead || keyval != GDK_KEY_Return ||
         (state & (GDK_CONTROL_MASK | GDK_ALT_MASK)))
         return FALSE;
-    ns = spawn_local(p);
-    if (!ns)
+    /* 重启保留 scrollback：旧会话已死 → 偷 vt 复用 */
+    if (p->sess && !hb_session_alive(p->sess))
+        reuse = hb_session_steal_vt(p->sess);
+    ns = spawn_local(p, reuse);
+    if (!ns) {
+        if (reuse) hb_vt_free(reuse);
         return TRUE;
+    }
     if (p->sess) {
         hb_session_close(p->sess);
         hb_session_free(p->sess);
@@ -307,7 +313,7 @@ GtkWidget *hb_term_page_new_local(HbStore *st)
     p->store = st;
     apply_settings(p);          /* 先取 sb_lines / theme / font */
 
-    p->sess = spawn_local(p);
+    p->sess = spawn_local(p, NULL);
     hb_terminal_set_session(HB_TERMINAL(p->term), p->sess);
     set_status(p, p->sess != NULL);
     if (!p->sess) {

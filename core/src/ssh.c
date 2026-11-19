@@ -1837,7 +1837,8 @@ hb_session *hb_session_new_ssh(const hb_ssh_opts *opts,
 
     {
         hb_session *s = hb_session_new_transport(&tr, rows, cols,
-                                                 scrollback_lines);
+                                                 scrollback_lines,
+                                                 opts->reuse_vt);
         if (!s)
             goto fail;
         return s;

@@ -60,11 +60,21 @@ typedef struct hb_session hb_session;
 
 /* 本地 PTY 会话；立即启动线程（spawn 失败返回 NULL）。 */
 hb_session *hb_session_new_local(const hb_pty_opts *opts, int scrollback_lines);
+/* 同上但复用已有 vt（重连保 scrollback）；新会话接管所有权并 resize 到
+ * opts 的 rows/cols。reuse 为 NULL 等价于 hb_session_new_local。
+ * 失败时 reuse 仍归调用方。 */
+hb_session *hb_session_new_local_vt(const hb_pty_opts *opts, hb_vt *reuse,
+                                    int scrollback_lines);
 
 int   hb_session_event_fd(hb_session *s);
 bool  hb_session_next_event(hb_session *s, hb_sess_event *out);
 
 hb_vt *hb_session_vt(hb_session *s);
+
+/* EXIT 事件之后调用：取走 vt 所有权（scrollback 原样保留），交给
+ * hb_session_new_local_vt / hb_ssh_opts.reuse_vt 的新会话。
+ * 偷取后本 session 的 hb_session_vt() 返回 NULL；hb_session_free 照常。 */
+hb_vt *hb_session_steal_vt(hb_session *s);
 
 void hb_session_write(hb_session *s, const char *data, size_t len);
 void hb_session_key(hb_session *s, hb_key key, int mods);

@@ -145,10 +145,64 @@ static void test_local_interactive(void)
     hb_session_free(s);
 }
 
+/* steal_vt + new_local_vt：A 会话写的内容在 B 会话接管 vt 后仍可读 */
+static void test_vt_reuse(void)
+{
+    hb_pty_opts o = { .shell = "/bin/sh",
+                      .command = "printf 'KEEPTHIS\\n'",
+                      .rows = 10, .cols = 40 };
+    hb_session *sa = hb_session_new_local(&o, 100);
+    hb_session *sb;
+    hb_vt *vt;
+    hb_sess_event ev;
+    char *line;
+    int ok;
+
+    CHECK(sa != NULL);
+    if (!sa)
+        return;
+    ok = wait_for(sa, HB_SESS_EV_EXIT, &ev, NULL, 3000);
+    CHECK(ok);
+    hb_sess_event_clear(&ev);
+
+    vt = hb_session_steal_vt(sa);
+    CHECK(vt != NULL);
+    CHECK(hb_session_vt(sa) == NULL);
+
+    {
+        hb_pty_opts o2 = { .shell = "/bin/sh",
+                           .command = "printf 'SECOND\\n'",
+                           .rows = 10, .cols = 40 };
+        sb = hb_session_new_local_vt(&o2, vt, 100);
+    }
+    CHECK(sb != NULL);
+    if (!sb) {
+        hb_vt_free(vt);
+        hb_session_free(sa);
+        return;
+    }
+    CHECK(hb_session_vt(sb) == vt);
+    ok = wait_for(sb, HB_SESS_EV_EXIT, &ev, NULL, 3000);
+    CHECK(ok);
+    hb_sess_event_clear(&ev);
+
+    /* A 的 "KEEPTHIS" 与 B 的 "SECOND" 都在同一个 vt 里 */
+    line = hb_vt_get_text(hb_session_vt(sb), 0, 0, 0, 39, false);
+    CHECK(line && strncmp(line, "KEEPTHIS", 8) == 0);
+    free(line);
+    line = hb_vt_get_text(hb_session_vt(sb), 1, 0, 1, 39, false);
+    CHECK(line && strncmp(line, "SECOND", 6) == 0);
+    free(line);
+
+    hb_session_free(sb);
+    hb_session_free(sa);
+}
+
 int main(void)
 {
     test_local_exit();
     test_local_interactive();
+    test_vt_reuse();
     fprintf(stderr, "test_session: %d checks, %d failures\n",
             hb_t_checks, hb_t_failures);
     TEST_RETURN();

@@ -362,9 +362,11 @@ static void *sess_thread(void *arg)
         int rc = s->tr.connect(s->tr.ctx, s);
         if (rc != 0) {
             /* transport 已经在 connect 里 emit 过具体 ERROR */
-            hb__session_emit(s, HB_SESS_EV_EXIT, 0, -1, "connect failed", NULL);
+            pthread_mutex_lock(&s->mu);
             s->exited = true;
             s->exit_code = -1;
+            pthread_mutex_unlock(&s->mu);
+            hb__session_emit(s, HB_SESS_EV_EXIT, 0, -1, "connect failed", NULL);
             free(buf);
             return NULL;
         }
@@ -506,13 +508,19 @@ static void pty_close_op(void *ctx) { hb_pty_hangup(ctx); }
 static void pty_destroy_op(void *ctx) { hb_pty_free(ctx); }
 
 hb_session *hb_session_new_transport(hb_session_transport *tr,
-                                   int rows, int cols, int scrollback_lines)
+                                   int rows, int cols, int scrollback_lines,
+                                   hb_vt *reuse_vt)
 {
     hb_session *s = calloc(1, sizeof *s);
     if (!s)
         return NULL;
     s->tr = *tr;
-    s->vt = hb_vt_new(rows, cols, scrollback_lines);
+    if (reuse_vt) {
+        s->vt = reuse_vt;
+        hb_vt_resize(s->vt, rows, cols);
+    } else {
+        s->vt = hb_vt_new(rows, cols, scrollback_lines);
+    }
     if (!s->vt) {
         free(s);
         return NULL;
@@ -527,11 +535,8 @@ hb_session *hb_session_new_transport(hb_session_transport *tr,
 
     {
         int p[2];
-        if (pipe(p) != 0) {
-            hb_vt_free(s->vt);
-            free(s);
-            return NULL;
-        }
+        if (pipe(p) != 0)
+            goto fail;
         s->cmd_r = p[0];
         s->cmd_w = p[1];
     }
@@ -540,9 +545,7 @@ hb_session *hb_session_new_transport(hb_session_transport *tr,
         if (pipe(p) != 0) {
             close(s->cmd_r);
             close(s->cmd_w);
-            hb_vt_free(s->vt);
-            free(s);
-            return NULL;
+            goto fail;
         }
         s->ev_r = p[0];
         s->ev_w = p[1];
@@ -562,15 +565,25 @@ hb_session *hb_session_new_transport(hb_session_transport *tr,
     if (pthread_create(&s->th, NULL, sess_thread, s) != 0) {
         close(s->cmd_r); close(s->cmd_w);
         close(s->ev_r);  close(s->ev_w);
-        hb_vt_free(s->vt);
-        free(s);
-        return NULL;
+        goto fail;
     }
     s->th_started = true;
     return s;
+
+fail:
+    /* 复用的 vt 不在失败时释放：所有权仍归调用方（摘掉指向本 s 的回调） */
+    if (s->vt == reuse_vt) {
+        hb_vt_set_output_fn(s->vt, NULL, NULL);
+        hb_vt_set_event_fn(s->vt, NULL, NULL);
+    } else {
+        hb_vt_free(s->vt);
+    }
+    free(s);
+    return NULL;
 }
 
-hb_session *hb_session_new_local(const hb_pty_opts *opts, int scrollback_lines)
+hb_session *hb_session_new_local_vt(const hb_pty_opts *opts, hb_vt *reuse,
+                                    int scrollback_lines)
 {
     hb_pty *p = NULL;
     hb_session_transport tr;
@@ -594,7 +607,8 @@ hb_session *hb_session_new_local(const hb_pty_opts *opts, int scrollback_lines)
     tr.connect = NULL;
 
     {
-        hb_session *s = hb_session_new_transport(&tr, rows, cols, scrollback_lines);
+        hb_session *s = hb_session_new_transport(&tr, rows, cols,
+                                                 scrollback_lines, reuse);
         if (!s) {
             hb_pty_free(p);
             return NULL;
@@ -603,7 +617,35 @@ hb_session *hb_session_new_local(const hb_pty_opts *opts, int scrollback_lines)
     }
 }
 
+hb_session *hb_session_new_local(const hb_pty_opts *opts, int scrollback_lines)
+{
+    return hb_session_new_local_vt(opts, NULL, scrollback_lines);
+}
+
 hb_vt *hb_session_vt(hb_session *s) { return s ? s->vt : NULL; }
+
+hb_vt *hb_session_steal_vt(hb_session *s)
+{
+    hb_vt *v;
+    if (!s)
+        return NULL;
+    /* 仅 EXIT 之后允许：线程设置 exited 之后不再触碰 vt。
+     * alive()==false 但 want_close 时线程可能仍在喂 vt —— 必须看 exited。 */
+    pthread_mutex_lock(&s->mu);
+    if (!s->exited) {
+        pthread_mutex_unlock(&s->mu);
+        return NULL;
+    }
+    v = s->vt;
+    s->vt = NULL;
+    pthread_mutex_unlock(&s->mu);
+    /* 摘掉指向本 session 的回调，复用方会在 new_transport 里重新挂上。 */
+    if (v) {
+        hb_vt_set_output_fn(v, NULL, NULL);
+        hb_vt_set_event_fn(v, NULL, NULL);
+    }
+    return v;
+}
 
 void hb_session_write(hb_session *s, const char *data, size_t len)
 {
@@ -629,16 +671,22 @@ void hb_session_write(hb_session *s, const char *data, size_t len)
 
 void hb_session_key(hb_session *s, hb_key key, int mods)
 {
+    if (!s || !s->vt)
+        return;
     hb_vt_key(s->vt, key, mods);
 }
 
 void hb_session_unichar(hb_session *s, uint32_t c, int mods)
 {
+    if (!s || !s->vt)
+        return;
     hb_vt_unichar(s->vt, c, mods);
 }
 
 void hb_session_paste(hb_session *s, const char *utf8)
 {
+    if (!s || !s->vt)
+        return;
     hb_vt_paste(s->vt, utf8);
 }
 
