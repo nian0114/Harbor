@@ -5,6 +5,7 @@
 #include <string.h>
 #include <time.h>
 
+#include <libssh2.h>
 #include <sodium.h>
 
 const char *hb_strerror(hb_err e)
@@ -28,6 +29,8 @@ int hb_core_init(void)
     if (inited)
         return 0;
     if (sodium_init() < 0)
+        return -1;
+    if (libssh2_init(0) != 0)
         return -1;
     inited = 1;
     return 0;

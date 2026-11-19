@@ -7,6 +7,8 @@ core_priv_inc = include_directories('src')
 sqlite3_dep = dependency('sqlite3')
 sodium_dep = dependency('libsodium')
 vterm_dep = dependency('vterm')
+ssh2_dep = dependency('libssh2')
+crypto_dep = dependency('libcrypto')
 thread_dep = dependency('threads')
 util_dep = cc.find_library('util', required: false)
 
@@ -24,15 +26,18 @@ harbor_core_lib = static_library('harbor-core',
     'src/vt.c',
     'src/pty.c',
     'src/session.c',
+    'src/ssh.c',
     include_directories: [core_inc, cjson_inc, core_priv_inc],
     link_whole: cjson_lib,
-    dependencies: [sqlite3_dep, sodium_dep, vterm_dep, thread_dep, util_dep],
+    dependencies: [sqlite3_dep, sodium_dep, vterm_dep, ssh2_dep, crypto_dep,
+                   thread_dep, util_dep],
 )
 
 harbor_core_dep = declare_dependency(
     link_with: harbor_core_lib,
     include_directories: core_inc,
-    dependencies: [sqlite3_dep, sodium_dep, vterm_dep, thread_dep, util_dep],
+    dependencies: [sqlite3_dep, sodium_dep, vterm_dep, ssh2_dep, crypto_dep,
+                   thread_dep, util_dep],
 )
 
 if get_option('tests')

@@ -1,0 +1,1817 @@
+/*
+ * SSH 传输：libssh2（OpenSSL 后端）。一个 hb_session 一条 SSH 连接，
+ * 支持 ProxyJump 跳板链（direct-tcpip + socketpair 泵线程）、TOFU/MITM
+ * 主机密钥确认、agent/密钥/密码/keyboard-interactive 认证、keepalive。
+ * 连接在 session 线程上跑，全程可经 hb_session_close 取消。
+ */
+
+#include "harbor/ssh.h"
+
+#include "session_priv.h"
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <libssh2.h>
+#include <netdb.h>
+#include <openssl/evp.h>
+#include <poll.h>
+#include <pthread.h>
+#include <sodium.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#define HANDSHAKE_MS  30000   /* 握手 / 认证 / channel 阶段死线 */
+#define WAIT_SLICE_MS 100     /* 等待切片：期间检查取消 */
+#define PUMP_BUF      (32 * 1024)
+
+/* 等待码（远离 -hb_ssh_err 与"换源"的取值域）：取消/超时/socket 故障 */
+#define W_CANCEL -100
+#define W_TMOUT  -101
+#define W_SOCK   -102
+#define IS_WAIT(w) ((w) <= W_CANCEL)
+
+/* ------------------------------ 配置拷贝 ------------------------------ */
+
+typedef struct {
+    char       *host;
+    int         port;
+    char       *user;
+    hb_ssh_auth auth;
+    char       *password;      /* sodium */
+    char       *privkey;       /* sodium */
+    char       *identity_file;
+    char       *passphrase;    /* sodium */
+    char       *label;
+} c_hop;
+
+/* ProxyJump 泵：上一跳 session 上的 direct-tcpip channel ↔ socketpair */
+typedef struct {
+    LIBSSH2_SESSION *sess;
+    LIBSSH2_CHANNEL *ch;
+    int              hop_fd;   /* 上一跳 session 的底层 socket */
+    int              pair;     /* 泵持有的 socketpair 端 */
+    pthread_t        th;
+    bool             started;
+    volatile bool    stop;
+    bool             chan_eof;
+    bool             pair_eof;
+    bool             sent_eof;
+    uint8_t          cbuf[PUMP_BUF];   /* pair → channel 暂存 */
+    size_t           clen;
+    uint8_t          pbuf[PUMP_BUF];   /* channel → pair 暂存 */
+    size_t           plen;
+} pump_t;
+
+typedef struct {
+    c_hop            cfg;
+    char             mark;     /* 'J' / 'T' */
+    char             pfx[160]; /* "" 或 "[跳板 i/N label] " */
+    LIBSSH2_SESSION *sess;
+    int              sock;     /* 真 socket（首跳）或 socketpair 端 */
+    LIBSSH2_CHANNEL *chan;     /* 目标：shell/exec；跳板：fwd channel */
+    pump_t           pump;
+    bool             pump_on;
+} hop;
+
+typedef struct {
+    hb_session *s;
+    hop        *hops;
+    size_t      nhops;
+    char      **known;
+    size_t      nknown;
+    int         timeout_ms;
+    int         keepalive_s;
+    char       *term;
+    char      **env;
+    char       *command;
+    int         rows, cols;
+    int64_t     ka_next;       /* 下次 keepalive 到期时刻 ms；0 = 关 */
+    bool        disconnected;
+    bool        disconnect_emitted;
+    char        errbuf[256];   /* 技术细节 → ERROR.text2 */
+} hb_ssh;
+
+static char *xstrdup(const char *s)
+{
+    char *p;
+    size_t n;
+    if (!s)
+        return NULL;
+    n = strlen(s) + 1;
+    p = malloc(n);
+    if (p)
+        memcpy(p, s, n);
+    return p;
+}
+
+static void hop_cfg_free(c_hop *c)
+{
+    free(c->host);
+    free(c->user);
+    if (c->password)
+        hb_secret_free(c->password);
+    if (c->privkey)
+        hb_secret_free(c->privkey);
+    free(c->identity_file);
+    if (c->passphrase)
+        hb_secret_free(c->passphrase);
+    free(c->label);
+}
+
+/* ------------------------------ 小工具 ------------------------------ */
+
+static void set_err(hb_ssh *h, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(h->errbuf, sizeof h->errbuf, fmt, ap);
+    va_end(ap);
+}
+
+static void set_lib_err(hb_ssh *h, LIBSSH2_SESSION *sess)
+{
+    char *msg = NULL;
+    int len = 0;
+    if (sess &&
+        libssh2_session_last_error(sess, &msg, &len, 0) == 0 && msg && len)
+        snprintf(h->errbuf, sizeof h->errbuf, "libssh2: %.*s", len, msg);
+    else
+        snprintf(h->errbuf, sizeof h->errbuf, "libssh2 error %d",
+                 sess ? libssh2_session_last_errno(sess) : 0);
+}
+
+static void emit_error(hb_ssh *h, int code, const char *text)
+{
+    hb__session_emit(h->s, HB_SESS_EV_ERROR, 0, code, text,
+                     h->errbuf[0] ? h->errbuf : NULL);
+}
+
+/* 把等待码翻成错误类别 + 发事件；返回 -code */
+static int fail_wait(hb_ssh *h, int w, int phase_err)
+{
+    if (w == W_CANCEL) {
+        emit_error(h, HB_SSH_ERR_CANCELLED, "连接已取消");
+        return -HB_SSH_ERR_CANCELLED;
+    }
+    if (w == W_TMOUT) {
+        emit_error(h, HB_SSH_ERR_TIMEOUT, "主机不可达或超时");
+        return -HB_SSH_ERR_TIMEOUT;
+    }
+    emit_error(h, phase_err,
+               phase_err == HB_SSH_ERR_DISCONNECTED ? "连接已断开"
+                                                    : "连接失败");
+    return -phase_err;
+}
+
+static void stage(hb_ssh *h, hop *hp, int st, const char *fmt, ...)
+{
+    char msg[384], line[560];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof msg, fmt, ap);
+    va_end(ap);
+    snprintf(line, sizeof line, "%s%s", hp->pfx, msg);
+    hb__session_emit(h->s, HB_SESS_EV_STAGE, hp->mark, st, line, NULL);
+}
+
+/* ------------------------------ DNS（线程 + 超时/取消） ------------------------------ */
+
+typedef struct {
+    char             host[256];
+    char             port[8];
+    struct addrinfo *res;
+    int              err;
+    pthread_t        th;
+    pthread_mutex_t  mu;
+    bool             done;
+    bool             abandoned;
+} dns_job;
+
+static void *dns_run(void *arg)
+{
+    dns_job *j = arg;
+    struct addrinfo hints, *res = NULL;
+    int e;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    e = getaddrinfo(j->host, j->port, &hints, &res);
+    pthread_mutex_lock(&j->mu);
+    if (j->abandoned) {
+        pthread_mutex_unlock(&j->mu);
+        if (res)
+            freeaddrinfo(res);
+        free(j);
+        return NULL;
+    }
+    j->res = res;
+    j->err = e;
+    j->done = true;
+    pthread_mutex_unlock(&j->mu);
+    return NULL;
+}
+
+/* 0 成功；W_* 负码 */
+static int dns_resolve(hb_ssh *h, const char *host, int port,
+                       int timeout_ms, struct addrinfo **res_out)
+{
+    dns_job *j;
+    int64_t dl;
+    int r = W_TMOUT;
+
+    *res_out = NULL;
+    j = calloc(1, sizeof *j);
+    if (!j)
+        return W_SOCK;
+    snprintf(j->host, sizeof j->host, "%s", host);
+    snprintf(j->port, sizeof j->port, "%d", port);
+    pthread_mutex_init(&j->mu, NULL);
+    if (pthread_create(&j->th, NULL, dns_run, j) != 0) {
+        pthread_mutex_destroy(&j->mu);
+        free(j);
+        return W_SOCK;
+    }
+    dl = hb_now_ms() + timeout_ms;
+    for (;;) {
+        bool done;
+        pthread_mutex_lock(&j->mu);
+        done = j->done;
+        pthread_mutex_unlock(&j->mu);
+        if (done)
+            break;
+        if (hb__session_cancelled(h->s)) {
+            r = W_CANCEL;
+            goto abandon;
+        }
+        if (hb_now_ms() >= dl)
+            goto abandon;
+        usleep(3000);
+    }
+    pthread_join(j->th, NULL);
+    if (j->err != 0 || !j->res) {
+        set_err(h, "getaddrinfo: %s",
+                j->err ? gai_strerror(j->err) : "no result");
+        r = W_SOCK;
+    } else {
+        *res_out = j->res;
+        r = 0;
+    }
+    pthread_mutex_destroy(&j->mu);
+    free(j);
+    return r;
+
+abandon:
+    pthread_mutex_lock(&j->mu);
+    j->abandoned = true;
+    pthread_mutex_unlock(&j->mu);
+    pthread_detach(j->th);   /* 线程结束时自行 free(j) */
+    return r;
+}
+
+/* ------------------------------ TCP 非阻塞连接 ------------------------------ */
+
+/* 0 成功；W_* 负码，-4 拒绝 */
+static int tcp_connect(hb_ssh *h, struct addrinfo *res, int timeout_ms,
+                       int *fd_out)
+{
+    int64_t dl = hb_now_ms() + timeout_ms;
+    bool any_refused = false, any_other = false;
+
+    for (; res; res = res->ai_next) {
+        int fd = socket(res->ai_family,
+                        res->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC,
+                        res->ai_protocol);
+        int rc;
+        if (fd < 0)
+            continue;
+        rc = connect(fd, res->ai_addr, res->ai_addrlen);
+        if (rc != 0 && errno != EINPROGRESS) {
+            if (errno == ECONNREFUSED)
+                any_refused = true;
+            else
+                any_other = true;
+            close(fd);
+            continue;
+        }
+        if (rc != 0) {
+            /* EINPROGRESS：poll 可写，切片内查取消 */
+            int st = W_SOCK;
+            for (;;) {
+                struct pollfd p = { fd, POLLOUT, 0 };
+                int64_t left = dl - hb_now_ms();
+                int pr;
+                if (hb__session_cancelled(h->s)) {
+                    st = W_CANCEL;
+                    break;
+                }
+                if (left <= 0) {
+                    st = W_TMOUT;
+                    break;
+                }
+                if (left > WAIT_SLICE_MS)
+                    left = WAIT_SLICE_MS;
+                pr = poll(&p, 1, (int)left);
+                if (pr > 0) {
+                    int e = 0;
+                    socklen_t el = sizeof e;
+                    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &e, &el) == 0) {
+                        if (e == 0)
+                            st = 0;
+                        else if (e == ECONNREFUSED) {
+                            any_refused = true;
+                            st = W_SOCK;
+                        } else {
+                            any_other = true;
+                            st = W_SOCK;
+                        }
+                    }
+                    break;
+                }
+                if (pr < 0 && errno != EINTR) {
+                    any_other = true;
+                    st = W_SOCK;
+                    break;
+                }
+            }
+            if (st == 0) {
+                *fd_out = fd;
+                return 0;
+            }
+            close(fd);
+            if (st == W_CANCEL || st == W_TMOUT)
+                return st;
+            continue;
+        }
+        *fd_out = fd;   /* 立即成功（回环常见） */
+        return 0;
+    }
+    if (any_refused && !any_other)
+        return -4;
+    return W_SOCK;
+}
+
+/* ------------------------------ libssh2 EAGAIN 等待 ------------------------------ */
+
+/* 0 ok；W_* 负码 */
+static int wait_dir(hb_ssh *h, hop *hp, int64_t deadline_ms)
+{
+    int dir = libssh2_session_block_directions(hp->sess);
+    short ev = 0;
+    if (dir & LIBSSH2_SESSION_BLOCK_INBOUND)
+        ev |= POLLIN;
+    if (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND)
+        ev |= POLLOUT;
+    if (!ev)
+        ev = POLLIN;
+    for (;;) {
+        struct pollfd p = { hp->sock, ev, 0 };
+        int64_t left;
+        int r;
+        if (hb__session_cancelled(h->s))
+            return W_CANCEL;
+        left = deadline_ms - hb_now_ms();
+        if (left <= 0)
+            return W_TMOUT;
+        if (left > WAIT_SLICE_MS)
+            left = WAIT_SLICE_MS;
+        r = poll(&p, 1, (int)left);
+        if (r > 0) {
+            if (p.revents & (POLLERR | POLLHUP | POLLNVAL))
+                return W_SOCK;
+            return 0;
+        }
+        if (r < 0 && errno != EINTR)
+            return W_SOCK;
+    }
+}
+
+/* int rc 表达式的 EAGAIN 重试：w 置 W_* 码；调用方 `if (w) ...` */
+#define SSH_LOOP(h, hp, dl, expr, out, w)                                      \
+    do {                                                                     \
+        (w) = 0;                                                             \
+        for (;;) {                                                           \
+            (out) = (expr);                                                  \
+            if ((out) != LIBSSH2_ERROR_EAGAIN)                               \
+                break;                                                       \
+            (w) = wait_dir((h), (hp), (dl));                                 \
+            if (w)                                                           \
+                break;                                                       \
+        }                                                                    \
+    } while (0)
+
+/* 指针表达式版本：NULL + errno==EAGAIN → 重试 */
+#define SSH_LOOP_PTR(h, hp, dl, expr, out, w)                                  \
+    do {                                                                     \
+        (w) = 0;                                                             \
+        for (;;) {                                                           \
+            (out) = (expr);                                                  \
+            if ((out) != NULL ||                                             \
+                libssh2_session_last_errno((hp)->sess) !=                    \
+                    LIBSSH2_ERROR_EAGAIN)                                    \
+                break;                                                       \
+            (w) = wait_dir((h), (hp), (dl));                                 \
+            if (w)                                                           \
+                break;                                                       \
+        }                                                                    \
+    } while (0)
+
+/* ------------------------------ 主机密钥 ------------------------------ */
+
+static const char *hk_type_name(int t)
+{
+    switch (t) {
+    case LIBSSH2_HOSTKEY_TYPE_RSA:        return "ssh-rsa";
+    case LIBSSH2_HOSTKEY_TYPE_DSS:        return "ssh-dss";
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_256:  return "ecdsa-sha2-nistp256";
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_384:  return "ecdsa-sha2-nistp384";
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_521:  return "ecdsa-sha2-nistp521";
+    case LIBSSH2_HOSTKEY_TYPE_ED25519:    return "ssh-ed25519";
+    }
+    return "unknown";
+}
+
+/* randomart 标题标签："ED25519 256" / "RSA 2048" / "ECDSA 256"… */
+static void hk_label(int type, const unsigned char *key, size_t klen,
+                     char *out, size_t cap)
+{
+    switch (type) {
+    case LIBSSH2_HOSTKEY_TYPE_ED25519:
+        snprintf(out, cap, "ED25519 256");
+        return;
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_256:
+        snprintf(out, cap, "ECDSA 256");
+        return;
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_384:
+        snprintf(out, cap, "ECDSA 384");
+        return;
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_521:
+        snprintf(out, cap, "ECDSA 521");
+        return;
+    case LIBSSH2_HOSTKEY_TYPE_RSA: {
+        /* blob: string "ssh-rsa", mpint e, mpint n → n 的位数 */
+        unsigned bits = 0;
+        size_t off = 0;
+        int i;
+        for (i = 0; i < 3; i++) {
+            uint32_t l;
+            if (off + 4 > klen)
+                break;
+            memcpy(&l, key + off, 4);
+            l = ntohl(l);
+            off += 4;
+            if (off + l > klen)
+                break;
+            if (i == 2) {   /* n */
+                bits = l * 8;
+                if (l > 0 && key[off] == 0)
+                    bits -= 8;
+            }
+            off += l;
+        }
+        snprintf(out, cap, "RSA %u", bits ? bits : 2048);
+        return;
+    }
+    default:
+        snprintf(out, cap, "UNKNOWN");
+    }
+}
+
+static char *b64_encode(const unsigned char *bin, size_t len, bool strip_pad)
+{
+    size_t cap = sodium_base64_ENCODED_LEN(len,
+                                           sodium_base64_VARIANT_ORIGINAL);
+    char *b64 = malloc(cap);
+    size_t n;
+    if (!b64)
+        return NULL;
+    sodium_bin2base64(b64, cap, bin, len, sodium_base64_VARIANT_ORIGINAL);
+    if (strip_pad) {
+        n = strlen(b64);
+        while (n && b64[n - 1] == '=')
+            b64[--n] = 0;
+    }
+    return b64;
+}
+
+char *hb_ssh_fingerprint_sha256(const unsigned char *key, size_t len)
+{
+    unsigned char d[32];
+    char *b64, *out;
+    unsigned int dl = 0;
+    if (hb_core_init() != 0)
+        return NULL;
+    if (!EVP_Digest(key, len, d, &dl, EVP_sha256(), NULL) || dl != 32)
+        return NULL;
+    b64 = b64_encode(d, 32, true);
+    if (!b64)
+        return NULL;
+    out = malloc(strlen(b64) + 8);
+    if (out)
+        sprintf(out, "SHA256:%s", b64);
+    free(b64);
+    return out;
+}
+
+/* ------------------------------ randomart ------------------------------ */
+
+#define RA_X 17
+#define RA_Y 9
+
+static void ra_border(char *out, const char *title)
+{
+    /* "+--[title]--+"：标题在 17 字符内居中，多出的 '-' 放右边（OpenSSH 同款） */
+    size_t tl = strlen(title);
+    size_t pad = tl < RA_X ? RA_X - tl : 0;
+    size_t left = pad / 2, right = pad - left, i;
+    char *p = out;
+    *p++ = '+';
+    for (i = 0; i < left; i++)
+        *p++ = '-';
+    memcpy(p, title, tl);
+    p += tl;
+    for (i = 0; i < right; i++)
+        *p++ = '-';
+    *p++ = '+';
+    *p++ = '\n';
+    *p = 0;
+}
+
+char *hb_ssh_randomart(const char *keytype_label,
+                       const unsigned char *sha256, size_t len)
+{
+    static const char aug[] = " .o+=*BOX@%&#/^";
+    const int alen = (int)sizeof(aug) - 1;
+    unsigned char field[RA_X][RA_Y];
+    int x, y, i;
+    char title[48], *out, *p;
+
+    if (!sha256 || len == 0)
+        return NULL;
+    memset(field, 0, sizeof field);
+    x = RA_X / 2;
+    y = RA_Y / 2;
+    for (i = 0; i < (int)len; i++) {
+        int input = sha256[i];
+        int bit;
+        for (bit = 0; bit < 4; bit++) {
+            x += (input & 0x1) ? 1 : -1;
+            y += (input & 0x2) ? 1 : -1;
+            if (x < 0) x = 0;
+            if (x > RA_X - 1) x = RA_X - 1;
+            if (y < 0) y = 0;
+            if (y > RA_Y - 1) y = RA_Y - 1;
+            if (field[x][y] < alen - 2)
+                field[x][y]++;
+            input >>= 2;
+        }
+    }
+    field[RA_X / 2][RA_Y / 2] = (unsigned char)(alen - 1);   /* S */
+    field[x][y] = (unsigned char)alen;                     /* E */
+
+    snprintf(title, sizeof title, "[%s]", keytype_label ? keytype_label : "?");
+    out = malloc((RA_X + 4) * (RA_Y + 2) + 8);
+    if (!out)
+        return NULL;
+    p = out;
+    ra_border(p, title);
+    p += strlen(p);
+    for (y = 0; y < RA_Y; y++) {
+        *p++ = '|';
+        for (x = 0; x < RA_X; x++) {
+            int v = field[x][y];
+            if (v == alen - 1)
+                *p++ = 'S';
+            else if (v == alen)
+                *p++ = 'E';
+            else
+                *p++ = aug[v > alen ? alen : v];
+        }
+        *p++ = '|';
+        *p++ = '\n';
+    }
+    ra_border(p, "[SHA256]");
+    return out;
+}
+
+/* ------------------------------ parse_target / err_name ------------------------------ */
+
+hb_err hb_ssh_parse_target(const char *s, char **user, char **host, int *port)
+{
+    const char *at, *h;
+    char *hp = NULL;
+    long p = 0;
+    char *endp;
+
+    if (!s || !*s || !user || !host || !port)
+        return HB_ERR_INVALID;
+    *user = NULL;
+    *host = NULL;
+    *port = 0;
+
+    at = strrchr(s, '@');
+    h = s;
+    if (at) {
+        if (at == s || !at[1])
+            return HB_ERR_INVALID;
+        *user = strndup(s, (size_t)(at - s));
+        h = at + 1;
+    }
+    if (*h == '[') {
+        const char *cb = strchr(h, ']');
+        const char *rest;
+        if (!cb)
+            goto bad;
+        hp = strndup(h + 1, (size_t)(cb - h - 1));
+        rest = cb + 1;
+        if (*rest == ':') {
+            p = strtol(rest + 1, &endp, 10);
+            if (*endp || endp == rest + 1)
+                goto bad;
+        } else if (*rest)
+            goto bad;
+    } else {
+        const char *c1 = strchr(h, ':');
+        if (!c1) {
+            hp = xstrdup(h);
+        } else if (strchr(c1 + 1, ':')) {
+            hp = xstrdup(h);   /* 裸 IPv6，无端口 */
+        } else {
+            hp = strndup(h, (size_t)(c1 - h));
+            p = strtol(c1 + 1, &endp, 10);
+            if (*endp || endp == c1 + 1)
+                goto bad;
+        }
+    }
+    if (!hp || !*hp || p < 0 || p > 65535)
+        goto bad;
+    *host = hp;
+    *port = (int)p;
+    return HB_OK;
+bad:
+    free(hp);
+    free(*user);
+    *user = NULL;
+    return HB_ERR_INVALID;
+}
+
+const char *hb_ssh_err_name(int code)
+{
+    switch (code) {
+    case HB_SSH_ERR_RESOLVE:
+    case HB_SSH_ERR_REFUSED:
+    case HB_SSH_ERR_UNREACHABLE:      return "unreachable";
+    case HB_SSH_ERR_TIMEOUT:          return "timeout";
+    case HB_SSH_ERR_AUTH:             return "auth_failed";
+    case HB_SSH_ERR_HOSTKEY_CHANGED:  return "hostkey_changed";
+    case HB_SSH_ERR_HOSTKEY_REJECTED: return "hostkey_rejected";
+    case HB_SSH_ERR_CANCELLED:        return "cancelled";
+    default:                          return "error";
+    }
+}
+
+/* ------------------------------ 主机密钥校验 ------------------------------ */
+
+/* 构造可写入 known_hosts 的一行 */
+static char *kh_make_line(const char *host, int port, const char *type_name,
+                          const unsigned char *key, size_t klen)
+{
+    char *b64 = b64_encode(key, klen, false);
+    char *line;
+    if (!b64)
+        return NULL;
+    line = malloc(strlen(host) + strlen(type_name) + strlen(b64) + 32);
+    if (line) {
+        if (port == 22)
+            sprintf(line, "%s %s %s", host, type_name, b64);
+        else
+            sprintf(line, "[%s]:%d %s %s", host, port, type_name, b64);
+    }
+    free(b64);
+    return line;
+}
+
+static unsigned hk_key_bit(int t)
+{
+    switch (t) {
+    case LIBSSH2_HOSTKEY_TYPE_RSA:        return LIBSSH2_KNOWNHOST_KEY_SSHRSA;
+    case LIBSSH2_HOSTKEY_TYPE_DSS:        return LIBSSH2_KNOWNHOST_KEY_SSHDSS;
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_256:  return LIBSSH2_KNOWNHOST_KEY_ECDSA_256;
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_384:  return LIBSSH2_KNOWNHOST_KEY_ECDSA_384;
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_521:  return LIBSSH2_KNOWNHOST_KEY_ECDSA_521;
+    case LIBSSH2_HOSTKEY_TYPE_ED25519:    return LIBSSH2_KNOWNHOST_KEY_ED25519;
+    }
+    return LIBSSH2_KNOWNHOST_KEY_UNKNOWN;
+}
+
+/* 0 = 可继续；<0 = -hb_ssh_err */
+static int hostkey_verify(hb_ssh *h, hop *hp)
+{
+    LIBSSH2_KNOWNHOSTS *kh;
+    const char *key;
+    size_t klen;
+    int type = 0, chk;
+    size_t i;
+
+    kh = libssh2_knownhost_init(hp->sess);
+    if (!kh) {
+        set_err(h, "knownhost init failed");
+        emit_error(h, HB_SSH_ERR_HANDSHAKE, "主机密钥校验初始化失败");
+        return -HB_SSH_ERR_HANDSHAKE;
+    }
+    for (i = 0; i < h->nknown; i++)
+        libssh2_knownhost_readline(kh, h->known[i], strlen(h->known[i]),
+                                   LIBSSH2_KNOWNHOST_FILE_OPENSSH);
+
+    key = libssh2_session_hostkey(hp->sess, &klen, &type);
+    if (!key || !klen) {
+        libssh2_knownhost_free(kh);
+        set_lib_err(h, hp->sess);
+        emit_error(h, HB_SSH_ERR_HANDSHAKE, "无法读取主机密钥");
+        return -HB_SSH_ERR_HANDSHAKE;
+    }
+    chk = libssh2_knownhost_checkp(
+        kh, hp->cfg.host, hp->cfg.port, key, klen,
+        LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW |
+            hk_key_bit(type),
+        NULL);
+    libssh2_knownhost_free(kh);
+
+    if (chk == LIBSSH2_KNOWNHOST_CHECK_MATCH)
+        return 0;
+    if (chk == LIBSSH2_KNOWNHOST_CHECK_FAILURE) {
+        set_err(h, "knownhost check failure");
+        emit_error(h, HB_SSH_ERR_HANDSHAKE, "主机密钥校验失败");
+        return -HB_SSH_ERR_HANDSHAKE;
+    }
+
+    /* NOTFOUND（code 0 未知）/ MISMATCH（code 1 变更）→ 等 UI 裁决 */
+    {
+        int changed = (chk == LIBSSH2_KNOWNHOST_CHECK_MISMATCH) ? 1 : 0;
+        const char *tn = hk_type_name(type);
+        char *fp = hb_ssh_fingerprint_sha256((const unsigned char *)key, klen);
+        const char *hash =
+            libssh2_hostkey_hash(hp->sess, LIBSSH2_HOSTKEY_HASH_SHA256);
+        char label[40];
+        char *art = NULL;
+        char *khline =
+            kh_make_line(hp->cfg.host, hp->cfg.port, tn,
+                         (const unsigned char *)key, klen);
+        char hostport[320], text2[128];
+        char *extra = NULL;
+        int accept = 0, r;
+
+        hk_label(type, (const unsigned char *)key, klen, label, sizeof label);
+        if (hash)
+            art = hb_ssh_randomart(label, (const unsigned char *)hash, 32);
+        snprintf(hostport, sizeof hostport, "%s:%d", hp->cfg.host, hp->cfg.port);
+        snprintf(text2, sizeof text2, "%s %s", tn, fp ? fp : "?");
+        if (khline && art) {
+            size_t n = strlen(khline) + strlen(art) + 2;
+            extra = malloc(n);
+            if (extra)
+                snprintf(extra, n, "%s\n%s", khline, art);
+        } else if (khline) {
+            extra = xstrdup(khline);
+        }
+        free(fp);
+        free(art);
+
+        hb__session_reply_reset(h->s, HB__REPLY_HOSTKEY);
+        hb__session_emit_ex(h->s, HB_SESS_EV_HOSTKEY, hp->mark, changed,
+                            hostport, text2, extra);
+        free(extra);
+        free(khline);
+        r = hb__session_reply_wait(h->s, &accept, NULL);
+        if (r <= 0) {
+            emit_error(h, HB_SSH_ERR_CANCELLED, "连接已取消");
+            return -HB_SSH_ERR_CANCELLED;
+        }
+        if (!accept) {
+            int code = changed ? HB_SSH_ERR_HOSTKEY_CHANGED
+                               : HB_SSH_ERR_HOSTKEY_REJECTED;
+            emit_error(h, code,
+                       changed ? "主机密钥已变更，可能存在中间人攻击"
+                               : "主机密钥未被信任，连接已取消");
+            return -code;
+        }
+    }
+    return 0;
+}
+
+/* ------------------------------ 认证 ------------------------------ */
+
+static const char *auth_name(hb_ssh_auth a)
+{
+    switch (a) {
+    case HB_SSH_AUTH_PASSWORD: return "password";
+    case HB_SSH_AUTH_KEY:      return "publickey";
+    case HB_SSH_AUTH_AGENT:    return "agent";
+    case HB_SSH_AUTH_NONE:     return "none";
+    default:                   return "auto";
+    }
+}
+
+static int ssh_authenticated(hop *hp)
+{
+    return libssh2_userauth_authenticated(hp->sess) == 1;
+}
+
+/* 取服务器认证方式列表；NULL = 已认证(none 通过)或真错误（当全允许处理）。
+ * *w 置 W_* 等待码。 */
+static char *auth_methods(hb_ssh *h, hop *hp, int64_t dl, int *w)
+{
+    *w = 0;
+    for (;;) {
+        char *m = libssh2_userauth_list(hp->sess, hp->cfg.user,
+                                        strlen(hp->cfg.user));
+        if (m || libssh2_userauth_authenticated(hp->sess))
+            return m;
+        if (libssh2_session_last_errno(hp->sess) != LIBSSH2_ERROR_EAGAIN)
+            return NULL;   /* 真错误 → 后续当全部允许处理 */
+        *w = wait_dir(h, hp, dl);
+        if (*w)
+            return NULL;
+    }
+}
+
+/* 0 成功；1 无 agent / 无可用身份（换下一方式）；W_* 等待码 */
+static int auth_agent(hb_ssh *h, hop *hp, int64_t dl)
+{
+    LIBSSH2_AGENT *ag;
+    struct libssh2_agent_publickey *id = NULL, *prev = NULL;
+    int rc = -1, w = 0, ok = 1;
+    const char *sock = getenv("SSH_AUTH_SOCK");
+
+    if (!sock || !*sock)
+        return 1;
+    ag = libssh2_agent_init(hp->sess);
+    if (!ag)
+        return 1;
+    SSH_LOOP(h, hp, dl, libssh2_agent_connect(ag), rc, w);
+    if (w) {
+        ok = w;
+        goto out;
+    }
+    if (rc)
+        goto out;
+    SSH_LOOP(h, hp, dl, libssh2_agent_list_identities(ag), rc, w);
+    if (w) {
+        ok = w;
+        goto out;
+    }
+    if (rc)
+        goto out;
+    while (ok != 0) {
+        SSH_LOOP(h, hp, dl, libssh2_agent_get_identity(ag, &id, prev), rc, w);
+        if (w) {
+            ok = w;
+            goto out;
+        }
+        if (rc)
+            break;      /* 遍历完 */
+        SSH_LOOP(h, hp, dl,
+                 libssh2_agent_userauth(ag, hp->cfg.user, id), rc, w);
+        if (w) {
+            ok = w;
+            goto out;
+        }
+        if (rc == 0) {
+            ok = 0;
+            break;
+        }
+        prev = id;
+    }
+out:
+    libssh2_agent_disconnect(ag);
+    libssh2_agent_free(ag);
+    return ok;
+}
+
+/* 单次密钥尝试；返回 0 或 W_*；libssh2 rc 存 *rc_out */
+static int key_try(hb_ssh *h, hop *hp, const char *priv_text,
+                   const char *idfile, const char *pp, int64_t dl, int *rc_out)
+{
+    int w;
+    if (priv_text) {
+        SSH_LOOP(h, hp, dl,
+                 libssh2_userauth_publickey_frommemory(
+                     hp->sess, hp->cfg.user, strlen(hp->cfg.user),
+                     NULL, 0, priv_text, strlen(priv_text), pp),
+                 *rc_out, w);
+    } else {
+        SSH_LOOP(h, hp, dl,
+                 libssh2_userauth_publickey_fromfile_ex(
+                     hp->sess, hp->cfg.user,
+                     (unsigned int)strlen(hp->cfg.user),
+                     NULL, idfile, pp),
+                 *rc_out, w);
+    }
+    return w;
+}
+
+static char *prompt_secret(hb_ssh *h, hop *hp, int code, const char *msg)
+{
+    char *got = NULL;
+    hb__session_reply_reset(h->s, HB__REPLY_PROMPT);
+    hb__session_emit(h->s, HB_SESS_EV_PROMPT, hp->mark, code, msg, NULL);
+    if (hb__session_reply_wait(h->s, NULL, &got) <= 0) {
+        hb_secret_free(got);
+        return NULL;
+    }
+    return got;   /* NULL = 用户取消 */
+}
+
+/* 尝试一个密钥源（内存文本或文件），加密时按需 PROMPT 口令。
+ * 0 成功；1 源不可用/服务器拒绝（换源）；<0 -hb_ssh_err */
+static int auth_key_source(hb_ssh *h, hop *hp, const char *priv_text,
+                           const char *idfile, int64_t *dl)
+{
+    const char *pp = hp->cfg.passphrase;
+    char *got = NULL;
+    int tries = 0, rc = -1, w;
+
+    if (idfile && access(idfile, R_OK) != 0) {
+        set_err(h, "%s: %s", idfile, strerror(errno));
+        return 1;
+    }
+    while (tries < 3) {
+        w = key_try(h, hp, priv_text, idfile, pp, *dl, &rc);
+        if (w) {
+            hb_secret_free(got);
+            return fail_wait(h, w, HB_SSH_ERR_AUTH);
+        }
+        if (rc == 0) {
+            hb_secret_free(got);
+            return 0;
+        }
+        if (rc == LIBSSH2_ERROR_AUTHENTICATION_FAILED) {
+            hb_secret_free(got);
+            set_lib_err(h, hp->sess);
+            return 1;   /* 密钥解析正常但服务器不认 → 换源 */
+        }
+        /* 解析/解密失败 → 大概率要口令；PROMPT code 1 */
+        {
+            char msg[320];
+            if (tries > 0)
+                snprintf(msg, sizeof msg, "口令错误，请重试");
+            else if (idfile)
+                snprintf(msg, sizeof msg, "私钥 %s 的口令", idfile);
+            else
+                snprintf(msg, sizeof msg, "私钥口令");
+            hb_secret_free(got);
+            got = prompt_secret(h, hp, 1, msg);
+            if (!got) {
+                emit_error(h, HB_SSH_ERR_CANCELLED, "连接已取消");
+                return -HB_SSH_ERR_CANCELLED;
+            }
+            *dl = hb_now_ms() + HANDSHAKE_MS;   /* 用户输入时间不计死线 */
+        }
+        pp = got;
+        tries++;
+    }
+    hb_secret_free(got);
+    set_lib_err(h, hp->sess);
+    return 1;
+}
+
+/* keyboard-interactive：用密码填满所有挑战项 */
+static void kbi_cb(const char *name, int name_len,
+                   const char *instruction, int instruction_len,
+                   int num_prompts,
+                   const LIBSSH2_USERAUTH_KBDINT_PROMPT *prompts,
+                   LIBSSH2_USERAUTH_KBDINT_RESPONSE *responses,
+                   void **abstract)
+{
+    const char *pw = (abstract && *abstract) ? *abstract : NULL;
+    int i;
+    (void)name; (void)name_len; (void)instruction; (void)instruction_len;
+    (void)prompts;
+    if (!pw)
+        return;
+    for (i = 0; i < num_prompts; i++) {
+        responses[i].text = strdup(pw);
+        responses[i].length = (unsigned int)strlen(pw);
+    }
+}
+
+/* 0 成功；<0 -hb_ssh_err（已发事件） */
+static int auth_password(hb_ssh *h, hop *hp, const char *methods, int64_t *dl)
+{
+    const char *use = hp->cfg.password;
+    char *got = NULL;
+    int tries = 0, w = 0;
+    bool allow_kbi = !methods || strstr(methods, "keyboard-interactive");
+    bool allow_pw = !methods || strstr(methods, "password");
+
+    if (!allow_pw && !allow_kbi) {
+        set_err(h, "server does not offer password/keyboard-interactive");
+        return -HB_SSH_ERR_AUTH;
+    }
+    while (tries < 3) {
+        int rc = -1;
+        if (!use) {
+            char msg[320];
+            if (tries > 0)
+                snprintf(msg, sizeof msg, "密码错误，请重试");
+            else
+                snprintf(msg, sizeof msg, "%s@%s:%d 的密码",
+                         hp->cfg.user, hp->cfg.host, hp->cfg.port);
+            hb_secret_free(got);
+            got = prompt_secret(h, hp, 0, msg);
+            if (!got) {
+                emit_error(h, HB_SSH_ERR_CANCELLED, "连接已取消");
+                return -HB_SSH_ERR_CANCELLED;
+            }
+            use = got;
+            *dl = hb_now_ms() + HANDSHAKE_MS;
+        }
+        if (allow_pw) {
+            SSH_LOOP(h, hp, *dl,
+                     libssh2_userauth_password_ex(
+                         hp->sess, hp->cfg.user,
+                         (unsigned int)strlen(hp->cfg.user),
+                         use, (unsigned int)strlen(use), NULL),
+                     rc, w);
+            if (w) {
+                hb_secret_free(got);
+                return fail_wait(h, w, HB_SSH_ERR_AUTH);
+            }
+            if (rc == 0) {
+                hb_secret_free(got);
+                return 0;
+            }
+        }
+        if (allow_kbi && !ssh_authenticated(hp)) {
+            *libssh2_session_abstract(hp->sess) = (void *)use;
+            SSH_LOOP(h, hp, *dl,
+                     libssh2_userauth_keyboard_interactive_ex(
+                         hp->sess, hp->cfg.user,
+                         (unsigned int)strlen(hp->cfg.user), &kbi_cb),
+                     rc, w);
+            *libssh2_session_abstract(hp->sess) = NULL;
+            if (w) {
+                hb_secret_free(got);
+                return fail_wait(h, w, HB_SSH_ERR_AUTH);
+            }
+            if (rc == 0) {
+                hb_secret_free(got);
+                return 0;
+            }
+        }
+        hb_secret_free(got);
+        got = NULL;
+        use = NULL;
+        tries++;
+        if (hp->cfg.password)
+            break;   /* 显式给的密码错了 → 不重试 */
+    }
+    hb_secret_free(got);
+    set_lib_err(h, hp->sess);
+    return -HB_SSH_ERR_AUTH;
+}
+
+/* 0 成功；<0 -hb_ssh_err（错误事件已发或待末尾统一发 AUTH） */
+static int do_auth(hb_ssh *h, hop *hp, int64_t dl)
+{
+    c_hop *c = &hp->cfg;
+    char *methods;
+    int w = 0, r;
+
+    methods = auth_methods(h, hp, dl, &w);
+    if (w)
+        return fail_wait(h, w, HB_SSH_ERR_AUTH);
+    if (!methods && ssh_authenticated(hp))
+        return 0;   /* none 直接通过 */
+    if (c->auth == HB_SSH_AUTH_NONE)
+        goto auth_fail;
+
+    /* agent */
+    if (c->auth == HB_SSH_AUTH_AGENT || c->auth == HB_SSH_AUTH_AUTO) {
+        r = auth_agent(h, hp, dl);
+        if (r == 0)
+            return 0;
+        if (IS_WAIT(r))
+            return fail_wait(h, r, HB_SSH_ERR_AUTH);
+        if (r < 0)
+            return r;
+        if (c->auth == HB_SSH_AUTH_AGENT)
+            goto auth_fail;
+    }
+
+    /* 密钥：KEY → privkey → identity_file；AUTO → identity_file → privkey */
+    if ((c->auth == HB_SSH_AUTH_KEY || c->auth == HB_SSH_AUTH_AUTO) &&
+        (!methods || strstr(methods, "publickey"))) {
+        const char *priv = NULL, *file = NULL;
+        if (c->auth == HB_SSH_AUTH_KEY) {
+            priv = c->privkey;
+            file = c->identity_file;
+        } else {
+            file = c->identity_file;
+            priv = file ? NULL : c->privkey;   /* AUTO：file 先，privkey 兜底 */
+        }
+        if (file || priv) {
+            r = auth_key_source(h, hp, priv, file, &dl);
+            if (r == 0)
+                return 0;
+            if (r < 0)
+                return r;
+        }
+        if (c->auth == HB_SSH_AUTH_AUTO && file && c->privkey) {
+            r = auth_key_source(h, hp, c->privkey, NULL, &dl);
+            if (r == 0)
+                return 0;
+            if (r < 0)
+                return r;
+        }
+        if (c->auth == HB_SSH_AUTH_KEY)
+            goto auth_fail;
+    } else if (c->auth == HB_SSH_AUTH_KEY) {
+        set_err(h, "server does not offer publickey");
+        goto auth_fail;
+    }
+
+    /* 密码 */
+    if (c->auth == HB_SSH_AUTH_PASSWORD || c->auth == HB_SSH_AUTH_AUTO) {
+        r = auth_password(h, hp, methods, &dl);
+        if (r == 0)
+            return 0;
+        if (r == -HB_SSH_ERR_AUTH)
+            goto auth_fail;
+        return r;   /* CANCELLED 等（事件已发） */
+    }
+
+auth_fail:
+    if (!h->errbuf[0])
+        set_err(h, "no supported auth method / credentials rejected");
+    emit_error(h, HB_SSH_ERR_AUTH, "认证失败：服务器拒绝了提供的凭据");
+    return -HB_SSH_ERR_AUTH;
+}
+
+/* ------------------------------ ProxyJump 泵 ------------------------------ */
+
+static void *pump_run(void *arg)
+{
+    pump_t *p = arg;
+    int tmo = 100;
+    for (;;) {
+        struct pollfd pf[2];
+        int r;
+        if (p->stop)
+            break;
+        pf[0].fd = p->hop_fd;
+        pf[0].events = (short)(POLLIN | (p->clen ? POLLOUT : 0));
+        pf[0].revents = 0;
+        pf[1].fd = p->pair;
+        pf[1].events = (short)((p->chan_eof ? 0 : POLLIN) |
+                               (p->plen ? POLLOUT : 0));
+        pf[1].revents = 0;
+        r = poll(pf, 2, tmo);
+        tmo = 100;
+        if (p->stop)
+            break;
+        if (r < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+
+        /* pair → channel：先暂存，再尽量 channel_write */
+        if ((pf[1].revents & POLLIN) && p->clen < sizeof p->cbuf) {
+            ssize_t n = read(p->pair, p->cbuf + p->clen,
+                             sizeof p->cbuf - p->clen);
+            if (n > 0)
+                p->clen += (size_t)n;
+            else if (n == 0)
+                p->pair_eof = true;
+            else if (errno != EAGAIN && errno != EWOULDBLOCK &&
+                     errno != EINTR)
+                p->pair_eof = true;
+        }
+        if (p->clen) {
+            ssize_t n = libssh2_channel_write(p->ch, (const char *)p->cbuf,
+                                              p->clen);
+            if (n > 0) {
+                memmove(p->cbuf, p->cbuf + n, p->clen - (size_t)n);
+                p->clen -= (size_t)n;
+            } else if (n != LIBSSH2_ERROR_EAGAIN) {
+                p->chan_eof = true;
+            }
+        }
+
+        /* channel → pair：channel_read 到 pbuf，再尽量写 pair */
+        if (!p->chan_eof && p->plen < sizeof p->pbuf) {
+            ssize_t n = libssh2_channel_read(p->ch, (char *)p->pbuf + p->plen,
+                                             sizeof p->pbuf - p->plen);
+            if (n > 0) {
+                p->plen += (size_t)n;
+                /* libssh2 内部可能还压着已解密数据而 socket 不可读 →
+                 * 下一轮 poll 立即返回，尽快再读 */
+                tmo = 0;
+            } else if (n == 0 && libssh2_channel_eof(p->ch))
+                p->chan_eof = true;
+            else if (n < 0 && n != LIBSSH2_ERROR_EAGAIN)
+                p->chan_eof = true;
+        }
+        if (p->plen && (pf[1].revents & POLLOUT)) {
+            ssize_t n = send(p->pair, p->pbuf, p->plen, MSG_NOSIGNAL);
+            if (n > 0) {
+                memmove(p->pbuf, p->pbuf + n, p->plen - (size_t)n);
+                p->plen -= (size_t)n;
+            } else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+                       errno != EINTR) {
+                p->pair_eof = true;   /* 内层已死 → channel 也无意义 */
+                p->chan_eof = true;
+                p->plen = 0;          /* 下行缓存无人能收，丢弃 */
+            }
+        }
+
+        if (p->chan_eof) {
+            p->clen = 0;                  /* channel 已死，上行缓存丢弃 */
+            /* 下行缓存必须写完再 shutdown，否则截断尾包 */
+            if (p->plen == 0 && !p->pair_eof) {
+                shutdown(p->pair, SHUT_WR);   /* 通知内层：下行已尽 */
+                p->pair_eof = true;
+            }
+        }
+        /* 上行缓存必须先发完，再向 channel 宣告 EOF，否则截断尾包 */
+        if (p->pair_eof && p->clen == 0 && !p->sent_eof) {
+            libssh2_channel_send_eof(p->ch);  /* 通知远端：下行已断 */
+            p->sent_eof = true;
+        }
+        if (p->chan_eof && p->pair_eof && p->plen == 0 && p->clen == 0)
+            break;
+        if (pf[0].revents & (POLLERR | POLLHUP | POLLNVAL))
+            p->chan_eof = true;
+    }
+    return NULL;
+}
+
+static int pump_start(hb_ssh *h, hop *inner)
+{
+    hop *outer = inner - 1;   /* hops[i-1] */
+    int pr[2];
+    pump_t *p = &inner->pump;
+
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
+                   pr) != 0) {
+        set_err(h, "socketpair: %s", strerror(errno));
+        return W_SOCK;
+    }
+    p->sess = outer->sess;
+    p->ch = outer->chan;
+    p->hop_fd = outer->sock;
+    p->pair = pr[0];
+    inner->sock = pr[1];
+    if (pthread_create(&p->th, NULL, pump_run, p) != 0) {
+        close(pr[0]);
+        close(pr[1]);
+        inner->sock = -1;
+        set_err(h, "pthread_create failed");
+        return W_SOCK;
+    }
+    p->started = true;
+    inner->pump_on = true;
+    return 0;
+}
+
+/* ------------------------------ hop 连接 ------------------------------ */
+
+static int hop_up(hb_ssh *h, size_t i)
+{
+    hop *hp = &h->hops[i];
+    int64_t dl;
+    int w, rc;
+
+    if (i == 0) {
+        struct addrinfo *res = NULL;
+        stage(h, hp, 0, "解析 %s…", hp->cfg.host);
+        w = dns_resolve(h, hp->cfg.host, hp->cfg.port, h->timeout_ms, &res);
+        if (w) {
+            if (w == W_CANCEL)
+                return fail_wait(h, w, HB_SSH_ERR_RESOLVE);
+            if (w == W_TMOUT) {
+                emit_error(h, HB_SSH_ERR_TIMEOUT, "主机不可达或超时");
+                return -HB_SSH_ERR_TIMEOUT;
+            }
+            {
+                char msg[384];
+                snprintf(msg, sizeof msg, "无法解析主机名 %s", hp->cfg.host);
+                emit_error(h, HB_SSH_ERR_RESOLVE, msg);
+            }
+            return -HB_SSH_ERR_RESOLVE;
+        }
+        stage(h, hp, 1, "TCP 连接 %s:%d…", hp->cfg.host, hp->cfg.port);
+        w = tcp_connect(h, res, h->timeout_ms, &hp->sock);
+        freeaddrinfo(res);
+        if (w) {
+            if (w == -4) {
+                set_err(h, "ECONNREFUSED");
+                {
+                    char msg[384];
+                    snprintf(msg, sizeof msg, "无法连接：%s:%d 拒绝连接",
+                             hp->cfg.host, hp->cfg.port);
+                    emit_error(h, HB_SSH_ERR_REFUSED, msg);
+                }
+                return -HB_SSH_ERR_REFUSED;
+            }
+            if (w == W_SOCK) {
+                set_err(h, "connect failed");
+                emit_error(h, HB_SSH_ERR_UNREACHABLE, "主机不可达或超时");
+                return -HB_SSH_ERR_UNREACHABLE;
+            }
+            return fail_wait(h, w, HB_SSH_ERR_UNREACHABLE);
+        }
+    } else {
+        /* 经上一跳 session 转发到本跳；地址由上一跳的服务端解析 */
+        hop *out = &h->hops[i - 1];
+        int64_t fdl = hb_now_ms() + HANDSHAKE_MS;
+        stage(h, hp, 0, "解析 %s（远端）…", hp->cfg.host);
+        stage(h, hp, 1, "经跳板 %zu 转发 %s:%d…", i, hp->cfg.host,
+              hp->cfg.port);
+        SSH_LOOP_PTR(h, out, fdl,
+                     libssh2_channel_direct_tcpip_ex(
+                         out->sess, hp->cfg.host, hp->cfg.port,
+                         "127.0.0.1", 22),
+                     out->chan, w);
+        if (w)
+            return fail_wait(h, w, HB_SSH_ERR_DISCONNECTED);
+        if (!out->chan) {
+            set_lib_err(h, out->sess);
+            emit_error(h, HB_SSH_ERR_CHANNEL,
+                       "无法建立跳板转发通道");
+            return -HB_SSH_ERR_CHANNEL;
+        }
+        w = pump_start(h, hp);
+        if (w)
+            return fail_wait(h, w, HB_SSH_ERR_DISCONNECTED);
+    }
+
+    /* SSH 握手（非阻塞 + EAGAIN 重试） */
+    stage(h, hp, 2, "SSH 握手…");
+    hp->sess = libssh2_session_init();
+    if (!hp->sess) {
+        set_err(h, "session_init failed");
+        emit_error(h, HB_SSH_ERR_HANDSHAKE, "SSH 握手失败");
+        return -HB_SSH_ERR_HANDSHAKE;
+    }
+    libssh2_session_set_blocking(hp->sess, 0);
+    dl = hb_now_ms() + HANDSHAKE_MS;
+    SSH_LOOP(h, hp, dl, libssh2_session_handshake(hp->sess, hp->sock), rc, w);
+    if (w)
+        return fail_wait(h, w, HB_SSH_ERR_HANDSHAKE);
+    if (rc) {
+        set_lib_err(h, hp->sess);
+        emit_error(h, HB_SSH_ERR_HANDSHAKE, "SSH 握手失败");
+        return -HB_SSH_ERR_HANDSHAKE;
+    }
+    {
+        const char *kex = libssh2_session_methods(hp->sess, LIBSSH2_METHOD_KEX);
+        const char *hk =
+            libssh2_session_methods(hp->sess, LIBSSH2_METHOD_HOSTKEY);
+        stage(h, hp, 2, "SSH 握手 · kex %s · %s", kex ? kex : "?",
+              hk ? hk : "?");
+    }
+
+    w = hostkey_verify(h, hp);
+    if (w)
+        return w;
+
+    stage(h, hp, 3, "认证 %s (%s)…", hp->cfg.user,
+          auth_name(hp->cfg.auth));
+    w = do_auth(h, hp, hb_now_ms() + HANDSHAKE_MS);
+    if (w)
+        return w;   /* 错误事件已在 do_auth 内发出 */
+    /* 认证完成 → 即擦密钥材料（sodium_free 清零） */
+    if (hp->cfg.password) {
+        hb_secret_free(hp->cfg.password);
+        hp->cfg.password = NULL;
+    }
+    if (hp->cfg.passphrase) {
+        hb_secret_free(hp->cfg.passphrase);
+        hp->cfg.passphrase = NULL;
+    }
+    if (hp->cfg.privkey) {
+        hb_secret_free(hp->cfg.privkey);
+        hp->cfg.privkey = NULL;
+    }
+    return 0;
+}
+
+/* 目标跳：开 channel + pty + shell/exec */
+static int target_shell(hb_ssh *h, hop *hp, int64_t dl)
+{
+    int w, rc;
+    size_t i;
+
+    stage(h, hp, 4, "启动 shell (%s)…", h->term);
+    SSH_LOOP_PTR(h, hp, dl,
+                 libssh2_channel_open_ex(hp->sess, "session", 7,
+                                         LIBSSH2_CHANNEL_WINDOW_DEFAULT,
+                                         LIBSSH2_CHANNEL_PACKET_DEFAULT,
+                                         NULL, 0),
+                 hp->chan, w);
+    if (w)
+        return fail_wait(h, w, HB_SSH_ERR_CHANNEL);
+    if (!hp->chan) {
+        set_lib_err(h, hp->sess);
+        emit_error(h, HB_SSH_ERR_CHANNEL, "无法打开 SSH channel");
+        return -HB_SSH_ERR_CHANNEL;
+    }
+
+    if (h->env) {
+        for (i = 0; h->env[i]; i++) {
+            const char *eq = strchr(h->env[i], '=');
+            if (eq && eq != h->env[i]) {
+                char k[128];
+                size_t kl = (size_t)(eq - h->env[i]);
+                if (kl >= sizeof k)
+                    kl = sizeof k - 1;
+                memcpy(k, h->env[i], kl);
+                k[kl] = 0;
+                libssh2_channel_setenv_ex(hp->chan, k, kl, eq + 1,
+                                          strlen(eq + 1));   /* 忽略失败 */
+            }
+        }
+    }
+
+    SSH_LOOP(h, hp, dl,
+             libssh2_channel_request_pty_ex(
+                 hp->chan, h->term, (unsigned int)strlen(h->term),
+                 NULL, 0, h->cols, h->rows, 0, 0),
+             rc, w);
+    if (w)
+        return fail_wait(h, w, HB_SSH_ERR_CHANNEL);
+    if (rc) {
+        set_lib_err(h, hp->sess);
+        emit_error(h, HB_SSH_ERR_CHANNEL, "PTY 请求被拒绝");
+        return -HB_SSH_ERR_CHANNEL;
+    }
+
+    if (h->command) {
+        SSH_LOOP(h, hp, dl,
+                 libssh2_channel_process_startup(
+                     hp->chan, "exec", 4, h->command, strlen(h->command)),
+                 rc, w);
+    } else {
+        SSH_LOOP(h, hp, dl,
+                 libssh2_channel_process_startup(
+                     hp->chan, "shell", 5, NULL, 0),
+                 rc, w);
+    }
+    if (w)
+        return fail_wait(h, w, HB_SSH_ERR_CHANNEL);
+    if (rc) {
+        set_lib_err(h, hp->sess);
+        emit_error(h, HB_SSH_ERR_CHANNEL, "无法启动远程 shell/命令");
+        return -HB_SSH_ERR_CHANNEL;
+    }
+
+    if (h->keepalive_s > 0) {
+        libssh2_keepalive_config(hp->sess, 1,
+                                 (unsigned int)h->keepalive_s);
+        h->ka_next = hb_now_ms() + (int64_t)h->keepalive_s * 1000;
+    }
+    hb__session_emit(h->s, HB_SESS_EV_CONNECTED, hp->mark, 0, NULL, NULL);
+    return 0;
+}
+
+/* ------------------------------ transport ops ------------------------------ */
+
+static hop *target_hop(hb_ssh *h)
+{
+    return &h->hops[h->nhops - 1];
+}
+
+static int ssh_fd_op(void *ctx)
+{
+    hb_ssh *h = ctx;
+    return target_hop(h)->sock;
+}
+
+static ssize_t ssh_read_op(void *ctx, char *buf, size_t len)
+{
+    hb_ssh *h = ctx;
+    hop *hp = target_hop(h);
+    ssize_t n;
+
+    if (!hp->chan) {
+        errno = EIO;
+        return -1;
+    }
+    n = libssh2_channel_read(hp->chan, buf, len);
+    if (n == LIBSSH2_ERROR_EAGAIN) {
+        n = libssh2_channel_read_stderr(hp->chan, buf, len);
+        if (n == LIBSSH2_ERROR_EAGAIN) {
+            errno = EAGAIN;
+            return -1;
+        }
+    }
+    if (n > 0)
+        return n;
+    if (n == 0) {
+        if (libssh2_channel_eof(hp->chan))
+            return 0;
+        errno = EAGAIN;
+        return -1;
+    }
+    /* 真错误 */
+    if (!libssh2_channel_eof(hp->chan))
+        h->disconnected = true;
+    errno = EIO;
+    return -1;
+}
+
+static ssize_t ssh_write_op(void *ctx, const char *buf, size_t len)
+{
+    hb_ssh *h = ctx;
+    hop *hp = target_hop(h);
+    ssize_t n;
+
+    if (!hp->chan) {
+        errno = EIO;
+        return -1;
+    }
+    n = libssh2_channel_write(hp->chan, buf, len);
+    if (n == LIBSSH2_ERROR_EAGAIN) {
+        errno = EAGAIN;
+        return -1;
+    }
+    if (n < 0) {
+        h->disconnected = true;
+        errno = EIO;
+        return -1;
+    }
+    return n;
+}
+
+static int ssh_resize_op(void *ctx, int rows, int cols)
+{
+    hb_ssh *h = ctx;
+    hop *hp = target_hop(h);
+    int rc, i;
+    if (!hp->chan)
+        return -1;
+    for (i = 0; i < 20; i++) {
+        rc = libssh2_channel_request_pty_size_ex(hp->chan, cols, rows, 0, 0);
+        if (rc != LIBSSH2_ERROR_EAGAIN)
+            break;
+        usleep(20000);
+    }
+    return rc == 0 ? 0 : -1;
+}
+
+static bool ssh_poll_exit_op(void *ctx, int *code)
+{
+    hb_ssh *h = ctx;
+    hop *hp = target_hop(h);
+
+    if (h->disconnected && !h->disconnect_emitted) {
+        h->disconnect_emitted = true;
+        set_err(h, "session/channel terminated unexpectedly");
+        emit_error(h, HB_SSH_ERR_DISCONNECTED, "连接已断开");
+    }
+    if (h->disconnected) {
+        *code = -1;
+        return true;
+    }
+    if (!hp->chan)
+        return false;
+    if (!libssh2_channel_eof(hp->chan))
+        return false;
+    *code = libssh2_channel_get_exit_status(hp->chan);
+    return true;
+}
+
+static void ssh_close_op(void *ctx)
+{
+    hb_ssh *h = ctx;
+    hop *hp = target_hop(h);
+    if (hp->sock >= 0)
+        shutdown(hp->sock, SHUT_RDWR);
+}
+
+static const char *ssh_exit_text_op(void *ctx)
+{
+    hb_ssh *h = ctx;
+    return h->disconnected ? "连接已断开" : "连接已关闭 · SSH channel EOF";
+}
+
+static int ssh_tick_op(void *ctx)
+{
+    hb_ssh *h = ctx;
+    int64_t now, left;
+    int next = 0;
+
+    if (!h->ka_next)
+        return -1;
+    now = hb_now_ms();
+    if (now >= h->ka_next) {
+        if (libssh2_keepalive_send(target_hop(h)->sess, &next) == 0 && next > 0)
+            h->ka_next = now + (int64_t)next * 1000;
+        else
+            h->ka_next = now + (int64_t)h->keepalive_s * 1000;
+    }
+    left = h->ka_next - now;
+    if (left < 50)
+        left = 50;
+    if (left > 3600000)
+        left = 3600000;
+    return (int)left;
+}
+
+/* ------------------------------ 释放 ------------------------------ */
+
+static void pump_stop(pump_t *p)
+{
+    if (!p->started)
+        return;
+    p->stop = true;
+    shutdown(p->pair, SHUT_RDWR);
+    pthread_join(p->th, NULL);
+    p->started = false;
+    close(p->pair);
+    p->pair = -1;
+}
+
+static void hop_teardown(hb_ssh *h, size_t i)
+{
+    hop *hp = &h->hops[i];
+    (void)h;
+    if (hp->pump_on)
+        pump_stop(&hp->pump);
+    if (hp->chan) {
+        libssh2_channel_close(hp->chan);
+        libssh2_channel_free(hp->chan);
+        hp->chan = NULL;
+    }
+    if (hp->sess) {
+        libssh2_session_disconnect_ex(hp->sess, SSH_DISCONNECT_BY_APPLICATION,
+                                      "", "");
+        libssh2_session_free(hp->sess);
+        hp->sess = NULL;
+    }
+    if (hp->sock >= 0) {
+        close(hp->sock);
+        hp->sock = -1;
+    }
+}
+
+static void ssh_destroy_op(void *ctx)
+{
+    hb_ssh *h = ctx;
+    size_t i;
+    if (!h)
+        return;
+    /* 内 → 外依次拆除（先停靠外的泵） */
+    for (i = h->nhops; i > 0; i--)
+        hop_teardown(h, i - 1);
+    for (i = 0; i < h->nhops; i++)
+        hop_cfg_free(&h->hops[i].cfg);
+    for (i = 0; i < h->nknown; i++)
+        free(h->known[i]);
+    free(h->known);
+    free(h->term);
+    free(h->command);
+    if (h->env) {
+        for (i = 0; h->env[i]; i++)
+            free(h->env[i]);
+        free(h->env);
+    }
+    free(h->hops);
+    free(h);
+}
+
+/* ------------------------------ connect ------------------------------ */
+
+static int ssh_connect_op(void *ctx, hb_session *s)
+{
+    hb_ssh *h = ctx;
+    size_t i;
+    int rc;
+
+    h->s = s;
+    for (i = 0; i < h->nhops; i++) {
+        rc = hop_up(h, i);
+        if (rc)
+            return -1;
+    }
+    return target_shell(h, target_hop(h),
+                        hb_now_ms() + HANDSHAKE_MS) ? -1 : 0;
+}
+
+/* ------------------------------ 构造 ------------------------------ */
+
+static bool hop_cfg_copy(c_hop *dst, const hb_ssh_hop *src)
+{
+    memset(dst, 0, sizeof *dst);
+    dst->host = xstrdup(src->host);
+    dst->port = src->port > 0 ? src->port : 22;
+    dst->user = xstrdup(src->user);
+    dst->auth = src->auth;
+    dst->password = hb_secret_strdup(src->password);
+    dst->privkey = hb_secret_strdup(src->privkey);
+    dst->identity_file = xstrdup(src->identity_file);
+    dst->passphrase = hb_secret_strdup(src->passphrase);
+    dst->label = xstrdup(src->label);
+    if (!dst->host || !dst->user)
+        return false;
+    return true;
+}
+
+hb_session *hb_session_new_ssh(const hb_ssh_opts *opts,
+                               int rows, int cols, int scrollback_lines)
+{
+    hb_ssh *h;
+    hb_session_transport tr;
+    size_t i;
+
+    if (!opts || !opts->target.host || !opts->target.user)
+        return NULL;
+    h = calloc(1, sizeof *h);
+    if (!h)
+        return NULL;
+    h->nhops = opts->njumps + 1;
+    h->hops = calloc(h->nhops, sizeof *h->hops);
+    if (!h->hops) {
+        free(h);
+        return NULL;
+    }
+    h->timeout_ms = (opts->connect_timeout_s > 0 ? opts->connect_timeout_s : 15)
+                    * 1000;
+    h->keepalive_s = opts->keepalive_s;
+    h->term = xstrdup(opts->term ? opts->term : "xterm-256color");
+    h->command = xstrdup(opts->command);
+    h->rows = rows;
+    h->cols = cols;
+    for (i = 0; i < h->nhops; i++)
+        h->hops[i].sock = -1;
+
+    /* 跳板（外→内）+ 目标 */
+    for (i = 0; i < opts->njumps; i++) {
+        hop *hp = &h->hops[i];
+        if (!hop_cfg_copy(&hp->cfg, &opts->jumps[i]))
+            goto fail;
+        hp->mark = 'J';
+        snprintf(hp->pfx, sizeof hp->pfx, "[跳板 %zu/%zu %s] ", i + 1,
+                 opts->njumps,
+                 opts->jumps[i].label ? opts->jumps[i].label
+                                      : opts->jumps[i].host);
+    }
+    if (!hop_cfg_copy(&h->hops[h->nhops - 1].cfg, &opts->target))
+        goto fail;
+    h->hops[h->nhops - 1].mark = 'T';
+
+    /* known_hosts 行拷贝 */
+    h->nknown = opts->nknown;
+    if (h->nknown) {
+        h->known = calloc(h->nknown, sizeof *h->known);
+        if (!h->known)
+            goto fail;
+        for (i = 0; i < h->nknown; i++) {
+            h->known[i] = xstrdup(opts->known_lines[i]);
+            if (!h->known[i])
+                goto fail;
+        }
+    }
+    /* env 数组拷贝 */
+    if (opts->env) {
+        size_t n = 0;
+        while (opts->env[n])
+            n++;
+        h->env = calloc(n + 1, sizeof *h->env);
+        if (!h->env)
+            goto fail;
+        for (i = 0; i < n; i++)
+            h->env[i] = xstrdup(opts->env[i]);
+    }
+
+    memset(&tr, 0, sizeof tr);
+    tr.ctx = h;
+    tr.fd = ssh_fd_op;
+    tr.read = ssh_read_op;
+    tr.write = ssh_write_op;
+    tr.resize = ssh_resize_op;
+    tr.poll_exit = ssh_poll_exit_op;
+    tr.close = ssh_close_op;
+    tr.destroy = ssh_destroy_op;
+    tr.tick = h->keepalive_s > 0 ? ssh_tick_op : NULL;
+    tr.exit_text = ssh_exit_text_op;
+    tr.connect = ssh_connect_op;
+
+    {
+        hb_session *s = hb_session_new_transport(&tr, rows, cols,
+                                                 scrollback_lines);
+        if (!s)
+            goto fail;
+        return s;
+    }
+fail:
+    ssh_destroy_op(h);
+    return NULL;
+}

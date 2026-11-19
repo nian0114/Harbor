@@ -30,13 +30,27 @@ typedef enum {
     HB_SESS_EV_CONNECTED,
     HB_SESS_EV_EXIT,        /* code=退出码, text=原因 */
     HB_SESS_EV_ERROR,       /* code=错误类别, text=人类可读信息 */
+    /* 主机密钥确认（TOFU/MITM）：
+     *   code  0=未知主机，1=密钥已变更
+     *   text  "host:port"
+     *   text2 "ssh-ed25519 SHA256:xxxx"（算法名 + 指纹）
+     *   extra 第 1 行 = 可直接存入 known_hosts 的完整行；
+     *         其余行 = OpenSSH `ssh-keygen -lv` 同款 randomart 框。
+     * 连接线程挂起等 hb_session_hostkey_reply。 */
+    HB_SESS_EV_HOSTKEY,
+    /* 交互式输入请求：
+     *   code  0=密码，1=私钥口令（passphrase）
+     *   text  提示语
+     * 连接线程挂起等 hb_session_prompt_reply（NULL = 取消）。 */
+    HB_SESS_EV_PROMPT,
 } hb_sess_ev_type;
 
 typedef struct {
     hb_sess_ev_type type;
-    char   mark;
+    char   mark;            /* 0 / 'J' 跳板跳 / 'T' 目标 */
     int    code;
     char  *text, *text2;    /* owned；hb_sess_event_clear 释放 */
+    char  *extra;           /* owned；HOSTKEY 的 known_hosts 行 + randomart */
     int64_t ts_ms;
 } hb_sess_event;
 
@@ -59,6 +73,10 @@ void hb_session_paste(hb_session *s, const char *utf8);
 void hb_session_resize(hb_session *s, int rows, int cols);
 
 bool hb_session_alive(hb_session *s);
+/* HOSTKEY 事件应答：accept 是否信任并继续（未知=TOFU 记入，变更=强制继续）。 */
+void hb_session_hostkey_reply(hb_session *s, bool accept);
+/* PROMPT 事件应答：secret 会复制进锁定内存并在用完即擦；NULL = 取消连接。 */
+void hb_session_prompt_reply(hb_session *s, const char *secret);
 void hb_session_close(hb_session *s);   /* 异步：请线程挂断，随后出 EXIT 事件 */
 void hb_session_free(hb_session *s);    /* join 线程；close 与否都安全 */
 

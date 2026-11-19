@@ -23,3 +23,8 @@ test_session = executable('test_session', 'test_session.c',
     dependencies: harbor_core_dep,
 )
 test('session', test_session)
+
+test_ssh = executable('test_ssh', 'test_ssh.c',
+    dependencies: harbor_core_dep,
+)
+test('ssh', test_ssh, timeout: 60)

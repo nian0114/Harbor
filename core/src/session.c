@@ -41,6 +41,13 @@ struct hb_session {
     bool exited;
     int  exit_code;
 
+    /* 应答管道（HOSTKEY / PROMPT）：连接线程阻塞等待 UI 回复 */
+    pthread_cond_t reply_cv;
+    int  reply_kind;        /* 0=无等待, HB__REPLY_* */
+    bool reply_done;
+    int  reply_accept;      /* HOSTKEY：1 接受 0 拒绝 */
+    char *reply_secret;     /* PROMPT：sodium_malloc 的回复，NULL=取消 */
+
     hb_session_tap_fn tap;
     void *tap_ud;
 };
@@ -51,7 +58,8 @@ void hb_sess_event_clear(hb_sess_event *ev)
 {
     free(ev->text);
     free(ev->text2);
-    ev->text = ev->text2 = NULL;
+    free(ev->extra);
+    ev->text = ev->text2 = ev->extra = NULL;
 }
 
 static char *xstrndup(const char *s, size_t n)
@@ -67,8 +75,9 @@ static char *xstrndup(const char *s, size_t n)
     return p;
 }
 
-void hb__session_emit(hb_session *s, hb_sess_ev_type type, char mark, int code,
-                      const char *text, const char *text2)
+void hb__session_emit_ex(hb_session *s, hb_sess_ev_type type, char mark,
+                         int code, const char *text, const char *text2,
+                         const char *extra)
 {
     ev_node *n;
     char w = 'e';
@@ -82,6 +91,7 @@ void hb__session_emit(hb_session *s, hb_sess_ev_type type, char mark, int code,
     n->ev.code = code;
     n->ev.text = text ? xstrndup(text, strlen(text)) : NULL;
     n->ev.text2 = text2 ? xstrndup(text2, strlen(text2)) : NULL;
+    n->ev.extra = extra ? xstrndup(extra, strlen(extra)) : NULL;
     n->ev.ts_ms = hb_now_ms();
 
     pthread_mutex_lock(&s->mu);
@@ -90,6 +100,7 @@ void hb__session_emit(hb_session *s, hb_sess_ev_type type, char mark, int code,
             pthread_mutex_unlock(&s->mu);
             free(n->ev.text);
             free(n->ev.text2);
+            free(n->ev.extra);
             free(n);
             return;
         }
@@ -102,6 +113,96 @@ void hb__session_emit(hb_session *s, hb_sess_ev_type type, char mark, int code,
     s->ev_tail = n;
     pthread_mutex_unlock(&s->mu);
     if (write(s->ev_w, &w, 1) < 0) { /* 忽略 EAGAIN */ }
+}
+
+void hb__session_emit(hb_session *s, hb_sess_ev_type type, char mark, int code,
+                      const char *text, const char *text2)
+{
+    hb__session_emit_ex(s, type, mark, code, text, text2, NULL);
+}
+
+/* ------------------------------ 应答管道 ------------------------------ */
+
+void hb__session_reply_reset(hb_session *s, int kind)
+{
+    pthread_mutex_lock(&s->mu);
+    s->reply_kind = kind;
+    s->reply_done = false;
+    s->reply_accept = 0;
+    if (s->reply_secret) {
+        hb_secret_free(s->reply_secret);
+        s->reply_secret = NULL;
+    }
+    pthread_mutex_unlock(&s->mu);
+}
+
+int hb__session_reply_wait(hb_session *s, int *accept_out, char **sec_out)
+{
+    int kind, r = 0;
+    pthread_mutex_lock(&s->mu);
+    kind = s->reply_kind;
+    while (!s->reply_done && !s->want_close)
+        pthread_cond_wait(&s->reply_cv, &s->mu);
+    if (s->reply_done && !s->want_close) {
+        r = 1;
+        if (kind == HB__REPLY_HOSTKEY && accept_out)
+            *accept_out = s->reply_accept;
+        if (kind == HB__REPLY_PROMPT && sec_out) {
+            *sec_out = s->reply_secret;
+            s->reply_secret = NULL;      /* 移交所有权 */
+        }
+    }
+    if (s->reply_secret) {
+        hb_secret_free(s->reply_secret); /* 取消路径：清掉未取走的回复 */
+        s->reply_secret = NULL;
+    }
+    s->reply_kind = 0;
+    s->reply_done = false;
+    pthread_mutex_unlock(&s->mu);
+    return r;
+}
+
+void hb_session_hostkey_reply(hb_session *s, bool accept)
+{
+    if (!s)
+        return;
+    pthread_mutex_lock(&s->mu);
+    if (s->reply_kind == HB__REPLY_HOSTKEY && !s->reply_done) {
+        s->reply_accept = accept ? 1 : 0;
+        s->reply_done = true;
+        pthread_cond_broadcast(&s->reply_cv);
+    }
+    pthread_mutex_unlock(&s->mu);
+}
+
+void hb_session_prompt_reply(hb_session *s, const char *secret)
+{
+    char *cp = NULL;
+    if (!s)
+        return;
+    if (secret)
+        cp = hb_secret_strdup(secret);
+    pthread_mutex_lock(&s->mu);
+    if (s->reply_kind == HB__REPLY_PROMPT && !s->reply_done) {
+        if (s->reply_secret)
+            hb_secret_free(s->reply_secret);
+        s->reply_secret = cp;   /* NULL = 用户取消 */
+        s->reply_done = true;
+        pthread_cond_broadcast(&s->reply_cv);
+        cp = NULL;
+    }
+    pthread_mutex_unlock(&s->mu);
+    if (cp)
+        hb_secret_free(cp);
+}
+
+bool hb__session_cancelled(hb_session *s)
+{
+    bool c;
+    pthread_mutex_lock(&s->mu);
+    c = s->want_close;
+    pthread_mutex_unlock(&s->mu);
+    return c;
 }
 
 int hb_session_event_fd(hb_session *s)
@@ -260,10 +361,10 @@ static void *sess_thread(void *arg)
     if (s->tr.connect) {
         int rc = s->tr.connect(s->tr.ctx, s);
         if (rc != 0) {
-            hb__session_emit(s, HB_SESS_EV_ERROR, 0, rc, "connect failed", NULL);
-            hb__session_emit(s, HB_SESS_EV_EXIT, 0, rc, "connect failed", NULL);
+            /* transport 已经在 connect 里 emit 过具体 ERROR */
+            hb__session_emit(s, HB_SESS_EV_EXIT, 0, -1, "connect failed", NULL);
             s->exited = true;
-            s->exit_code = rc;
+            s->exit_code = -1;
             free(buf);
             return NULL;
         }
@@ -281,7 +382,7 @@ static void *sess_thread(void *arg)
         pf[1].fd = s->tr.fd(s->tr.ctx);
         pf[1].events = POLLIN | (sess_pending_write(s) ? POLLOUT : 0);
         pf[1].revents = 0;
-        nfd = poll(pf, 2, -1);
+        nfd = poll(pf, 2, s->tr.tick ? s->tr.tick(s->tr.ctx) : -1);
         if (nfd < 0) {
             if (errno == EINTR)
                 continue;
@@ -386,7 +487,10 @@ static void *sess_thread(void *arg)
     s->exited = true;
     s->exit_code = code;
     pthread_mutex_unlock(&s->mu);
-    hb__session_emit(s, HB_SESS_EV_EXIT, 0, code, "process exited", NULL);
+    hb__session_emit(s, HB_SESS_EV_EXIT, 0, code,
+                     s->tr.exit_text ? s->tr.exit_text(s->tr.ctx)
+                                     : "process exited",
+                     NULL);
     free(buf);
     return NULL;
 }
@@ -417,6 +521,7 @@ hb_session *hb_session_new_transport(hb_session_transport *tr,
     hb_vt_set_event_fn(s->vt, sess_vt_event, s);
 
     pthread_mutex_init(&s->mu, NULL);
+    pthread_cond_init(&s->reply_cv, NULL);
     s->pend_rows = 0;
     s->exit_code = -1;
 
@@ -565,6 +670,7 @@ void hb_session_close(hb_session *s)
         return;
     pthread_mutex_lock(&s->mu);
     s->want_close = true;
+    pthread_cond_broadcast(&s->reply_cv);   /* 唤醒阻塞在应答等待的连接线程 */
     pthread_mutex_unlock(&s->mu);
     if (write(s->cmd_w, &w, 1) < 0) {}
 }
@@ -594,12 +700,16 @@ void hb_session_free(hb_session *s)
         s->ev_head = n->next;
         free(n->ev.text);
         free(n->ev.text2);
+        free(n->ev.extra);
         free(n);
     }
     close(s->cmd_r); close(s->cmd_w);
     close(s->ev_r);  close(s->ev_w);
     free(s->wq);
+    if (s->reply_secret)
+        hb_secret_free(s->reply_secret);
     hb_vt_free(s->vt);
+    pthread_cond_destroy(&s->reply_cv);
     pthread_mutex_destroy(&s->mu);
     free(s);
 }
