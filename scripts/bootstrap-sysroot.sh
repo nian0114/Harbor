@@ -19,7 +19,7 @@ SEEDS=(
     libssh2-1-dev libssl-dev libsodium-dev libsqlite3-dev
     libvterm-dev libvncserver-dev
     freerdp3-dev libwinpr3-dev
-    libjson-glib-dev libsoup-3.0-dev
+    libjson-glib-dev libsoup-3.0-dev libsecret-1-dev
     libglib2.0-dev libglib2.0-dev-bin
     xvfb xauth xfonts-base
 )
@@ -27,7 +27,7 @@ SEEDS=(
 APT_LINE="sudo apt install build-essential pkg-config meson ninja-build \
 libgtk-4-dev libadwaita-1-dev libvte-2.91-dev libssh2-1-dev libssl-dev \
 libsodium-dev libsqlite3-dev libvterm-dev libvncserver-dev freerdp3-dev \
-libwinpr3-dev libjson-glib-dev libsoup-3.0-dev libglib2.0-dev \
+libwinpr3-dev libjson-glib-dev libsoup-3.0-dev libsecret-1-dev libglib2.0-dev \
 xvfb xauth"
 
 echo "==> 若本机可用 root，等价做法是:"
@@ -46,14 +46,12 @@ mapfile -t PKGS < <(
 )
 echo "    候选包: ${#PKGS[@]}"
 
-echo "==> 下载 .deb 到 $DEBCACHE（已存在的跳过）..."
+echo "==> 下载 .deb 到 $DEBCACHE（apt 自身会跳过已下载的文件）..."
 cd "$DEBCACHE"
 failed=()
 for p in "${PKGS[@]}"; do
     # 虚包没有候选版本，跳过
     apt-cache policy "$p" 2>/dev/null | grep -q 'Candidate: [0-9]' || continue
-    fname=$(apt-get download --print-uris "$p" 2>/dev/null | awk '{print $2}' | tr -d "'")
-    [ -n "$fname" ] && [ -f "$fname" ] && continue
     apt-get download "$p" >/dev/null 2>&1 || failed+=("$p")
 done
 if ((${#failed[@]})); then
