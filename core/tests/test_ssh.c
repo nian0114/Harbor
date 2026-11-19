@@ -756,6 +756,56 @@ static void test_jump_bulk(void)
     hb_session_free(s);
 }
 
+/* 8c. AUTO + ssh-agent：无配置密钥时经 agent 直通，无任何提示 */
+static void test_agent(void)
+{
+    hb_ssh_opts o = base_opts();
+    hb_session *s;
+    drv d;
+    const char *kl[] = { fix_khline };
+    char cmd[9200];
+    char *out;
+    int agent_pid = 0;
+
+    if (access("/usr/bin/ssh-agent", X_OK) != 0 ||
+        access("/usr/bin/ssh-add", X_OK) != 0)
+        return;   /* 无 agent 工具则跳过本项 */
+
+    out = run_out("/usr/bin/ssh-agent -a %s/agent.sock", fix_dir);
+    CHECK(out != NULL);
+    if (out) {
+        const char *p = strstr(out, "SSH_AGENT_PID=");
+        if (p)
+            agent_pid = atoi(p + 14);
+    }
+    snprintf(cmd, sizeof cmd,
+             "SSH_AUTH_SOCK=%s/agent.sock /usr/bin/ssh-add %s/client "
+             ">/dev/null 2>&1",
+             fix_dir, fix_dir);
+    CHECK(system(cmd) == 0);
+
+    o.known_lines = kl;
+    o.nknown = 1;
+    o.target.auth = HB_SSH_AUTH_AUTO;
+    o.target.privkey = NULL;
+    o.command = "echo agent-ok; exit 0";
+    snprintf(cmd, sizeof cmd, "%s/agent.sock", fix_dir);
+    setenv("SSH_AUTH_SOCK", cmd, 1);
+    drv_init(&d);
+    s = hb_session_new_ssh(&o, 24, 80, 200);
+    CHECK(s != NULL);
+    if (s) {
+        CHECK(drv_run(s, &d, 10000));
+        CHECK_EQ_INT(d.connected, 1);
+        CHECK_EQ_INT(d.exit_code, 0);
+        CHECK_EQ_INT(d.prompt_n, 0);   /* agent 直通：无密码/口令提示 */
+        hb_session_free(s);
+    }
+    unsetenv("SSH_AUTH_SOCK");
+    if (agent_pid > 0)
+        kill((pid_t)agent_pid, SIGTERM);
+}
+
 /* 9. 交互 shell：TERM / resize / exit */
 static void test_interactive(void)
 {
@@ -967,6 +1017,7 @@ int main(void)
     test_refused_resolve();
     test_proxyjump();
     test_jump_bulk();
+    test_agent();
     test_interactive();
     test_cancel_connect();
     test_cancel_during_hostkey();

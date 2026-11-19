@@ -1106,30 +1106,47 @@ static int do_auth(hb_ssh *h, hop *hp, int64_t dl)
             goto auth_fail;
     }
 
-    /* 密钥：KEY → privkey → identity_file；AUTO → identity_file → privkey */
+    /* 密钥：KEY → privkey → identity_file；
+     * AUTO → identity_file → privkey → 默认 ~/.ssh/id_* */
     if ((c->auth == HB_SSH_AUTH_KEY || c->auth == HB_SSH_AUTH_AUTO) &&
         (!methods || strstr(methods, "publickey"))) {
-        const char *priv = NULL, *file = NULL;
+        const char *src_priv[2] = { NULL, NULL };
+        const char *src_file[2] = { NULL, NULL };
+        int nsrc = 0, si;
         if (c->auth == HB_SSH_AUTH_KEY) {
-            priv = c->privkey;
-            file = c->identity_file;
+            src_priv[nsrc++] = c->privkey;
+            src_file[nsrc++] = c->identity_file;
         } else {
-            file = c->identity_file;
-            priv = file ? NULL : c->privkey;   /* AUTO：file 先，privkey 兜底 */
+            src_file[nsrc++] = c->identity_file;
+            src_priv[nsrc++] = c->privkey;
         }
-        if (file || priv) {
-            r = auth_key_source(h, hp, priv, file, &dl);
+        for (si = 0; si < nsrc; si++) {
+            if (!src_priv[si] && !src_file[si])
+                continue;
+            r = auth_key_source(h, hp, src_priv[si], src_file[si], &dl);
             if (r == 0)
                 return 0;
             if (r < 0)
                 return r;
         }
-        if (c->auth == HB_SSH_AUTH_AUTO && file && c->privkey) {
-            r = auth_key_source(h, hp, c->privkey, NULL, &dl);
-            if (r == 0)
-                return 0;
-            if (r < 0)
-                return r;
+        /* AUTO：未配置的默认身份文件 ~/.ssh/id_{ed25519,ecdsa,rsa} */
+        if (c->auth == HB_SSH_AUTH_AUTO) {
+            static const char *defs[] = {
+                "id_ed25519", "id_ecdsa", "id_rsa"
+            };
+            const char *home = getenv("HOME");
+            size_t di;
+            for (di = 0; home && di < sizeof defs / sizeof defs[0]; di++) {
+                char path[1080];
+                snprintf(path, sizeof path, "%s/.ssh/%s", home, defs[di]);
+                if (access(path, R_OK) != 0)
+                    continue;
+                r = auth_key_source(h, hp, NULL, path, &dl);
+                if (r == 0)
+                    return 0;
+                if (r < 0)
+                    return r;
+            }
         }
         if (c->auth == HB_SSH_AUTH_KEY)
             goto auth_fail;
