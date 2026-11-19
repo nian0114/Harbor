@@ -6,25 +6,54 @@
 
 #include <vterm.h>
 
-/* ------------------------- scrollback ring ------------------------- */
+/* ------------------------------------------------------------------ */
+/* 屏幕数据模型：不用 libvterm 的 VTermScreen（其整屏 memmove 是性能      */
+/* 瓶颈）。改用 VTermState 回调 + 自建行指针屏：滚动只是指针旋转，          */
+/* 顶部滚出行直接把行缓冲移入 scrollback ring（零 cell 拷贝）。            */
+/* ------------------------------------------------------------------ */
 
 typedef struct {
     hb_cell *cells;
-    int      cols;    /* cells 分配的列数（ring 满时复用缓冲） */
-    bool     wrapped; /* 本行软续到下一行 */
+    int      cap;     /* cells 容量（≥ cols） */
+    int      used;    /* cells[0,used) 有效；[used,..) 视作 fill 空白 */
+    hb_color fill_fg, fill_bg; /* 清空/滚动入空行的背景（BCE） */
+    bool     wrapped; /* 本行是上一行的软续行（lineinfo.continuation） */
+} row_t;
+
+/* scrollback 描述符：内容在 sb_arena 里（追加式字节环，写点始终热） */
+typedef struct {
+    size_t   off;        /* arena 内 cell 偏移 */
+    int      n;          /* 有效 cell 数（= 行的 used） */
+    hb_color fg, bg;     /* [n,cols) 空白区颜色（入环时的 fill） */
+    bool     wraps_next; /* 本行内容软续到其后一行（入环时记录） */
 } sb_line;
+
+typedef struct {
+    uint16_t attrs;
+    hb_color fg, bg;
+} pen_t;
 
 typedef enum { SCAN_TEXT, SCAN_ESC, SCAN_CSI, SCAN_PRIV } scan_state;
 
 struct hb_vt {
-    VTerm       *vt;
-    VTermScreen *screen;
-    VTermState  *state;
+    VTerm      *vt;
+    VTermState *state;
     int rows, cols;
 
-    /* scrollback 环形缓冲：sb[sb_start] 最旧 */
+    row_t **prim;      /* 主屏 rows 个行指针 */
+    row_t **alt;       /* alt 屏 */
+    row_t **buf;       /* 当前活动屏 = prim 或 alt */
+    row_t **tmp;       /* 滚动指针旋转暂存，容量 ≥ rows */
+    int     tmp_cap;
+
+    pen_t pen;         /* 当前 erase/putglyph 用笔（BCE） */
+    int   pg_row;      /* 最近一次 putglyph 的行（wrapped 惰性同步） */
+
+    /* scrollback 环形缓冲：sb[sb_start] 最旧；内容在 arena */
     sb_line *sb;
     int      sb_cap, sb_len, sb_start;
+    hb_cell *sb_arena;   /* 追加式 cell 环；写点总在尾部（热） */
+    size_t   sb_acap, sb_atail;
     uint64_t total_pushed; /* 见 hb_vt_total_pushed */
 
     pthread_mutex_t lock; /* 递归 */
@@ -35,7 +64,7 @@ struct hb_vt {
     uint64_t gen;
     char    *title;
     bool     osc52_allowed;
-    bool     alt;
+    bool     alt_active;
     int      mouse_mode;
     int      cursor_shape;
     bool     cursor_visible, cursor_blink;
@@ -75,7 +104,7 @@ static void emit(hb_vt *v, hb_vt_ev_type type, char mark, int code,
         v->ev_fn(&ev, v->ev_ud);
 }
 
-/* ------------------------- 颜色/属性转换 ------------------------- */
+/* ------------------------- 颜色/空白格 ------------------------- */
 
 static hb_color conv_color(const VTermColor *c, bool is_fg)
 {
@@ -100,87 +129,187 @@ static hb_color conv_color(const VTermColor *c, bool is_fg)
     return out;
 }
 
-static uint16_t conv_attrs(const VTermScreenCellAttrs *a)
+/* 空白格：BCE —— 用当前 pen 的前/背景，attrs 清零 */
+static hb_cell blank_cell(const hb_vt *v)
 {
-    uint16_t m = 0;
-    if (a->bold)      m |= HB_ATTR_BOLD;
-    if (a->italic)    m |= HB_ATTR_ITALIC;
-    if (a->underline == VTERM_UNDERLINE_SINGLE) m |= HB_ATTR_UNDERLINE;
-    if (a->underline == VTERM_UNDERLINE_DOUBLE) m |= HB_ATTR_DUNDERLINE;
-    if (a->underline == VTERM_UNDERLINE_CURLY)  m |= HB_ATTR_CURLY;
-    if (a->blink)     m |= HB_ATTR_BLINK;
-    if (a->reverse)   m |= HB_ATTR_REVERSE;
-    if (a->conceal)   m |= HB_ATTR_CONCEAL;
-    if (a->strike)    m |= HB_ATTR_STRIKE;
-    return m;
+    hb_cell c;
+    memset(&c, 0, sizeof c);
+    c.width = 1;
+    c.fg = v->pen.fg;
+    c.bg = v->pen.bg;
+    return c;
 }
 
-static void conv_cell(const VTermScreenCell *sc, hb_cell *hc)
+static row_t *row_new(int cols)
 {
-    memset(hc, 0, sizeof *hc);
-    memcpy(hc->chars, sc->chars, sizeof hc->chars);
-    hc->width = (uint8_t)sc->width;
-    hc->attrs = conv_attrs(&sc->attrs);
-    hc->fg = conv_color(&sc->fg, true);
-    hc->bg = conv_color(&sc->bg, false);
+    row_t *r = calloc(1, sizeof *r);
+    int cap = cols > 16 ? cols : 16;
+    if (!r)
+        return NULL;
+    r->cells = calloc((size_t)cap, sizeof *r->cells);
+    if (!r->cells) {
+        free(r);
+        return NULL;
+    }
+    r->cap = cap;
+    r->fill_fg.type = HB_COLOR_DEFAULT_FG;
+    r->fill_bg.type = HB_COLOR_DEFAULT_BG;
+    return r;
 }
 
-/* ------------------------- scrollback ------------------------- */
-
-static void sb_push(hb_vt *v, const VTermScreenCell *cells, int cols)
+static void row_free(row_t *r)
 {
-    sb_line *l;
-    const VTermLineInfo *li = NULL;
+    if (!r)
+        return;
+    free(r->cells);
+    free(r);
+}
+
+/* 保证容量 ≥ need；[cap,ncap) 无需初始化（used 之外不读） */
+static void row_ensure(row_t *r, int need)
+{
+    int ncap;
+    if (need <= r->cap)
+        return;
+    ncap = r->cap;
+    while (ncap < need)
+        ncap *= 2;
+    {
+        hb_cell *nc = realloc(r->cells, (size_t)ncap * sizeof *nc);
+        if (!nc)
+            return;
+        r->cells = nc;
+        r->cap = ncap;
+    }
+}
+
+/* 逻辑清空：不写字格。used=0 且记录 fill 颜色（BCE）。
+ * 之后 [0,used) 不变式保证读取安全：写入跨过 used 时先补 fill。 */
+static void row_blank(hb_vt *v, row_t *r)
+{
+    r->used = 0;
+    r->wrapped = false;
+    r->fill_fg = v->pen.fg;
+    r->fill_bg = v->pen.bg;
+}
+
+/* 写入到 col 之前若超过 used，先把 [used,col) 补成 fill 空白 */
+static void row_gap(hb_vt *v, row_t *r, int upto)
+{
+    hb_cell e;
+    int i;
+    (void)v;
+    if (upto <= r->used)
+        return;
+    if (upto > r->cap)
+        upto = r->cap;
+    memset(&e, 0, sizeof e);
+    e.width = 1;
+    e.fg = r->fill_fg;
+    e.bg = r->fill_bg;
+    for (i = r->used; i < upto; i++)
+        r->cells[i] = e;
+    r->used = upto;
+}
+
+static void fill_range(hb_vt *v, row_t *r, int c0, int c1)
+{
+    hb_cell e = blank_cell(v);
+    int i;
+    if (c0 < 0)
+        c0 = 0;
+    if (c1 > r->cap)
+        c1 = r->cap;
+    if (c0 > r->used)
+        row_gap(v, r, c0);          /* [used,c0) 补成 fill 空白，保持前缀有效 */
+    for (i = c0; i < c1; i++)
+        r->cells[i] = e;
+    if (c1 > r->used)
+        r->used = c1;
+}
+
+/* ------------------------- scrollback ring ------------------------- */
+
+/* 保证 arena 里有 ≥ n 个连续 cell；不够时回卷或逐出最旧描述符 */
+static int sb_reserve(hb_vt *v, int n)
+{
+    size_t free;
+    if (!v->sb_arena)
+        return 0;
+    if ((size_t)n > v->sb_acap)
+        return 0;
+    for (;;) {
+        if (v->sb_len == 0) {
+            free = v->sb_acap - v->sb_atail;
+            if (n <= (int)free)
+                return 1;
+            v->sb_atail = 0;
+            return 1;                  /* 全空：尾部死区后从头写 */
+        }
+        {
+            size_t head = v->sb[v->sb_start].off;
+            if (head > v->sb_atail)
+                free = head - v->sb_atail;
+            else
+                free = v->sb_acap - v->sb_atail;
+            if (n <= (int)free)
+                return 1;
+            if (head <= v->sb_atail) {   /* 尾部不够 → 回卷到 0 */
+                v->sb_atail = 0;
+                continue;
+            }
+            /* head > tail 仍不够 → 逐出最旧 */
+            v->sb_start = (v->sb_start + 1) % v->sb_cap;
+            v->sb_len--;
+        }
+    }
+}
+
+/* 把行内容 memcpy 进 arena 尾部（顺序写，热）。返回 ring 槽位或 NULL。 */
+static void sb_push_row(hb_vt *v, const row_t *row, bool wraps_next)
+{
     int idx;
+    int n = row->used;
 
     if (v->sb_len == v->sb_cap) {
-        /* 丢最旧行：其 cells 缓冲直接给新行复用（写 idx == 被丢槽位） */
         v->sb_start = (v->sb_start + 1) % v->sb_cap;
         v->sb_len--;
     }
+    if (!sb_reserve(v, n))
+        n = 0;
     idx = (v->sb_start + v->sb_len) % v->sb_cap;
-    l = &v->sb[idx];
-    if (!l->cells || l->cols != cols) {
-        free(l->cells);
-        l->cells = malloc((size_t)cols * sizeof *l->cells);
-        if (!l->cells) {
-            l->cols = 0;
-            return;
-        }
-        l->cols = cols;
-    }
-    for (int i = 0; i < cols; i++) {
-        conv_cell(&cells[i], &l->cells[i]);
-        if (i > 0 && cells[i - 1].width == 2)
-            l->cells[i].width = 0;      /* 宽字符尾随格 */
-    }
-    /* 被推走的是旧行 0；其是否续到下一行 = 旧行 1 的 continuation 标记 */
-    if (v->state)
-        li = vterm_state_get_lineinfo(v->state, 1);
-    l->wrapped = li ? li->continuation != 0 : false;
+    v->sb[idx].off = v->sb_atail;
+    v->sb[idx].n = n;
+    v->sb[idx].fg = row->fill_fg;
+    v->sb[idx].bg = row->fill_bg;
+    v->sb[idx].wraps_next = wraps_next;
+    if (n)
+        memcpy(v->sb_arena + v->sb_atail, row->cells,
+               (size_t)n * sizeof *row->cells);
+    v->sb_atail += (size_t)n;
     v->sb_len++;
     v->total_pushed++;
 }
 
-static int sb_pop(hb_vt *v, VTermScreenCell *cells, int cols)
+/* 弹出最新一行到 *row（memcpy 回来）；total_pushed 递减。 */
+static int sb_pop_row(hb_vt *v, row_t *row)
 {
+    int idx, n;
     sb_line *l;
-    int idx, i;
     if (v->sb_len == 0)
         return 0;
     idx = (v->sb_start + v->sb_len - 1) % v->sb_cap;
     l = &v->sb[idx];
-    for (i = 0; i < cols; i++) {
-        memset(&cells[i], 0, sizeof cells[i]);
-        if (i < v->cols)
-            memcpy(cells[i].chars, l->cells[i].chars, sizeof cells[i].chars);
-        /* 属性/颜色：近似还原文本即可（reflow 拉回的主要是字符） */
-        cells[i].width = l->cells[i].width;
-        cells[i].fg.type = VTERM_COLOR_DEFAULT_FG;
-        cells[i].bg.type = VTERM_COLOR_DEFAULT_BG;
-    }
-    free(l->cells);
-    l->cells = NULL;
+    n = l->n;
+    row_ensure(row, n);
+    if (n > row->cap)
+        n = row->cap;
+    if (n)
+        memcpy(row->cells, v->sb_arena + l->off, (size_t)n * sizeof *row->cells);
+    row->used = n;
+    row->fill_fg = l->fg;
+    row->fill_bg = l->bg;
+    row->wrapped = false;
     v->sb_len--;
     v->total_pushed--;
     return 1;
@@ -188,13 +317,15 @@ static int sb_pop(hb_vt *v, VTermScreenCell *cells, int cols)
 
 static void sb_clear(hb_vt *v)
 {
-    for (int i = 0; i < v->sb_len; i++) {
-        int idx = (v->sb_start + i) % v->sb_cap;
-        free(v->sb[idx].cells);
-        v->sb[idx].cells = NULL;
-    }
     v->sb_len = 0;
     v->sb_start = 0;
+    v->sb_atail = 0;
+}
+
+static const sb_line *sb_desc_at(const hb_vt *v, int row) /* row < 0, -1 最新 */
+{
+    int idx = (v->sb_start + v->sb_len + row) % v->sb_cap;
+    return &v->sb[idx];
 }
 
 /* ------------------------- OSC 处理 ------------------------- */
@@ -334,30 +465,351 @@ static const VTermSelectionCallbacks SEL = {
     .query = sel_query,
 };
 
-/* ------------------------- screen 回调 ------------------------- */
+/* ------------------------- VTermState 回调 ------------------------- */
 
-static int cb_damage(VTermRect rect, void *user)
+static int cb_putglyph(VTermGlyphInfo *info, VTermPos pos, void *user)
 {
     hb_vt *v = user;
-    (void)rect;
-    v->gen++;
+    row_t *r;
+    hb_cell *c;
+    int col = pos.col, i, n;
+
+    if (pos.row < 0 || pos.row >= v->rows || col < 0 || col >= v->cols)
+        return 1;
+    r = v->buf[pos.row];
+    if (!r)
+        return 1;
+    if (col + (info->width > 1 ? info->width : 1) > r->cap) {
+        row_ensure(r, col + (info->width > 1 ? info->width : 1));
+        if (col >= r->cap)
+            return 1;
+    }
+
+    /* 写入跨过 used → 先补 fill 空白保持 [0,used) 有效 */
+    if (col > r->used)
+        row_gap(v, r, col);
+
+    /* 覆盖宽字符任一半 → 另一格变孤儿，清成空白 */
+    if (col > 0 && col - 1 < r->used && r->cells[col - 1].width == 2)
+        r->cells[col - 1] = blank_cell(v);
+    if (col < r->used && r->cells[col].width == 2 && col + 1 < r->cap)
+        r->cells[col + 1] = blank_cell(v);
+
+    c = &r->cells[col];
+    memset(c, 0, sizeof *c);
+    n = 0;
+    for (i = 0; info->chars[i] && n < HB_VT_MAX_CHARS; i++, n++)
+        c->chars[n] = info->chars[i];
+    c->width = (uint8_t)(info->width > 0 ? info->width : 1);
+    c->attrs = v->pen.attrs;
+    c->fg = v->pen.fg;
+    c->bg = v->pen.bg;
+
+    if (info->width == 2 && col + 1 < v->cols && col + 1 < r->cap) {
+        /* 尾随格自身可能曾是宽字符头 → 其尾随格成孤儿 */
+        if (col + 2 < r->cap && r->cells[col + 1].width == 2)
+            r->cells[col + 2] = blank_cell(v);
+        memset(&r->cells[col + 1], 0, sizeof r->cells[col + 1]);
+        r->cells[col + 1].width = 0;
+        r->cells[col + 1].fg = v->pen.fg;
+        r->cells[col + 1].bg = v->pen.bg;
+    }
+
+    if (col + info->width > r->used)
+        r->used = col + info->width;
+    if (r->used > v->cols)
+        r->used = v->cols;
+
+    /* state 在 autowrap 时直接写 lineinfo.continuation（不经回调）。
+     * 只有换行（wrap/linefeed 后写行变化）才可能动它，按行变化时同步一次。 */
+    if (pos.row != v->pg_row) {
+        const VTermLineInfo *li = vterm_state_get_lineinfo(v->state, pos.row);
+        r->wrapped = li ? li->continuation != 0 : false;
+        v->pg_row = pos.row;
+    }
+    return 1;
+}
+
+static int cb_movecursor(VTermPos pos, VTermPos oldpos, int visible, void *user)
+{
+    (void)user;
+    (void)pos; (void)oldpos; (void)visible;
+    return 1;
+}
+
+/* 全宽竖滚：行指针旋转；主屏 start_row==0 时顶行移入 scrollback。 */
+static void scroll_full(hb_vt *v, VTermRect rect, int downward)
+{
+    int s = rect.start_row, e = rect.end_row;
+    int h, k, i;
+    bool push;
+
+    if (e > v->rows)
+        e = v->rows;
+    h = e - s;
+    if (h <= 0)
+        return;
+
+    if (v->tmp_cap < v->rows) {
+        row_t **nt = realloc(v->tmp, (size_t)v->rows * sizeof *nt);
+        if (nt) {
+            v->tmp = nt;
+            v->tmp_cap = v->rows;
+        }
+    }
+
+    if (downward > 0) {
+        k = downward < h ? downward : h;
+        push = (s == 0 && v->buf == v->prim);
+        for (i = 0; i < k; i++)
+            v->tmp[i] = v->buf[s + i];
+        memmove(&v->buf[s], &v->buf[s + k], (size_t)(h - k) * sizeof *v->buf);
+        for (i = 0; i < k; i++) {
+            row_t *leaving = v->tmp[i];
+            if (leaving) {
+                if (push) {
+                    /* 被推行是否软续到下一行 = 后继行的 continuation 标记 */
+                    bool wn = (i + 1 < k)
+                        ? (v->tmp[i + 1] && v->tmp[i + 1]->wrapped)
+                        : (k < h && v->buf[s] && v->buf[s]->wrapped);
+                    sb_push_row(v, leaving, wn);
+                }
+                /* 直接复用离开行作新空行：cells 还是热的 */
+                row_blank(v, leaving);
+            }
+            v->buf[e - k + i] = leaving;
+        }
+    } else {
+        k = -downward < h ? -downward : h;
+        /* 向下滚：底行丢弃并复用为新空行 */
+        for (i = 0; i < k; i++)
+            v->tmp[i] = v->buf[e - 1 - i];
+        memmove(&v->buf[s + k], &v->buf[s], (size_t)(h - k) * sizeof *v->buf);
+        for (i = 0; i < k; i++) {
+            row_t *b = v->tmp[i];
+            if (b) {
+                if (b->cap < v->cols)
+                    row_ensure(b, v->cols);
+                row_blank(v, b);
+            }
+            v->buf[s + i] = b;
+        }
+    }
+}
+
+/* 部分宽竖滚 / 横滚 / moverect 的按行 cell 拷贝。 */
+static void cells_move(hb_vt *v, int dst_row, int dst_c0,
+                       int src_row, int src_c0, int n)
+{
+    row_t *dr = v->buf[dst_row];
+    row_t *sr = v->buf[src_row];
+    if (n <= 0 || !dr || !sr)
+        return;
+    row_ensure(dr, dst_c0 + n);
+    row_ensure(sr, src_c0 + n);
+    if (dst_c0 + n > dr->cap)
+        n = dr->cap - dst_c0;
+    if (src_c0 + n > sr->cap)
+        n = sr->cap - src_c0;
+    if (n <= 0)
+        return;
+    /* src 超 used 的尾部是 fill 空白，先物化再拷贝（fill 即语义值） */
+    if (src_c0 + n > sr->used)
+        row_gap(v, sr, src_c0 + n);
+    if (dst_c0 > dr->used)
+        row_gap(v, dr, dst_c0);
+    memmove(&dr->cells[dst_c0], &sr->cells[src_c0],
+            (size_t)n * sizeof *dr->cells);
+    if (dst_c0 + n > dr->used)
+        dr->used = dst_c0 + n;
+}
+
+static int cb_scrollrect(VTermRect rect, int downward, int rightward,
+                         void *user)
+{
+    hb_vt *v = user;
+    int r;
+
+    if (rect.start_row < 0)
+        rect.start_row = 0;
+    if (rect.end_row > v->rows)
+        rect.end_row = v->rows;
+    if (rect.start_col < 0)
+        rect.start_col = 0;
+    if (rect.end_col > v->cols)
+        rect.end_col = v->cols;
+
+    if (rightward == 0 &&
+        rect.start_col == 0 && rect.end_col >= v->cols) {
+        scroll_full(v, rect, downward);
+        return 1;
+    }
+
+    if (rightward != 0) {
+        /* 水平：每行内 [c0,c1) 平移，空出端填空白 */
+        int c0 = rect.start_col, c1 = rect.end_col;
+        int w = c1 - c0;
+        int k = rightward < 0 ? -rightward : rightward;
+        if (k > w)
+            k = w;
+        for (r = rect.start_row; r < rect.end_row; r++) {
+            row_t *row = v->buf[r];
+            if (!row)
+                continue;
+            row_ensure(row, c1);
+            if (c1 > row->used)
+                row_gap(v, row, c1);   /* 先物化 fill 空白，再整体平移 */
+            if (rightward < 0) {   /* libvterm: 负 = 内容右移（ICH） */
+                memmove(&row->cells[c0 + k], &row->cells[c0],
+                        (size_t)(w - k) * sizeof *row->cells);
+                fill_range(v, row, c0, c0 + k);
+            } else {               /* 正 = 内容左移（DCH） */
+                memmove(&row->cells[c0], &row->cells[c0 + k],
+                        (size_t)(w - k) * sizeof *row->cells);
+                fill_range(v, row, c1 - k, c1);
+            }
+            /* used 上估保持正确（区域内容仍在行内） */
+            if (row->used > c0 && row->used < c1)
+                row->used = c1;
+        }
+        return 1;
+    }
+
+    /* 部分宽度竖滚：逐行拷贝 [c0,c1)，空出区填空白 */
+    {
+        int c0 = rect.start_col, c1 = rect.end_col;
+        int n = c1 - c0;
+        int s = rect.start_row, e = rect.end_row;
+        int h = e - s;
+        int k = downward < 0 ? -downward : downward;
+        if (k > h)
+            k = h;
+        if (downward > 0) {
+            for (r = s; r < e - k; r++)
+                cells_move(v, r, c0, r + k, c0, n);
+            for (r = e - k; r < e; r++) {
+                if (v->buf[r]) {
+                    row_ensure(v->buf[r], c1);
+                    fill_range(v, v->buf[r], c0, c1);
+                }
+            }
+        } else {
+            for (r = e - 1; r >= s + k; r--)
+                cells_move(v, r, c0, r - k, c0, n);
+            for (r = s; r < s + k; r++) {
+                if (v->buf[r]) {
+                    row_ensure(v->buf[r], c1);
+                    fill_range(v, v->buf[r], c0, c1);
+                }
+            }
+        }
+    }
     return 1;
 }
 
 static int cb_moverect(VTermRect dest, VTermRect src, void *user)
 {
     hb_vt *v = user;
-    (void)dest; (void)src;
-    v->gen++;
+    int n = src.end_col - src.start_col;
+    int h = src.end_row - src.start_row;
+    int dr = dest.start_row - src.start_row;
+    int dc = dest.start_col - src.start_col;
+    int i;
+
+    if (dr > 0) {
+        for (i = h - 1; i >= 0; i--)
+            cells_move(v, src.start_row + i + dr, src.start_col + dc,
+                       src.start_row + i, src.start_col, n);
+    } else {
+        for (i = 0; i < h; i++)
+            cells_move(v, src.start_row + i + dr, src.start_col + dc,
+                       src.start_row + i, src.start_col, n);
+    }
     return 1;
 }
 
-static int cb_movecursor(VTermPos pos, VTermPos oldpos, int visible, void *user)
+static int cb_erase(VTermRect rect, int selective, void *user)
 {
     hb_vt *v = user;
-    (void)pos; (void)oldpos; (void)visible;
-    v->gen++;
+    int r;
+    (void)selective; /* 不跟踪 protected，全部擦除 */
+
+    if (rect.start_row < 0)
+        rect.start_row = 0;
+    if (rect.end_row > v->rows)
+        rect.end_row = v->rows;
+
+    for (r = rect.start_row; r < rect.end_row; r++) {
+        row_t *row = v->buf[r];
+        if (!row)
+            continue;
+        row_ensure(row, rect.end_col);
+        fill_range(v, row, rect.start_col, rect.end_col);
+    }
+    /* state 在 end_col==cols 时直接清后续行的 continuation，镜像之 */
+    if (rect.end_col == v->cols)
+        for (r = rect.start_row + 1; r < rect.end_row + 1 && r < v->rows; r++)
+            if (v->buf[r])
+                v->buf[r]->wrapped = false;
     return 1;
+}
+
+static int cb_initpen(void *user)
+{
+    hb_vt *v = user;
+    v->pen.attrs = 0;
+    v->pen.fg.type = HB_COLOR_DEFAULT_FG;
+    v->pen.fg.idx = v->pen.fg.r = v->pen.fg.g = v->pen.fg.b = 0;
+    v->pen.bg.type = HB_COLOR_DEFAULT_BG;
+    v->pen.bg.idx = v->pen.bg.r = v->pen.bg.g = v->pen.bg.b = 0;
+    return 1;
+}
+
+static int cb_setpenattr(VTermAttr attr, VTermValue *val, void *user)
+{
+    hb_vt *v = user;
+    switch (attr) {
+    case VTERM_ATTR_BOLD:
+        if (val->boolean) v->pen.attrs |= HB_ATTR_BOLD;
+        else              v->pen.attrs &= (uint16_t)~HB_ATTR_BOLD;
+        return 1;
+    case VTERM_ATTR_UNDERLINE:
+        v->pen.attrs &= (uint16_t)~(HB_ATTR_UNDERLINE | HB_ATTR_DUNDERLINE |
+                                    HB_ATTR_CURLY);
+        if (val->number == 1)      v->pen.attrs |= HB_ATTR_UNDERLINE;
+        else if (val->number == 2) v->pen.attrs |= HB_ATTR_DUNDERLINE;
+        else if (val->number >= 3) v->pen.attrs |= HB_ATTR_CURLY;
+        return 1;
+    case VTERM_ATTR_ITALIC:
+        if (val->boolean) v->pen.attrs |= HB_ATTR_ITALIC;
+        else              v->pen.attrs &= (uint16_t)~HB_ATTR_ITALIC;
+        return 1;
+    case VTERM_ATTR_BLINK:
+        if (val->boolean) v->pen.attrs |= HB_ATTR_BLINK;
+        else              v->pen.attrs &= (uint16_t)~HB_ATTR_BLINK;
+        return 1;
+    case VTERM_ATTR_REVERSE:
+        if (val->boolean) v->pen.attrs |= HB_ATTR_REVERSE;
+        else              v->pen.attrs &= (uint16_t)~HB_ATTR_REVERSE;
+        return 1;
+    case VTERM_ATTR_CONCEAL:
+        if (val->boolean) v->pen.attrs |= HB_ATTR_CONCEAL;
+        else              v->pen.attrs &= (uint16_t)~HB_ATTR_CONCEAL;
+        return 1;
+    case VTERM_ATTR_STRIKE:
+        if (val->boolean) v->pen.attrs |= HB_ATTR_STRIKE;
+        else              v->pen.attrs &= (uint16_t)~HB_ATTR_STRIKE;
+        return 1;
+    case VTERM_ATTR_FOREGROUND:
+        v->pen.fg = conv_color(&val->color, true);
+        return 1;
+    case VTERM_ATTR_BACKGROUND:
+        v->pen.bg = conv_color(&val->color, false);
+        return 1;
+    default:
+        /* FONT/SMALL/BASELINE 忽略 */
+        return 1;
+    }
 }
 
 static int cb_settermprop(VTermProp prop, VTermValue *val, void *user)
@@ -386,8 +838,10 @@ static int cb_settermprop(VTermProp prop, VTermValue *val, void *user)
         }
         return 1;
     case VTERM_PROP_ALTSCREEN:
-        v->alt = val->boolean != 0;
-        emit(v, HB_VT_EV_ALTSCREEN, 0, v->alt, NULL, NULL);
+        v->alt_active = val->boolean != 0;
+        v->buf = v->alt_active ? v->alt : v->prim;
+        /* state 会在返回后对新 alt 屏发整屏 erase（清屏语义自带） */
+        emit(v, HB_VT_EV_ALTSCREEN, 0, v->alt_active, NULL, NULL);
         return 1;
     case VTERM_PROP_MOUSE:
         v->mouse_mode = val->number;
@@ -413,29 +867,14 @@ static int cb_bell(void *user)
     return 1;
 }
 
-static int cb_resize(int rows, int cols, void *user)
+static int cb_setlineinfo(int row, const VTermLineInfo *newinfo,
+                          const VTermLineInfo *oldinfo, void *user)
 {
     hb_vt *v = user;
-    v->rows = rows;
-    v->cols = cols;
-    v->gen++;
+    (void)oldinfo;
+    if (row >= 0 && row < v->rows && v->buf[row])
+        v->buf[row]->wrapped = newinfo->continuation != 0;
     return 1;
-}
-
-static int cb_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
-{
-    hb_vt *v = user;
-    sb_push(v, cells, cols);
-    v->gen++;
-    return 1;
-}
-
-static int cb_sb_popline(int cols, VTermScreenCell *cells, void *user)
-{
-    hb_vt *v = user;
-    int ok = sb_pop(v, cells, cols);
-    v->gen++;
-    return ok;
 }
 
 static int cb_sb_clear(void *user)
@@ -446,15 +885,121 @@ static int cb_sb_clear(void *user)
     return 1;
 }
 
-static const VTermScreenCallbacks SCR = {
-    .damage      = cb_damage,
-    .moverect    = cb_moverect,
+/* 单缓冲行数变化（无 reflow，xterm 语义）。
+ * can_sb：主屏缩行时顶行入 scrollback、增行时拉回；pos 仅活动屏传。 */
+static void resize_rows(hb_vt *v, row_t ***pbuf, int orows, int nrows,
+                        bool can_sb, VTermPos *pos)
+{
+    row_t **b = *pbuf;
+    int i;
+
+    if (nrows == orows)
+        return;
+
+    if (nrows < orows) {
+        int drop = orows - nrows;
+        for (i = 0; i < drop; i++) {
+            row_t *leaving = b[i];
+            bool wn = (i + 1 < orows && b[i + 1]) ? b[i + 1]->wrapped : false;
+            if (leaving) {
+                if (can_sb)
+                    sb_push_row(v, leaving, wn);
+                row_free(leaving);
+            }
+        }
+        memmove(&b[0], &b[drop], (size_t)nrows * sizeof *b);
+        {
+            row_t **nb = realloc(b, (size_t)nrows * sizeof *b);
+            if (nb)
+                b = nb;
+        }
+        if (pos) {
+            pos->row -= drop;
+            if (pos->row < 0)
+                pos->row = 0;
+        }
+    } else {
+        int added = nrows - orows;
+        int pulled = 0;
+        row_t **nb;
+        /* libvterm 语义：拉回 min(added, sb_len) 行填充顶部（不按光标限） */
+        if (can_sb)
+            while (pulled < added && v->sb_len > pulled)
+                pulled++;
+        nb = realloc(b, (size_t)nrows * sizeof *b);
+        if (nb)
+            b = nb;
+        memmove(&b[pulled], &b[0], (size_t)orows * sizeof *b);
+        for (i = pulled - 1; i >= 0; i--) {
+            b[i] = row_new(v->cols);
+            if (b[i])
+                sb_pop_row(v, b[i]);   /* 最新行放最底 */
+        }
+        if (pos)
+            pos->row += pulled;
+        for (i = pulled + orows; i < nrows; i++)
+            b[i] = row_new(v->cols);
+    }
+    *pbuf = b;
+}
+
+static int cb_resize(int rows, int cols, VTermStateFields *fields, void *user)
+{
+    hb_vt *v = user;
+    int orows = v->rows;
+    int bi;
+
+    /* lineinfo 数组随行数变化（默认 allocator == malloc/free，realloc 兼容） */
+    for (bi = 0; bi < 2; bi++) {
+        VTermLineInfo *old = fields->lineinfos[bi];
+        VTermLineInfo *nl;
+        int r;
+        if (!old)
+            continue;
+        nl = realloc(old, (size_t)rows * sizeof *nl);
+        if (!nl)
+            continue;
+        for (r = orows; r < rows; r++)
+            memset(&nl[r], 0, sizeof nl[r]);
+        fields->lineinfos[bi] = nl;
+    }
+
+    if (cols > v->cols && v->sb_arena) {
+        /* arena 保持 sb_cap × cols 的最坏容量 */
+        size_t need = (size_t)v->sb_cap * (size_t)cols;
+        if (need > v->sb_acap) {
+            hb_cell *na = realloc(v->sb_arena, need * sizeof *na);
+            if (na) {
+                v->sb_arena = na;
+                v->sb_acap = need;
+            }
+        }
+    }
+    v->cols = cols;
+
+    resize_rows(v, &v->prim, orows, rows, true,
+                v->alt_active ? NULL : &fields->pos);
+    resize_rows(v, &v->alt, orows, rows, false,
+                v->alt_active ? &fields->pos : NULL);
+
+    v->rows = rows;
+    v->buf = v->alt_active ? v->alt : v->prim;
+    v->gen++;
+    return 1;
+}
+
+static const VTermStateCallbacks ST = {
+    .putglyph    = cb_putglyph,
     .movecursor  = cb_movecursor,
+    .scrollrect  = cb_scrollrect,
+    .moverect    = cb_moverect,
+    .erase       = cb_erase,
+    .initpen     = cb_initpen,
+    .setpenattr  = cb_setpenattr,
     .settermprop = cb_settermprop,
     .bell        = cb_bell,
     .resize      = cb_resize,
-    .sb_pushline = cb_sb_pushline,
-    .sb_popline  = cb_sb_popline,
+    .setlineinfo = cb_setlineinfo,
     .sb_clear    = cb_sb_clear,
 };
 
@@ -518,6 +1063,7 @@ static void scan_byte(hb_vt *v, unsigned char ch)
 hb_vt *hb_vt_new(int rows, int cols, int scrollback_lines)
 {
     hb_vt *v = calloc(1, sizeof *v);
+    int i;
     if (!v)
         return NULL;
     if (hb_core_init() != 0) {
@@ -539,39 +1085,78 @@ hb_vt *hb_vt_new(int rows, int cols, int scrollback_lines)
     v->mouse_mode = 0;
     v->cursor_shape = VTERM_PROP_CURSORSHAPE_BLOCK;
     v->cursor_visible = true;
+    v->pg_row = -1;
+
+    v->prim = calloc((size_t)rows, sizeof *v->prim);
+    v->alt = calloc((size_t)rows, sizeof *v->alt);
+    if (!v->prim || !v->alt || !v->sb)
+        goto fail;
+    for (i = 0; i < rows; i++) {
+        v->prim[i] = row_new(cols);
+        v->alt[i] = row_new(cols);
+        if (!v->prim[i] || !v->alt[i])
+            goto fail;
+    }
+    v->buf = v->prim;
+
+    /* scrollback 内容 arena：最坏 sb_cap × cols cells（追加式，热写）。
+     * 分配失败仅降级为不存内容，不致命。 */
+    v->sb_acap = (size_t)v->sb_cap * (size_t)(cols > 0 ? cols : 1);
+    v->sb_arena = malloc(v->sb_acap * sizeof *v->sb_arena);
+    if (!v->sb_arena)
+        v->sb_acap = 0;
 
     v->vt = vterm_new(rows, cols);
-    if (!v->vt) {
-        free(v->sb);
-        pthread_mutex_destroy(&v->lock);
-        free(v);
-        return NULL;
-    }
+    if (!v->vt)
+        goto fail;
     vterm_set_utf8(v->vt, 1);
     vterm_output_set_callback(v->vt, out_cb, v);
 
-    v->screen = vterm_obtain_screen(v->vt);
-    vterm_screen_set_callbacks(v->screen, &SCR, v);
-    vterm_screen_set_unrecognised_fallbacks(v->screen, &FB, v);
-    vterm_screen_enable_altscreen(v->screen, 1);
-    vterm_screen_enable_reflow(v->screen, true);
-    vterm_screen_set_damage_merge(v->screen, VTERM_DAMAGE_SCROLL);
-
+    /* 只用 parser + state 层；绝不取 VTermScreen。 */
     v->state = vterm_obtain_state(v->vt);
+    vterm_state_set_callbacks(v->state, &ST, v);
+    vterm_state_set_unrecognised_fallbacks(v->state, &FB, v);
     v->sel_vbuf = malloc(16 * 1024);
     vterm_state_set_selection_callbacks(v->state, &SEL, v,
                                         v->sel_vbuf,
                                         v->sel_vbuf ? 16 * 1024 : 0);
-    vterm_screen_reset(v->screen, 1);
+    vterm_state_reset(v->state, 1);
     return v;
+
+fail:
+    if (v->prim)
+        for (i = 0; i < rows; i++)
+            row_free(v->prim[i]);
+    if (v->alt)
+        for (i = 0; i < rows; i++)
+            row_free(v->alt[i]);
+    free(v->prim);
+    free(v->alt);
+    free(v->sb);
+    if (v->vt)
+        vterm_free(v->vt);
+    pthread_mutex_destroy(&v->lock);
+    free(v);
+    return NULL;
 }
 
 void hb_vt_free(hb_vt *v)
 {
+    int i;
     if (!v)
         return;
     sb_clear(v);
     free(v->sb);
+    free(v->sb_arena);
+    if (v->prim)
+        for (i = 0; i < v->rows; i++)
+            row_free(v->prim[i]);
+    if (v->alt)
+        for (i = 0; i < v->rows; i++)
+            row_free(v->alt[i]);
+    free(v->prim);
+    free(v->alt);
+    free(v->tmp);
     free(v->osc_buf);
     free(v->sel_buf);
     free(v->sel_vbuf);
@@ -610,10 +1195,52 @@ void hb_vt_set_osc52_allowed(hb_vt *v, bool allowed)
 
 void hb_vt_feed(hb_vt *v, const char *bytes, size_t len)
 {
-    size_t i;
+    const unsigned char *p = (const unsigned char *)bytes;
+    const unsigned char *end = p + len;
     lock(v);
-    for (i = 0; i < len; i++)
-        scan_byte(v, (unsigned char)bytes[i]);
+    v->gen++;
+    /* 只为 ?2004 侦测扫描转义序列：memchr 定位 ESC/C1，非私有 CSI 直接
+     * 跳到终止字节，只有 "?" 开头的序列走状态机。 */
+    while (v->scan != SCAN_TEXT && p < end)
+        scan_byte(v, *p++);
+    while (p < end) {
+        const unsigned char *e = memchr(p, 0x1b, (size_t)(end - p));
+        /* C1 CSI(0x9b) 只需在下个 ESC 之前找（这避免 memchr 扫到末尾形成 O(n^2)） */
+        const unsigned char *lim = e ? e : end;
+        const unsigned char *c = memchr(p, 0x9b, (size_t)(lim - p));
+        const unsigned char *q = e ? e : c;
+        const unsigned char *seq;
+        int csi;
+        if (!q)
+            break;
+        seq = q;
+        if (*q == 0x1b) {
+            q++;
+            csi = (q < end && *q == '[');
+            if (csi)
+                q++;
+        } else {
+            q++;                    /* C1 CSI：参数直接跟在后面 */
+            csi = 1;
+        }
+        if (!csi) {
+            p = q;                  /* 非 CSI 的 ESC 序列：略过 ESC 一字节 */
+            continue;
+        }
+        if (q < end && *q == '?') {
+            /* 私有 CSI：交给状态机直到收尾 */
+            do {
+                scan_byte(v, *seq);
+                seq++;
+            } while (seq < end && v->scan != SCAN_TEXT);
+            p = seq;
+        } else {
+            /* 非私有序列：跳到 CSI 终止字节（0x40-0x7E） */
+            while (q < end && !(*q >= 0x40 && *q <= 0x7e))
+                q++;
+            p = q < end ? q + 1 : end;
+        }
+    }
     vterm_input_write(v->vt, bytes, len);
     unlock(v);
 }
@@ -622,9 +1249,6 @@ void hb_vt_resize(hb_vt *v, int rows, int cols)
 {
     lock(v);
     vterm_set_size(v->vt, rows, cols);
-    v->rows = rows;
-    v->cols = cols;
-    v->gen++;
     unlock(v);
 }
 
@@ -658,36 +1282,39 @@ uint64_t hb_vt_total_pushed(hb_vt *v)
 
 bool hb_vt_get_cell(hb_vt *v, int row, int col, hb_cell *out)
 {
-    bool ok = false;
     lock(v);
     if (col < 0 || col >= v->cols)
-        goto out;
+        goto fail;
     if (row >= 0 && row < v->rows) {
-        VTermScreenCell sc;
-        VTermPos pos = { .row = row, .col = col };
-        if (vterm_screen_get_cell(v->screen, pos, &sc)) {
-            conv_cell(&sc, out);
-            /* 宽字符尾随格：前一格 width==2 时本格报 width=0 */
-            if (col > 0) {
-                VTermScreenCell prev;
-                VTermPos ppos = { .row = row, .col = col - 1 };
-                if (vterm_screen_get_cell(v->screen, ppos, &prev) &&
-                    prev.width == 2)
-                    out->width = 0;
-            }
-            ok = true;
+        row_t *r = v->buf[row];
+        if (!r)
+            goto fail;
+        if (col < r->used && col < r->cap)
+            *out = r->cells[col];
+        else {
+            memset(out, 0, sizeof *out);
+            out->width = 1;
+            out->fg = r->fill_fg;
+            out->bg = r->fill_bg;
         }
     } else if (row < 0 && row >= -v->sb_len) {
-        int idx = (v->sb_start + v->sb_len + row) % v->sb_cap;
-        sb_line *l = &v->sb[idx];
-        if (l->cells) {
-            *out = l->cells[col];
-            ok = true;
+        const sb_line *l = sb_desc_at(v, row);
+        if (col < l->n && v->sb_arena)
+            *out = v->sb_arena[l->off + (size_t)col];
+        else {
+            memset(out, 0, sizeof *out);
+            out->width = 1;
+            out->fg = l->fg;
+            out->bg = l->bg;
         }
+    } else {
+        goto fail;
     }
-out:
     unlock(v);
-    return ok;
+    return true;
+fail:
+    unlock(v);
+    return false;
 }
 
 bool hb_vt_line_wrapped(hb_vt *v, int row)
@@ -695,13 +1322,15 @@ bool hb_vt_line_wrapped(hb_vt *v, int row)
     bool w = false;
     lock(v);
     if (row >= 0) {
-        const VTermLineInfo *li = NULL;
-        if (row + 1 < v->rows)
-            li = vterm_state_get_lineinfo(v->state, row + 1);
-        w = li ? li->continuation != 0 : false;
+        /* 本行软续到下一行 = 下一行的 continuation 标记（state 的 lineinfo
+         * 是最新真值，含 autowrap 直写） */
+        if (row + 1 < v->rows) {
+            const VTermLineInfo *li = vterm_state_get_lineinfo(v->state, row + 1);
+            w = li ? li->continuation != 0 : false;
+        }
     } else if (row >= -v->sb_len) {
         int idx = (v->sb_start + v->sb_len + row) % v->sb_cap;
-        w = v->sb[idx].wrapped;
+        w = v->sb[idx].wraps_next;
     }
     unlock(v);
     return w;
@@ -725,7 +1354,7 @@ bool hb_vt_altscreen(hb_vt *v)
 {
     bool a;
     lock(v);
-    a = v->alt;
+    a = v->alt_active;
     unlock(v);
     return a;
 }
@@ -868,8 +1497,8 @@ static size_t utf8_encode(uint32_t cp, char out[4])
     }
     out[0] = (char)(0xf0 | (cp >> 18));
     out[1] = (char)(0x80 | ((cp >> 12) & 0x3f));
-    out[2] = (char)(0x80 | ((cp >> 6) & 0x3f));
-    out[3] = (char)(0x80 | (cp & 0x3f));
+    out[2] = (char)(0x80 | (cp & 0x3f));
+    out[3] = (char)(0x80 | ((cp >> 6) & 0x3f));
     return 4;
 }
 

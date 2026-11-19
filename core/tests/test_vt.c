@@ -431,7 +431,211 @@ static void test_generation(void)
     hb_vt_free(v);
 }
 
+static void test_scroll_region(void)
+{
+    hb_vt *v = mkvt(10, 20, 20);
+    char buf[32];
+    int i;
+
+    /* 每行写一个不同标记字符 */
+    for (i = 0; i < 10; i++) {
+        int n = snprintf(buf, sizeof buf, "\e[%d;1H%c", i + 1, 'A' + i);
+        hb_vt_feed(v, buf, (size_t)n);
+    }
+    /* DECSTBM 5;10 → 区域为 0-based 行 4..9 */
+    hb_vt_feed(v, "\e[5;10r", strlen("\e[5;10r"));
+    /* 移到区域底（第 10 行）并换行 → 区域上滚 1 行 */
+    hb_vt_feed(v, "\e[10;1H\n", strlen("\e[10;1H\n"));
+    /* 区域外不变 */
+    CHECK_EQ_INT(cp_at(v, 0, 0), 'A');
+    CHECK_EQ_INT(cp_at(v, 3, 0), 'D');
+    /* 区域内上滚：行4 拿到旧行5 的 'F'，行8 拿到旧行9 的 'J' */
+    CHECK_EQ_INT(cp_at(v, 4, 0), 'F');
+    CHECK_EQ_INT(cp_at(v, 8, 0), 'J');
+    /* 行9 变空白 */
+    CHECK_EQ_INT(cp_at(v, 9, 0), 0);
+    /* 局部区域滚动不入 scrollback */
+    CHECK_EQ_INT(hb_vt_scrollback_count(v), 0);
+    CHECK_EQ_INT(hb_vt_total_pushed(v), 0);
+    hb_vt_free(v);
+}
+
+static void test_insert_delete_line(void)
+{
+    hb_vt *v = mkvt(10, 20, 20);
+
+    hb_vt_feed(v, "T0\r\nT1\r\nT2", 11);
+    /* 光标第 2 行，插入 2 行：T1/T2 下移 */
+    hb_vt_feed(v, "\e[2;1H\e[2L", strlen("\e[2;1H\e[2L"));
+    CHECK_EQ_INT(cp_at(v, 0, 0), 'T');
+    CHECK_EQ_INT(cp_at(v, 1, 0), 0);
+    CHECK_EQ_INT(cp_at(v, 2, 0), 0);
+    CHECK_EQ_INT(cp_at(v, 3, 0), 'T');
+    CHECK_EQ_INT(cp_at(v, 3, 1), '1');
+    CHECK_EQ_INT(cp_at(v, 4, 1), '2');
+    CHECK_EQ_INT(hb_vt_scrollback_count(v), 0);
+    /* 光标第 4 行（T1 所在），删除 2 行：T1、T2 行被删 */
+    hb_vt_feed(v, "\e[4;1H\e[2M", strlen("\e[4;1H\e[2M"));
+    CHECK_EQ_INT(cp_at(v, 3, 1), 0);
+    CHECK_EQ_INT(cp_at(v, 3, 0), 0);
+    hb_vt_free(v);
+}
+
+static void test_insert_delete_char(void)
+{
+    hb_vt *v = mkvt(5, 20, 20);
+
+    hb_vt_feed(v, "abcdef", 6);
+    hb_vt_feed(v, "\e[1;3H\e[3@", strlen("\e[1;3H\e[3@"));   /* 在第 3 列插入 3 空白 */
+    CHECK_EQ_INT(cp_at(v, 0, 1), 'b');
+    CHECK_EQ_INT(cp_at(v, 0, 2), 0);
+    CHECK_EQ_INT(cp_at(v, 0, 3), 0);
+    CHECK_EQ_INT(cp_at(v, 0, 4), 0);
+    CHECK_EQ_INT(cp_at(v, 0, 5), 'c');
+    CHECK_EQ_INT(cp_at(v, 0, 8), 'f');
+    hb_vt_feed(v, "\e[3P", strlen("\e[3P"));            /* 删除 3 格 → 还原 */
+    CHECK_EQ_INT(cp_at(v, 0, 2), 'c');
+    CHECK_EQ_INT(cp_at(v, 0, 5), 'f');
+    CHECK_EQ_INT(cp_at(v, 0, 6), 0);
+    hb_vt_free(v);
+}
+
+static void test_bce_erase(void)
+{
+    hb_vt *v = mkvt(5, 20, 20);
+    hb_cell c;
+
+    hb_vt_feed(v, "hello", 5);
+    hb_vt_feed(v, "\e[41m", 5);            /* bg = indexed 1 */
+    hb_vt_feed(v, "\e[2J", 4);             /* ED 全屏 → 擦除格带 bg 1 */
+    CHECK(hb_vt_get_cell(v, 0, 0, &c));
+    CHECK_EQ_INT(c.chars[0], 0);
+    CHECK_EQ_INT(c.bg.type, HB_COLOR_INDEXED);
+    CHECK_EQ_INT(c.bg.idx, 1);
+    CHECK(hb_vt_get_cell(v, 4, 19, &c));
+    CHECK_EQ_INT(c.bg.idx, 1);
+    /* EL：写文本后清到行尾 */
+    hb_vt_feed(v, "\e[42m\e[1;1Habc\e[K", 17); /* bg=2, "abc", EL */
+    CHECK(hb_vt_get_cell(v, 0, 5, &c));
+    CHECK_EQ_INT(c.chars[0], 0);
+    CHECK_EQ_INT(c.bg.idx, 2);
+    CHECK_EQ_INT(cp_at(v, 0, 0), 'a');
+    hb_vt_free(v);
+}
+
+static void test_wide_overwrite(void)
+{
+    hb_vt *v = mkvt(5, 10, 20);
+    hb_cell c;
+
+    /* 覆盖宽字符尾部 → 前半变孤儿清空 */
+    hb_vt_feed(v, "\xe4\xb8\xad", 3);         /* 中 at (0,0), trailer (0,1) */
+    hb_vt_feed(v, "\e[1;2Hx", 7);             /* x 覆盖 trailer */
+    CHECK(hb_vt_get_cell(v, 0, 0, &c));
+    CHECK_EQ_INT(c.chars[0], 0);              /* 孤儿被清 */
+    CHECK_EQ_INT(c.width, 1);
+    CHECK_EQ_INT(cp_at(v, 0, 1), 'x');
+    /* 覆盖宽字符前半 → 后半变孤儿清空 */
+    hb_vt_feed(v, "\e[2;1H\xe4\xb8\xad", strlen("\e[2;1H\xe4\xb8\xad")); /* 中 at (1,0), trailer (1,1) */
+    hb_vt_feed(v, "\e[2;1Hy", 7);             /* y 覆盖前半 */
+    CHECK_EQ_INT(cp_at(v, 1, 0), 'y');
+    CHECK(hb_vt_get_cell(v, 1, 1, &c));
+    CHECK_EQ_INT(c.chars[0], 0);
+    CHECK_EQ_INT(c.width, 1);
+    hb_vt_free(v);
+}
+
+static void test_ed3_clears_scrollback(void)
+{
+    hb_vt *v = mkvt(5, 20, 20);
+    int i;
+    char buf[32];
+
+    for (i = 0; i < 10; i++) {
+        int n = snprintf(buf, sizeof buf, "s%02d\r\n", i);
+        hb_vt_feed(v, buf, (size_t)n);
+    }
+    CHECK(hb_vt_scrollback_count(v) > 0);
+    hb_vt_feed(v, "\e[3J", 4);               /* ED 3 → 清 scrollback */
+    CHECK_EQ_INT(hb_vt_scrollback_count(v), 0);
+    CHECK(!hb_vt_get_cell(v, -1, 0, &(hb_cell){0}));
+    hb_vt_free(v);
+}
+
+static void test_resize_scrollback_roundtrip(void)
+{
+    hb_vt *v = mkvt(5, 20, 50);
+    char buf[32];
+    int i;
+
+    for (i = 0; i < 10; i++) {
+        int n = snprintf(buf, sizeof buf, "L%02d\r\n", i);
+        hb_vt_feed(v, buf, (size_t)n);
+    }
+    /* 10 行 × "\r\n" → L00..L05 共 6 行被推，屏 = L06..L09+空 */
+    CHECK_EQ_INT(hb_vt_scrollback_count(v), 6);
+    CHECK_EQ_INT(cp_at(v, 0, 2), '6');
+
+    /* 缩到 3 行 → 顶部 2 行 L06 L07 推入 scrollback */
+    hb_vt_resize(v, 3, 20);
+    CHECK_EQ_INT(hb_vt_scrollback_count(v), 8);
+    CHECK_EQ_INT(cp_at(v, 0, 2), '8');
+    CHECK_EQ_INT(cp_at(v, -1, 2), '7');
+
+    /* 增回 5 行 → 拉回 L06 L07，内容原样，末行原为空 */
+    hb_vt_resize(v, 5, 20);
+    CHECK_EQ_INT(hb_vt_scrollback_count(v), 6);
+    CHECK_EQ_INT(cp_at(v, 0, 2), '6');
+    CHECK_EQ_INT(cp_at(v, 1, 2), '7');
+    CHECK_EQ_INT(cp_at(v, 2, 2), '8');
+    CHECK_EQ_INT(cp_at(v, 3, 2), '9');
+    hb_vt_free(v);
+}
+
+static void test_ring_eviction(void)
+{
+    hb_vt *v = mkvt(5, 20, 5);
+    char buf[32];
+    int i;
+
+    for (i = 0; i < 12; i++) {
+        int n = snprintf(buf, sizeof buf, "E%02d\r\n", i);
+        hb_vt_feed(v, buf, (size_t)n);
+    }
+    /* 12 行入 5 行屏 → 推出 8 行，ring 容量 5 → 最旧 3 行逐出 */
+    CHECK_EQ_INT(hb_vt_scrollback_count(v), 5);
+    CHECK_EQ_INT(hb_vt_total_pushed(v), 8);
+    /* 最新 scrollback = E07，最旧 = E03 */
+    CHECK_EQ_INT(cp_at(v, -1, 2), '7');
+    CHECK_EQ_INT(cp_at(v, -5, 2), '3');
+    CHECK(!hb_vt_get_cell(v, -6, 0, &(hb_cell){0}));
+    hb_vt_free(v);
+}
+
+static void test_altscreen_save_restore(void)
+{
+    hb_vt *v = mkvt(5, 20, 20);
+    int row, col;
+
+    hb_vt_feed(v, "PRI", 3);
+    hb_vt_feed(v, "\e[?1049h", 8);
+    CHECK(hb_vt_altscreen(v));
+    CHECK_EQ_INT(cp_at(v, 0, 0), 0);          /* alt 屏干净 */
+    hb_vt_feed(v, "ALT", 3);                  /* 光标仍在保存的 (0,3) */
+    CHECK_EQ_INT(cp_at(v, 0, 3), 'A');
+    hb_vt_feed(v, "\e[?1049l", 8);
+    CHECK(!hb_vt_altscreen(v));
+    /* 主屏内容与光标均恢复 */
+    CHECK_EQ_INT(cp_at(v, 0, 0), 'P');
+    CHECK_EQ_INT(cp_at(v, 0, 2), 'I');
+    hb_vt_cursor(v, &row, &col, NULL, NULL, NULL);
+    CHECK_EQ_INT(row, 0);
+    CHECK_EQ_INT(col, 3);
+    hb_vt_free(v);
+}
+
 int main(void)
+
 {
     test_text_and_sgr();
     test_wide_and_wrap();
@@ -441,6 +645,15 @@ int main(void)
     test_osc_events();
     test_input();
     test_generation();
+    test_scroll_region();
+    test_insert_delete_line();
+    test_insert_delete_char();
+    test_bce_erase();
+    test_wide_overwrite();
+    test_ed3_clears_scrollback();
+    test_resize_scrollback_roundtrip();
+    test_ring_eviction();
+    test_altscreen_save_restore();
     fprintf(stderr, "test_vt: %d checks, %d failures\n", hb_t_checks, hb_t_failures);
     TEST_RETURN();
 }
