@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harbor — SSH / Remote Desktop 原型（macOS · Linux · Android）</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="stage">
+  <div class="mode-switch" id="modeSwitch">
+    <button data-mode="mac" class="active">macOS</button>
+    <button data-mode="linux">Linux</button>
+    <button data-mode="android">Android</button>
+  </div>
+  <div class="window" id="window">
+    <!-- Title bar -->
+    <div class="titlebar">
+      <div class="traffic"><span class="tl red"></span><span class="tl yellow"></span><span class="tl green"></span></div>
+      <div class="tabstrip" id="tabstrip"></div>
+      <button class="tab-add" id="tabAdd" title="新建 Tab">+</button>
+      <div class="titlebar-right">
+        <button class="icon-btn" id="sidebarToggle" title="侧栏"></button>
+        <button class="icon-btn bell" id="bellBtn" data-bell title="通知中心"><span class="badge badge-bell" id="bellBadge" hidden>0</span></button>
+        <span class="gtk-btns"><span>–</span><span>▢</span><span>✕</span></span>
+      </div>
+    </div>
+    <!-- Body -->
+    <div class="app-body" id="appBody"></div>
+    <!-- Notification center dropdown -->
+    <div class="notif-panel" id="notifPanel" hidden></div>
+    <!-- Modal root -->
+    <div class="modal-root" id="modalRoot" hidden></div>
+    <!-- Simulated system notifications -->
+    <div class="toast-stack" id="toastStack"></div>
+  </div>
+  <!-- Android phone form factor -->
+  <div class="phone" id="phone" hidden>
+    <div class="p-status" id="pStatus"></div>
+    <div class="p-body" id="phoneBody"></div>
+    <div class="p-nav" id="phoneNav"></div>
+  </div>
+  <div class="stage-hint" id="stageHint">Harbor 交互原型 · 演示提示：在终端输入 <code>ai-task</code> 体验会话完成监控；点击主机卡片建立连接；点击终端工具栏「共享」体验多端 Console。</div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
