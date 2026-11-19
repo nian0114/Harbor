@@ -43,6 +43,10 @@ typedef enum {
      *   text  提示语
      * 连接线程挂起等 hb_session_prompt_reply（NULL = 取消）。 */
     HB_SESS_EV_PROMPT,
+    /* 目标主机 OS 探测（hb_ssh_opts.detect_os；非致命）：
+     *   text  /etc/os-release 的 ID（"ubuntu"/"debian"/…）
+     *   text2 PRETTY_NAME */
+    HB_SESS_EV_OSINFO,
 } hb_sess_ev_type;
 
 typedef struct {

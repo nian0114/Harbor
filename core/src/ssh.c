@@ -94,6 +94,7 @@ typedef struct {
     int64_t     ka_next;       /* 下次 keepalive 到期时刻 ms；0 = 关 */
     int64_t     ka_last_in;    /* 最后一次 fd 可读（任意入站包 = 对端活着） */
     int         ka_miss;       /* 连续无入站的 keepalive 间隔数 */
+    bool        detect_os;
     bool        disconnected;
     bool        disconnect_emitted;
     char        errbuf[256];   /* 技术细节 → ERROR.text2 */
@@ -1737,6 +1738,99 @@ static void ssh_destroy_op(void *ctx)
 
 /* ------------------------------ connect ------------------------------ */
 
+/* 解析一行 "K=V"（去引号/CR）到 out；无该行返回 false */
+static bool osr_field(const char *txt, const char *key, char *out, size_t cap)
+{
+    const char *p = txt;
+    size_t kl = strlen(key);
+    while (*p) {
+        const char *nl = strchr(p, '\n');
+        size_t ll = nl ? (size_t)(nl - p) : strlen(p);
+        if (ll > kl && !memcmp(p, key, kl) && p[kl] == '=') {
+            const char *v = p + kl + 1;
+            size_t vl = ll - kl - 1;
+            if (vl && v[vl - 1] == '\r')
+                vl--;
+            if (vl >= 2 && (*v == '"' || *v == '\'') &&
+                v[vl - 1] == *v) {
+                v++;
+                vl -= 2;
+            }
+            if (vl >= cap)
+                vl = cap - 1;
+            memcpy(out, v, vl);
+            out[vl] = 0;
+            return true;
+        }
+        if (!nl)
+            break;
+        p = nl + 1;
+    }
+    return false;
+}
+
+/* 认证后 exec `cat /etc/os-release`（3s 预算、非致命）→ OSINFO。
+ * 只有 W_CANCEL 传播（中止连接）；超时/失败一律静默跳过。 */
+static int os_detect(hb_ssh *h, hop *hp)
+{
+    LIBSSH2_CHANNEL *ch = NULL;
+    char buf[8192];
+    char id[64] = "", pretty[256] = "";
+    size_t len = 0;
+    int64_t dl = hb_now_ms() + 3000;
+    int w, rc = -1;
+
+    SSH_LOOP_PTR(h, hp, dl,
+                 libssh2_channel_open_ex(hp->sess, "session", 7,
+                                         LIBSSH2_CHANNEL_WINDOW_DEFAULT,
+                                         LIBSSH2_CHANNEL_PACKET_DEFAULT,
+                                         NULL, 0),
+                 ch, w);
+    if (w || !ch)
+        goto out;
+    {
+        const char *cmd = "cat /etc/os-release 2>/dev/null";
+        SSH_LOOP(h, hp, dl,
+                 libssh2_channel_process_startup(
+                     ch, "exec", 4, cmd, strlen(cmd)),
+                 rc, w);
+    }
+    if (w)
+        goto out;
+    if (!rc) {
+        while (len < sizeof buf - 1) {
+            ssize_t n = libssh2_channel_read(ch, buf + len,
+                                             sizeof buf - 1 - len);
+            if (n > 0) {
+                len += (size_t)n;
+                continue;
+            }
+            if (n == 0 && libssh2_channel_eof(ch))
+                break;
+            if (n == LIBSSH2_ERROR_EAGAIN || n == 0) {
+                /* EAGAIN，或 libssh2 在 EOF 前偶发的 0 → 继续等到预算尽 */
+                w = wait_dir(h, hp, dl);
+                if (w == W_CANCEL)
+                    goto out;
+                if (w)
+                    break;   /* 超时等非致命 */
+                continue;
+            }
+            break;   /* 真错误 → 非致命 */
+        }
+    }
+    buf[len] = 0;
+    if (len && osr_field(buf, "ID", id, sizeof id))
+        osr_field(buf, "PRETTY_NAME", pretty, sizeof pretty);
+out:
+    if (ch)
+        libssh2_channel_free(ch);
+    if (id[0])
+        hb__session_emit(h->s, HB_SESS_EV_OSINFO, 'T', 0, id,
+                         pretty[0] ? pretty : NULL);
+    return w == W_CANCEL ? w : 0;
+}
+
 static int ssh_connect_op(void *ctx, hb_session *s)
 {
     hb_ssh *h = ctx;
@@ -1748,6 +1842,11 @@ static int ssh_connect_op(void *ctx, hb_session *s)
         rc = hop_up(h, i);
         if (rc)
             return -1;
+    }
+    if (h->detect_os) {
+        rc = os_detect(h, target_hop(h));
+        if (rc)
+            return fail_wait(h, rc, HB_SSH_ERR_CHANNEL);
     }
     return target_shell(h, target_hop(h),
                         hb_now_ms() + HANDSHAKE_MS) ? -1 : 0;
@@ -1795,6 +1894,7 @@ hb_session *hb_session_new_ssh(const hb_ssh_opts *opts,
     h->keepalive_s = opts->keepalive_s;
     h->term = xstrdup(opts->term ? opts->term : "xterm-256color");
     h->command = xstrdup(opts->command);
+    h->detect_os = opts->detect_os;
     h->rows = rows;
     h->cols = cols;
     for (i = 0; i < h->nhops; i++)

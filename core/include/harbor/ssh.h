@@ -46,6 +46,7 @@ typedef struct {
     const char *const *env;                   /* 可选 "K=V"，channel setenv（忽略失败） */
     const char        *command;               /* NULL = 交互 shell；否则 exec */
     hb_vt             *reuse_vt;   /* 非 NULL → 复用 vt（重连保 scrollback） */
+    bool               detect_os;  /* 认证后探测 /etc/os-release → OSINFO 事件 */
 } hb_ssh_opts;
 
 /* 深拷贝 opts（密钥/密码进 sodium 锁定内存，认证后即擦除）。 */

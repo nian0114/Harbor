@@ -298,6 +298,8 @@ typedef struct {
     char err_text[300], err_text2[400];
     int  exit_code;
     bool exited;
+    int  osinfo_n;
+    char os_id[64], os_pretty[256];
 } drv;
 
 static void drv_init(drv *d)
@@ -350,6 +352,12 @@ static void drv_take(drv *d, hb_session *s, hb_sess_event *ev)
     case HB_SESS_EV_EXIT:
         d->exited = true;
         d->exit_code = ev->code;
+        break;
+    case HB_SESS_EV_OSINFO:
+        d->osinfo_n++;
+        snprintf(d->os_id, sizeof d->os_id, "%s", ev->text ? ev->text : "");
+        snprintf(d->os_pretty, sizeof d->os_pretty, "%s",
+                 ev->text2 ? ev->text2 : "");
         break;
     default:
         break;
@@ -806,6 +814,31 @@ static void test_agent(void)
         kill((pid_t)agent_pid, SIGTERM);
 }
 
+/* 8d. detect_os → OSINFO 事件（ID=ubuntu、PRETTY_NAME 非空） */
+static void test_osinfo(void)
+{
+    hb_ssh_opts o = base_opts();
+    hb_session *s;
+    drv d;
+    const char *kl[] = { fix_khline };
+
+    o.known_lines = kl;
+    o.nknown = 1;
+    o.detect_os = true;
+    o.command = "exit 0";
+    drv_init(&d);
+    s = hb_session_new_ssh(&o, 24, 80, 200);
+    CHECK(s != NULL);
+    if (!s)
+        return;
+    CHECK(drv_run(s, &d, 10000));
+    CHECK_EQ_INT(d.connected, 1);
+    CHECK_EQ_INT(d.osinfo_n, 1);
+    CHECK(strcmp(d.os_id, "ubuntu") == 0);
+    CHECK(d.os_pretty[0] != 0);
+    hb_session_free(s);
+}
+
 /* 9. 交互 shell：TERM / resize / exit */
 static void test_interactive(void)
 {
@@ -1018,6 +1051,7 @@ int main(void)
     test_proxyjump();
     test_jump_bulk();
     test_agent();
+    test_osinfo();
     test_interactive();
     test_cancel_connect();
     test_cancel_during_hostkey();
