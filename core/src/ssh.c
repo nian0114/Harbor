@@ -92,6 +92,8 @@ typedef struct {
     char       *command;
     int         rows, cols;
     int64_t     ka_next;       /* 下次 keepalive 到期时刻 ms；0 = 关 */
+    int64_t     ka_last_in;    /* 最后一次 fd 可读（任意入站包 = 对端活着） */
+    int         ka_miss;       /* 连续无入站的 keepalive 间隔数 */
     bool        disconnected;
     bool        disconnect_emitted;
     char        errbuf[256];   /* 技术细节 → ERROR.text2 */
@@ -1476,6 +1478,7 @@ static int target_shell(hb_ssh *h, hop *hp, int64_t dl)
         libssh2_keepalive_config(hp->sess, 1,
                                  (unsigned int)h->keepalive_s);
         h->ka_next = hb_now_ms() + (int64_t)h->keepalive_s * 1000;
+        h->ka_last_in = hb_now_ms();
     }
     hb__session_emit(h->s, HB_SESS_EV_CONNECTED, hp->mark, 0, NULL, NULL);
     return 0;
@@ -1500,6 +1503,9 @@ static ssize_t ssh_read_op(void *ctx, char *buf, size_t len)
     hop *hp = target_hop(h);
     ssize_t n;
 
+    /* 能进这里说明 fd 可读了 —— 有包从对端过来（包括 libssh2 内部吃掉的
+     * keepalive 回复），是半开 TCP 检测的"存活"信号。 */
+    h->ka_last_in = hb_now_ms();
     if (!hp->chan) {
         errno = EIO;
         return -1;
@@ -1623,10 +1629,24 @@ static int ssh_tick_op(void *ctx)
         return -1;
     now = hb_now_ms();
     if (now >= h->ka_next) {
-        if (libssh2_keepalive_send(target_hop(h)->sess, &next) == 0 && next > 0)
+        /* libssh2 keepalive 是 fire-and-forget：send() 打进内核缓冲就成功，
+         * 拔线型半开连接要靠 want_reply 的回复来检测 —— 连续 3 个间隔没有
+         * 任何入站包（reply 也算）→ 判定死连接。 */
+        if (now - h->ka_last_in >= (int64_t)h->keepalive_s * 1000) {
+            if (++h->ka_miss >= 3) {
+                h->disconnected = true;
+                return 0;
+            }
+        } else {
+            h->ka_miss = 0;
+        }
+        if (libssh2_keepalive_send(target_hop(h)->sess, &next) == 0 &&
+            next > 0)
             h->ka_next = now + (int64_t)next * 1000;
         else
             h->ka_next = now + (int64_t)h->keepalive_s * 1000;
+        if (h->disconnected)
+            return 0;   /* 立刻唤醒 poll → read/poll_exit 走断线收尾 */
     }
     left = h->ka_next - now;
     if (left < 50)
