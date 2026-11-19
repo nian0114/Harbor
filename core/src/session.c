@@ -313,28 +313,33 @@ static void *sess_thread(void *arg)
         if (pf[1].revents & (POLLOUT | POLLIN) || sess_pending_write(s))
             sess_flush_write(s);
 
-        /* 读 */
+        /* 读：pty 一次只吐几十字节，聚满一块再喂 vt，否则每次喂都是固定开销 */
         if (pf[1].revents & POLLIN) {
+            size_t len = 0;
             for (;;) {
-                ssize_t n = s->tr.read(s->tr.ctx, buf, READ_CHUNK);
+                ssize_t n = s->tr.read(s->tr.ctx, buf + len, READ_CHUNK - len);
                 if (n > 0) {
-                    hb_session_tap_fn tf;
-                    void *td;
-                    pthread_mutex_lock(&s->mu);
-                    tf = s->tap;
-                    td = s->tap_ud;
-                    pthread_mutex_unlock(&s->mu);
-                    if (tf)
-                        tf(s, buf, (size_t)n, td);
-                    hb_vt_feed(s->vt, buf, (size_t)n);
-                    out_dirty = true;
-                    continue;
-                }
-                if (n == 0)
+                    len += (size_t)n;
+                    if (len < READ_CHUNK)
+                        continue;
+                } else if (n == 0) {
                     eof = true;
-                else if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+                } else if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
                     eof = true;     /* EIO 等 → 视为结束 */
+                }
                 break;
+            }
+            if (len) {
+                hb_session_tap_fn tf;
+                void *td;
+                pthread_mutex_lock(&s->mu);
+                tf = s->tap;
+                td = s->tap_ud;
+                pthread_mutex_unlock(&s->mu);
+                if (tf)
+                    tf(s, buf, len, td);
+                hb_vt_feed(s->vt, buf, len);
+                out_dirty = true;
             }
         }
         if (pf[1].revents & (POLLERR | POLLHUP | POLLNVAL))
@@ -344,6 +349,11 @@ static void *sess_thread(void *arg)
             /* 进程已死：可能还有残留输出，下一轮 POLLIN 读干后再退 */
             if (!eof && (pf[1].revents & POLLIN) == 0)
                 eof = true;
+        }
+        /* 每轮 poll 通知一次；out_pending 事件侧再合并 */
+        if (out_dirty) {
+            hb__session_emit(s, HB_SESS_EV_OUTPUT, 0, 0, NULL, NULL);
+            out_dirty = false;
         }
         if (eof)
             break;
