@@ -306,6 +306,10 @@ AdwDialog *hb_dialog_hostkey_changed(GtkWindow *parent,
 
     g_signal_connect(dlg, "closed", G_CALLBACK(hk_closed), d);
     adw_dialog_present(ADW_DIALOG(dlg), GTK_WIDGET(parent));
+    /* FR-09 acc2：Enter/默认动作必须是「断开连接」而非更新指纹 —
+     * 焦点落在 cancel 上（ok 仍需勾选后才可用），Esc/关闭也走
+     * accepted=FALSE 路径。 */
+    gtk_widget_grab_focus(cancel);
     return ADW_DIALOG(dlg);
 }
 
