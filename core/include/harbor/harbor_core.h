@@ -11,5 +11,6 @@
 #include "keys.h"
 #include "watch.h"
 #include "knownhosts.h"
+#include "snippet.h"
 
 #endif

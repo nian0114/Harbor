@@ -49,3 +49,8 @@ test_knownhosts = executable('test_knownhosts', 'test_knownhosts.c',
     dependencies: harbor_core_dep,
 )
 test('knownhosts', test_knownhosts)
+
+test_snippet = executable('test_snippet', 'test_snippet.c',
+    dependencies: harbor_core_dep,
+)
+test('snippet', test_snippet)
