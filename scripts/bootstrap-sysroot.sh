@@ -22,6 +22,7 @@ SEEDS=(
     libjson-glib-dev libsoup-3.0-dev libsecret-1-dev
     libglib2.0-dev libglib2.0-dev-bin
     xvfb xauth xfonts-base
+    zsh fish
 )
 
 APT_LINE="sudo apt install build-essential pkg-config meson ninja-build \
