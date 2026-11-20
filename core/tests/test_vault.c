@@ -295,22 +295,30 @@ static void test_key_cascade(void)
     hb_obj *k = hb_obj_new("key");
     hb_obj *h1 = mk_host("h1", 1);
     hb_obj *h2 = mk_host("h2", 2);
+    hb_obj *h3 = mk_host("h3", 3);
     hb_obj *g = NULL;
-    char kid[64];
+    hb_key_ref *refs = NULL;
+    size_t nrefs = 0;
+    char kid[64], h3id[64];
 
     hb_obj_set_str(k, "name", "mykey");
     snprintf(kid, sizeof kid, "%s", hb_obj_id(k));
     hb_obj_set_str(h1, "auth", "key");
     hb_obj_set_str(h1, "key_id", kid);
-    hb_obj_set_str(h2, "auth", "key");
+    hb_obj_set_str(h2, "auth", "auto");        /* 引用 key 但 auth 已是 auto */
     hb_obj_set_str(h2, "key_id", kid);
+    hb_obj_set_str(h3, "auth", "key");
+    hb_obj_set_str(h3, "key_id", kid);
+    snprintf(h3id, sizeof h3id, "%s", hb_obj_id(h3));
 
     CHECK_EQ_INT(hb_vault_put(v, k), HB_OK);
     CHECK_EQ_INT(hb_vault_put(v, h1), HB_OK);
     CHECK_EQ_INT(hb_vault_put(v, h2), HB_OK);
+    CHECK_EQ_INT(hb_vault_put(v, h3), HB_OK);
 
-    CHECK_EQ_INT(hb_vault_key_ref_count(v, kid), 2);
-    CHECK_EQ_INT(hb_vault_delete_key_cascade(v, kid), HB_OK);
+    CHECK_EQ_INT(hb_vault_key_ref_count(v, kid), 3);
+    CHECK_EQ_INT(hb_vault_delete_key_cascade(v, kid, &refs, &nrefs), HB_OK);
+    CHECK_EQ_INT(nrefs, 3);
     CHECK_EQ_INT(hb_vault_key_ref_count(v, kid), 0);
 
     CHECK_EQ_INT(hb_vault_get(v, kid, &g), HB_OK);
@@ -318,13 +326,38 @@ static void test_key_cascade(void)
     hb_obj_free(g);
 
     CHECK_EQ_INT(hb_vault_get(v, hb_obj_id(h1), &g), HB_OK);
-    CHECK_EQ_STR(hb_obj_get_str(g, "auth"), "none");
+    CHECK_EQ_STR(hb_obj_get_str(g, "auth"), "auto");   /* 回落 auto，不是 none */
+    CHECK(!hb_obj_has(g, "key_id"));
+    hb_obj_free(g);
+
+    /* 级联后撤销前删掉 h3 → undo 必须跳过它 */
+    CHECK_EQ_INT(hb_vault_delete(v, h3id), HB_OK);
+    CHECK_EQ_INT(hb_vault_undo_key_cascade(v, kid, refs, nrefs), HB_OK);
+    hb_key_refs_free(refs, nrefs);
+
+    CHECK_EQ_INT(hb_vault_get(v, kid, &g), HB_OK);
+    CHECK(!hb_obj_tombstone(g));
+    hb_obj_free(g);
+
+    CHECK_EQ_INT(hb_vault_get(v, hb_obj_id(h1), &g), HB_OK);
+    CHECK_EQ_STR(hb_obj_get_str(g, "auth"), "key");    /* prev_auth 恢复 */
+    CHECK_EQ_STR(hb_obj_get_str(g, "key_id"), kid);
+    hb_obj_free(g);
+
+    CHECK_EQ_INT(hb_vault_get(v, hb_obj_id(h2), &g), HB_OK);
+    CHECK_EQ_STR(hb_obj_get_str(g, "auth"), "auto");
+    CHECK_EQ_STR(hb_obj_get_str(g, "key_id"), kid);
+    hb_obj_free(g);
+
+    CHECK_EQ_INT(hb_vault_get(v, h3id, &g), HB_OK);
+    CHECK(hb_obj_tombstone(g));                       /* 不复活已删主机 */
     CHECK(!hb_obj_has(g, "key_id"));
     hb_obj_free(g);
 
     hb_obj_free(k);
     hb_obj_free(h1);
     hb_obj_free(h2);
+    hb_obj_free(h3);
     hb_vault_close(v);
 }
 

@@ -80,8 +80,20 @@ void hb_vault_set_change_cb(hb_vault *v, hb_vault_change_cb cb, void *ud);
 
 /* 引用该密钥（data.key_id）的非 tombstone 主机数量。 */
 size_t hb_vault_key_ref_count(hb_vault *v, const char *key_id);
-/* tombstone 该密钥对象；所有引用它的主机 auth 置 "none"、移除 key_id。 */
-hb_err hb_vault_delete_key_cascade(hb_vault *v, const char *key_id);
+
+/* 删除密钥时被连带清空的主机：撤销时逐台恢复 key_id + 原 auth。 */
+typedef struct { char *host_id; char *prev_auth; } hb_key_ref;
+/* tombstone 该密钥对象；所有引用它的主机移除 key_id 且 auth 置 "auto"
+ *（不是 "none"：none 表示完全不认证，主机会直接失败）。
+ * refs_out/n_out 可传 NULL 不要快照；否则 malloc 数组，
+ * 用 hb_key_refs_free 释放。整个变更在一个事务里。 */
+hb_err hb_vault_delete_key_cascade(hb_vault *v, const char *key_id,
+                                   hb_key_ref **refs_out, size_t *n_out);
+/* 撤销级联删除：复活密钥；refs 中每台仍存活且未设 key_id 的主机恢复
+ * key_id 与 prev_auth（已删除的主机跳过）。同一事务。 */
+hb_err hb_vault_undo_key_cascade(hb_vault *v, const char *key_id,
+                                 const hb_key_ref *refs, size_t n);
+void   hb_key_refs_free(hb_key_ref *r, size_t n);
 
 /* JSON 数组导出（非 tombstone）：data 字段 + "id"，不含 _fv/secret。 */
 hb_err hb_vault_export_json(hb_vault *v, const char *type, char **out);

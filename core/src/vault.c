@@ -1106,15 +1106,33 @@ size_t hb_vault_key_ref_count(hb_vault *v, const char *key_id)
     return n;
 }
 
-hb_err hb_vault_delete_key_cascade(hb_vault *v, const char *key_id)
+void hb_key_refs_free(hb_key_ref *r, size_t n)
+{
+    size_t i;
+    if (!r)
+        return;
+    for (i = 0; i < n; i++) {
+        free(r[i].host_id);
+        free(r[i].prev_auth);
+    }
+    free(r);
+}
+
+hb_err hb_vault_delete_key_cascade(hb_vault *v, const char *key_id,
+                                   hb_key_ref **refs_out, size_t *n_out)
 {
     hb_err e;
     sqlite3_stmt *st;
     hb_obj **hosts = NULL;
-    size_t nh = 0, i;
+    hb_key_ref *refs = NULL;
+    size_t nh = 0, nrefs = 0, i;
     char **notify_ids = NULL;
     size_t nnotify = 0;
 
+    if (refs_out)
+        *refs_out = NULL;
+    if (n_out)
+        *n_out = 0;
     if (!v || !key_id)
         return HB_ERR_INVALID;
     if ((e = txn_begin(v)) != HB_OK)
@@ -1124,7 +1142,8 @@ hb_err hb_vault_delete_key_cascade(hb_vault *v, const char *key_id)
     if (e != HB_OK)
         goto out;
 
-    /* 收集引用该 key 的主机，逐个清掉 key_id、auth 置 none */
+    /* 收集引用该 key 的主机，逐个清掉 key_id、auth 置 auto；
+     * 同时记录 (host_id, 原 auth) 供撤销恢复 */
     if (sqlite3_prepare_v2(v->db,
             "SELECT id FROM objects WHERE type='host' AND tombstone=0"
             " AND json_extract(data,'$.key_id')=?1",
@@ -1135,6 +1154,7 @@ hb_err hb_vault_delete_key_cascade(hb_vault *v, const char *key_id)
     sqlite3_bind_text(st, 1, key_id, -1, SQLITE_TRANSIENT);
     while (sqlite3_step(st) == SQLITE_ROW) {
         hb_obj **na = realloc(hosts, (nh + 1) * sizeof *na);
+        hb_key_ref *nr;
         const char *hid = (const char *)sqlite3_column_text(st, 0);
         if (!na) {
             sqlite3_finalize(st);
@@ -1147,12 +1167,29 @@ hb_err hb_vault_delete_key_cascade(hb_vault *v, const char *key_id)
             sqlite3_finalize(st);
             goto out;
         }
+        nr = realloc(refs, (nrefs + 1) * sizeof *nr);
+        if (!nr) {
+            sqlite3_finalize(st);
+            e = HB_ERR_NOMEM;
+            goto out;
+        }
+        refs = nr;
+        refs[nrefs].host_id = xstrdup(hosts[nh]->id);
+        refs[nrefs].prev_auth = xstrdup(hb_obj_get_str(hosts[nh], "auth"));
+        if (!refs[nrefs].host_id ||
+            (hb_obj_get_str(hosts[nh], "auth") && !refs[nrefs].prev_auth)) {
+            sqlite3_finalize(st);
+            nrefs++;            /* 让 out 清理这块 */
+            e = HB_ERR_NOMEM;
+            goto out;
+        }
         nh++;
+        nrefs++;
     }
     sqlite3_finalize(st);
 
     for (i = 0; i < nh; i++) {
-        hb_obj_set_str(hosts[i], "auth", "none");
+        hb_obj_set_str(hosts[i], "auth", "auto");
         hb_obj_set_str(hosts[i], "key_id", NULL);
         e = put_locked(v, hosts[i], NULL);
         if (e != HB_OK)
@@ -1174,10 +1211,82 @@ hb_err hb_vault_delete_key_cascade(hb_vault *v, const char *key_id)
         notify(v, i == 0 ? "key" : "host", notify_ids[i]);
         free(notify_ids[i]);
     }
+    if (refs_out)
+        *refs_out = refs;
+    else
+        hb_key_refs_free(refs, nrefs);
+    if (n_out)
+        *n_out = nrefs;
+    refs = NULL;
 
 out:
     free(notify_ids);
     hb_obj_list_free(hosts, nh);
+    hb_key_refs_free(refs, nrefs);
+    if (e != HB_OK) {
+        txn_rollback(v);
+        return e;
+    }
+    return HB_OK;
+}
+
+hb_err hb_vault_undo_key_cascade(hb_vault *v, const char *key_id,
+                                 const hb_key_ref *refs, size_t n)
+{
+    hb_err e;
+    hb_obj **restored = NULL;
+    size_t nr = 0, i;
+
+    if (!v || !key_id || (n && !refs))
+        return HB_ERR_INVALID;
+    if ((e = txn_begin(v)) != HB_OK)
+        return e;
+
+    e = set_tombstone(v, key_id, 0);
+    if (e != HB_OK)
+        goto out;
+
+    for (i = 0; i < n; i++) {
+        hb_obj *h = NULL;
+        e = load_obj(v, refs[i].host_id, &h);
+        if (e == HB_ERR_NOT_FOUND) {       /* 期间被真删 */
+            e = HB_OK;
+            continue;
+        }
+        if (e != HB_OK)
+            goto out;
+        /* 已 tombstone 或已被设了别 key 的不动 */
+        if (!h->tombstone && !hb_obj_get_str(h, "key_id")) {
+            hb_obj_set_str(h, "key_id", key_id);
+            hb_obj_set_str(h, "auth", refs[i].prev_auth);
+            e = put_locked(v, h, NULL);
+            if (e == HB_OK) {
+                hb_obj **na = realloc(restored, (nr + 1) * sizeof *na);
+                if (!na) {
+                    e = HB_ERR_NOMEM;
+                    hb_obj_free(h);
+                    goto out;
+                }
+                restored = na;
+                restored[nr++] = h;
+            } else {
+                hb_obj_free(h);
+                goto out;
+            }
+        } else {
+            hb_obj_free(h);
+        }
+    }
+
+    e = txn_commit(v);
+    if (e != HB_OK)
+        goto out;
+    notify(v, "key", key_id);
+    for (i = 0; i < nr; i++)
+        notify(v, "host", restored[i]->id);
+
+out:
+    hb_obj_list_free(restored, nr);
     if (e != HB_OK) {
         txn_rollback(v);
         return e;
