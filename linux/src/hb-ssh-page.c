@@ -164,8 +164,6 @@ static void tab_close(HbSshPage *p)
     if (w && p->tab_id) hb_window_close_tab(w, p->tab_id);
 }
 
-static void toast(HbSshPage *p, const char *t) { hb_toast(GTK_WIDGET(p), t); }
-
 static const char *os_avatar(const char *os)
 {
     /* host.os → 头像/tab 图标键 */
@@ -330,6 +328,8 @@ static void host_to_hop(HbSshPage *p, ConnCtx *c, hb_obj *h, hb_ssh_hop *hop)
     hop->port = (int)hb_obj_get_int(h, "port", 22);
     if (hop->port <= 0) hop->port = 22;
     hop->user = hb_obj_get_str(h, "user");
+    if (!hop->user || !*hop->user)
+        hop->user = g_get_user_name();   /* 与 ssh(1) 一致：未填用户名用本机用户 */
     hop->label = hb_obj_get_str(h, "name");
     hop->auth = HB_SSH_AUTH_AUTO;
 
@@ -1527,9 +1527,10 @@ static void continue_connect(HbSshPage *p)
         return;
     }
     if (!c || !c->o.target.host || !*c->o.target.host) {
-        toast(p, "无法读取主机信息");
+        p->connecting = FALSE;
         log_finish(p, "error", "host object missing");
         p->log_id = 0;
+        show_error_card(p, "无法读取主机信息", NULL, 0);
         if (reuse) hb_vt_free(reuse);
         conn_ctx_free(c);
         if (thost) hb_obj_free(thost);
@@ -1541,9 +1542,12 @@ static void continue_connect(HbSshPage *p)
     conn_ctx_free(c);
     if (thost) hb_obj_free(thost);
     if (!p->sess) {
-        toast(p, "无法创建 SSH 会话");
+        p->connecting = FALSE;
         log_finish(p, "error", "session alloc failed");
         p->log_id = 0;
+        show_error_card(p, "无法创建 SSH 会话",
+                        "主机配置缺少必填字段（如用户名）", 0);
+        if (reuse) hb_vt_free(reuse);
         return;
     }
     hb_terminal_set_session(HB_TERMINAL(p->term), p->sess);
