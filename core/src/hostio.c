@@ -178,6 +178,7 @@ static const char *resolve_jump_elem(hb_vault *v, hb_obj ***phs, size_t *pnh,
             hs[nh] = o;
             *pnh = nh + 1;
             r->jumps_created++;
+            r_id(r, hb_obj_id(o));      /* UI 撤销也要删它 */
             free(pu); free(ph);
             return hb_obj_id(o);
         }

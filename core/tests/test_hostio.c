@@ -312,7 +312,8 @@ static void test_import_50(void)
     expect_jumps = 2;
     CHECK_EQ_INT(r.jumps_created, expect_jumps);
     CHECK_EQ_INT(r.skipped, 0);
-    CHECK_EQ_INT(r.ncreated, 50);
+    /* created_ids = 别名 50 + 跳板字面量 2（UI 撤销要全删） */
+    CHECK_EQ_INT(r.ncreated, 50 + expect_jumps);
     CHECK_EQ_INT(n_hosts(v), 50 + expect_jumps);
 
     /* 抽查字段 */

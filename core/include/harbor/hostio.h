@@ -36,7 +36,9 @@ void   hb_sshcfg_free(hb_sshcfg *c);
 typedef struct {
     size_t created, skipped, jumps_created;
     char **warnings; size_t nwarn;
-    char **created_ids; size_t ncreated;   /* new host ids, for UI selection/undo */
+    /* 新建主机 id（sshcfg：created + jumps_created 个；json：created 个），
+     * 供 UI 选中/撤销（撤销时逐个 tombstone 即可回滚整个导入）。 */
+    char **created_ids; size_t ncreated;
 } hb_import_result;
 void hb_import_result_free(hb_import_result *r);
 
