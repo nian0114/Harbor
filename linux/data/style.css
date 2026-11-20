@@ -23,6 +23,12 @@
 @define-color hb_term_text     #3fd97f;
 @define-color hb_term_dim      #8b96ad;
 
+/* 应用级 accent 固定为原型 --blue；否则 Ubuntu/Yaru 的橙色
+ * (#e95420) 会泄漏进所有焦点环与 entry 聚焦边框 */
+@define-color accent_bg_color  #2f7cf6;
+@define-color accent_color     #2f7cf6;
+@define-color accent_fg_color  #ffffff;
+
 * { font-family: "Ubuntu", "Cantarell", "Noto Sans", "Noto Sans CJK SC", sans-serif;
     font-size: 14px; }
 
