@@ -8,6 +8,8 @@
 #include "harbor/ssh.h"
 #include "harbor/keys.h"
 #include "harbor/vt.h"
+#include "harbor/vault.h"
+#include "harbor/knownhosts.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -521,6 +523,78 @@ static void test_known_match(void)
     CHECK_EQ_INT(d.connected, 1);
     CHECK_EQ_INT(d.exit_code, 0);
     hb_session_free(s);
+}
+
+/* 2b. FR-09 acc3：经 vault 导入的 ssh-keygen -H 哈希行 → 真实连接无 HOSTKEY */
+static void test_known_hashed(void)
+{
+    char path[4400], cmd[4600], hline[1024];
+    FILE *f;
+    hb_vault *v = NULL;
+    hb_import_result r;
+    hb_obj **objs = NULL;
+    size_t n = 0, nk = 0, i;
+    const char *kl[8];
+    hb_ssh_opts o;
+    hb_session *s;
+    drv d;
+    static const uint8_t DEK[32] = {9};
+
+    snprintf(path, sizeof path, "%s/kh_hash", fix_dir);
+    f = fopen(path, "w");
+    CHECK(f != NULL);
+    if (!f)
+        return;
+    fprintf(f, "%s\n", fix_khline);
+    fclose(f);
+    snprintf(cmd, sizeof cmd, "ssh-keygen -H -f '%s' >/dev/null 2>&1",
+             path);
+    CHECK(system(cmd) == 0);
+    hline[0] = 0;
+    f = fopen(path, "r");
+    if (f) {
+        char *e;
+        if (fgets(hline, sizeof hline, f)) {
+            e = strchr(hline, '\n');
+            if (e) *e = 0;
+        }
+        fclose(f);
+    }
+    CHECK(hline[0] == '|');
+    if (!hline[0])
+        return;
+
+    /* 走 vault 导入 → 收集对象的 line 字段当 known_lines */
+    snprintf(path, sizeof path, "%s/vhash.db", fix_dir);
+    CHECK_EQ_INT(hb_vault_open(path, DEK, &v), HB_OK);
+    memset(&r, 0, sizeof r);
+    CHECK_EQ_INT(hb_known_import_text(v, hline, &r), HB_OK);
+    CHECK_EQ_INT(r.created, 1);
+    hb_import_result_free(&r);
+    CHECK_EQ_INT(hb_vault_list(v, "known", &objs, &n), HB_OK);
+    for (i = 0; i < n && nk < 8; i++) {
+        const char *ln = hb_obj_get_str(objs[i], "line");
+        if (ln && *ln)
+            kl[nk++] = ln;
+    }
+    CHECK(nk >= 1);
+
+    o = base_opts();
+    o.known_lines = kl;
+    o.nknown = nk;
+    o.command = "echo ok; exit 0";
+    drv_init(&d);
+    s = hb_session_new_ssh(&o, 24, 80, 200);
+    CHECK(s != NULL);
+    if (s) {
+        CHECK(drv_run(s, &d, 10000));
+        CHECK_EQ_INT(d.hk_n, 0);            /* 哈希行匹配 → 无 HOSTKEY */
+        CHECK_EQ_INT(d.connected, 1);
+        CHECK_EQ_INT(d.exit_code, 0);
+        hb_session_free(s);
+    }
+    hb_obj_list_free(objs, n);
+    hb_vault_close(v);
 }
 
 /* 3. 密钥变更 → HOSTKEY code 1；拒绝 → HOSTKEY_CHANGED */
@@ -1133,6 +1207,7 @@ int main(void)
     test_parse_target();        /* 不依赖 sshd 的先跑 */
     test_tofu();
     test_known_match();
+    test_known_hashed();
     test_mismatch_reject();
     test_unknown_reject();
     test_key_prompt_ok();

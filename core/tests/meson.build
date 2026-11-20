@@ -44,3 +44,8 @@ test_watch = executable('test_watch', 'test_watch.c',
     dependencies: harbor_core_dep,
 )
 test('watch', test_watch, timeout: 60)
+
+test_knownhosts = executable('test_knownhosts', 'test_knownhosts.c',
+    dependencies: harbor_core_dep,
+)
+test('knownhosts', test_knownhosts)

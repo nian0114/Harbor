@@ -10,5 +10,6 @@
 #include "hostio.h"
 #include "keys.h"
 #include "watch.h"
+#include "knownhosts.h"
 
 #endif
