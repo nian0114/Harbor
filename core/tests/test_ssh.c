@@ -1119,7 +1119,7 @@ static void test_cancel_during_hostkey(void)
     CHECK(now_ms() - t0 < 2000);
 }
 
-/* 11. keepalive=1s：~2.5s 空闲后仍正常 */
+/* 11. keepalive=1s：~6s 空闲（远超 3 个间隔）后仍正常，不得误判断线 */
 static void test_keepalive(void)
 {
     hb_ssh_opts o = base_opts();
@@ -1130,7 +1130,7 @@ static void test_keepalive(void)
     o.known_lines = kl;
     o.nknown = 1;
     o.keepalive_s = 1;
-    o.command = "sleep 3; echo alive; exit 0";
+    o.command = "sleep 6; echo alive; exit 0";
     drv_init(&d);
     s = hb_session_new_ssh(&o, 24, 80, 200);
     CHECK(s != NULL);

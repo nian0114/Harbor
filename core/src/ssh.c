@@ -93,7 +93,8 @@ typedef struct {
     int         rows, cols;
     int64_t     ka_next;       /* 下次 keepalive 到期时刻 ms；0 = 关 */
     int64_t     ka_last_in;    /* 最后一次 fd 可读（任意入站包 = 对端活着） */
-    int         ka_miss;       /* 连续无入站的 keepalive 间隔数 */
+    int64_t     ka_last_out;   /* 最后一次发出 keepalive 的时刻 ms */
+    int         ka_miss;       /* 连续无入站应答的 keepalive 次数 */
     bool        detect_os;
     bool        disconnected;
     bool        disconnect_emitted;
@@ -1650,9 +1651,11 @@ static int ssh_tick_op(void *ctx)
     now = hb_now_ms();
     if (now >= h->ka_next) {
         /* libssh2 keepalive 是 fire-and-forget：send() 打进内核缓冲就成功，
-         * 拔线型半开连接要靠 want_reply 的回复来检测 —— 连续 3 个间隔没有
-         * 任何入站包（reply 也算）→ 判定死连接。 */
-        if (now - h->ka_last_in >= (int64_t)h->keepalive_s * 1000) {
+         * 拔线型半开连接要靠 want_reply 的回复来检测 —— 判据是"上次发出
+         * keepalive 之后没有任何入站包（reply 也算）"，连续 3 次 → 死连接。
+         * 不能拿 ka_last_in 比 keepalive_s：空闲连接上最后一个入站包就是
+         * 上一个 reply，距今≈发送间隔，会把健康连接误判为断线。 */
+        if (h->ka_last_out && h->ka_last_in < h->ka_last_out) {
             if (++h->ka_miss >= 3) {
                 h->disconnected = true;
                 return 0;
@@ -1660,11 +1663,15 @@ static int ssh_tick_op(void *ctx)
         } else {
             h->ka_miss = 0;
         }
-        if (libssh2_keepalive_send(target_hop(h)->sess, &next) == 0 &&
-            next > 0)
-            h->ka_next = now + (int64_t)next * 1000;
-        else
+        if (libssh2_keepalive_send(target_hop(h)->sess, &next) == 0) {
+            h->ka_last_out = now;
+            if (next > 0)
+                h->ka_next = now + (int64_t)next * 1000;
+            else
+                h->ka_next = now + (int64_t)h->keepalive_s * 1000;
+        } else {
             h->ka_next = now + (int64_t)h->keepalive_s * 1000;
+        }
         if (h->disconnected)
             return 0;   /* 立刻唤醒 poll → read/poll_exit 走断线收尾 */
     }
