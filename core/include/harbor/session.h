@@ -41,6 +41,7 @@ typedef enum {
     /* 交互式输入请求：
      *   code  0=密码，1=私钥口令（passphrase）
      *   text  提示语
+     *   mark  'J' 跳板跳 / 'T' 目标；text2 = hop 下标（"0"…njumps 为目标）
      * 连接线程挂起等 hb_session_prompt_reply（NULL = 取消）。 */
     HB_SESS_EV_PROMPT,
     /* 目标主机 OS 探测（hb_ssh_opts.detect_os；非致命）：

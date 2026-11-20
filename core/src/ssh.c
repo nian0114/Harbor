@@ -921,8 +921,10 @@ static int key_try(hb_ssh *h, hop *hp, const char *priv_text,
 static char *prompt_secret(hb_ssh *h, hop *hp, int code, const char *msg)
 {
     char *got = NULL;
+    char idx[8];   /* text2 = hop 下标：UI 凭它归属"记住口令"到正确的跳/目标 */
     hb__session_reply_reset(h->s, HB__REPLY_PROMPT);
-    hb__session_emit(h->s, HB_SESS_EV_PROMPT, hp->mark, code, msg, NULL);
+    snprintf(idx, sizeof idx, "%d", (int)(hp - h->hops));
+    hb__session_emit(h->s, HB_SESS_EV_PROMPT, hp->mark, code, msg, idx);
     if (hb__session_reply_wait(h->s, NULL, &got) <= 0) {
         hb_secret_free(got);
         return NULL;
