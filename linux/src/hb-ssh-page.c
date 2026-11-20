@@ -1,5 +1,6 @@
 #include "hb-ssh-page.h"
 #include "hb-conn.h"
+#include "hb-connect-view.h"
 #include "hb-terminal.h"
 #include "hb-find-bar.h"
 #include "hb-term-theme.h"
@@ -54,15 +55,7 @@ struct _HbSshPage {
 
     /* ---- connect 视图 ---- */
     GtkWidget  *stack;
-    GtkWidget  *node[3];        /* link / shield / terminal */
-    GtkWidget  *bar[2];
-    GtkWidget  *log_box;
-    GtkWidget  *log_scroll;
-    GtkWidget  *hide_btn;
-    gboolean    hide_log;
-    int         cur_stage;
-    GtkWidget  *err_card;       /* 连接期错误卡片（NULL=无） */
-    GtkWidget  *conn_foot;      /* connect 视图底部按钮行（错误卡显示时隐藏） */
+    GtkWidget  *conn_view;      /* HbConnectView（节点/日志/错误卡） */
 
     /* ---- 终端视图 ---- */
     GtkWidget  *term_view;
@@ -101,7 +94,6 @@ struct _HbSshPage {
     gboolean    was_reconnect;
     gboolean    reconnected_feed;   /* 连上后注入"重新连接成功"提示 */
 
-    GtkWidget  *connect_box;
     gulong      changed_handler;
 
     char       *theme_id;
@@ -173,66 +165,6 @@ static void set_status(HbSshPage *p, const char *txt, const char *cls)
     gtk_widget_remove_css_class(p->st_conn, "hb-term-warn");
     if (cls) gtk_widget_add_css_class(p->st_conn, cls);
     hb_session_page_meta_changed(HB_SESSION_PAGE(p));
-}
-
-/* ------------------------- 连接进度节点 ------------------------- */
-
-/* stage 0-1 → node0, 2 → node1, 3-4 → node2 */
-static int node_of(int stage)
-{
-    if (stage <= 1) return 0;
-    if (stage == 2) return 1;
-    return 2;
-}
-
-static void set_node(GtkWidget *n, const char *state)
-{
-    gtk_widget_remove_css_class(n, "pending");
-    gtk_widget_remove_css_class(n, "active");
-    gtk_widget_remove_css_class(n, "spin");
-    gtk_widget_remove_css_class(n, "done");
-    if (state) gtk_widget_add_css_class(n, state);
-}
-
-static void update_nodes(HbSshPage *p)
-{
-    int cur = node_of(p->cur_stage), i;
-    for (i = 0; i < 3; i++) {
-        if (i < cur)       set_node(p->node[i], "done");
-        else if (i == cur) set_node(p->node[i], "active spin");
-        else               set_node(p->node[i], "pending");
-    }
-    for (i = 0; i < 2; i++) {
-        gtk_widget_remove_css_class(p->bar[i], "pending");
-        gtk_widget_remove_css_class(p->bar[i], "done");
-        gtk_widget_add_css_class(p->bar[i],
-                               i < cur ? "done" : "pending");
-    }
-}
-
-static void add_log_line(HbSshPage *p, const char *text, gboolean err)
-{
-    GtkWidget *row, *l;
-    GtkWidget *v;
-    if (!p->log_box) return;
-    row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_widget_add_css_class(row, "connect-log-line");
-    gtk_box_append(GTK_BOX(row),
-        hb_icon_new(err ? "x" : "user", 13));
-    l = gtk_label_new(text);
-    gtk_label_set_xalign(GTK_LABEL(l), 0);
-    gtk_label_set_wrap(GTK_LABEL(l), TRUE);
-    gtk_widget_set_hexpand(l, TRUE);
-    if (err) gtk_widget_add_css_class(l, "hb-red");
-    gtk_box_append(GTK_BOX(row), l);
-    gtk_box_append(GTK_BOX(p->log_box), row);
-    /* 滚到底 */
-    v = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(p->log_scroll));
-    if (v) {
-        GtkAdjustment *adj = gtk_scrolled_window_get_vadjustment(
-            GTK_SCROLLED_WINDOW(p->log_scroll));
-        gtk_adjustment_set_value(adj, gtk_adjustment_get_upper(adj));
-    }
 }
 
 /* ------------------------- OSINFO ------------------------- */
@@ -585,90 +517,16 @@ static void on_ctl_connected(HbConnCtl *c, gpointer ud)
     gtk_widget_grab_focus(p->term);
 }
 
-static void on_errcard_close(GtkButton *b, gpointer ud)
-{ (void)b; tab_close((HbSshPage *)ud); }
-static void on_errcard_retry(GtkButton *b, gpointer ud)
-{ (void)b; start_connect((HbSshPage *)ud, FALSE); }
-static void on_errcard_edit(GtkButton *b, gpointer ud)
+/* connect 视图信号 → 页面动作 */
+static void on_cv_close(HbConnectView *v, gpointer ud)
+{ (void)v; tab_close((HbSshPage *)ud); }
+static void on_cv_start_over(HbConnectView *v, gpointer ud)
+{ (void)v; start_connect((HbSshPage *)ud, FALSE); }
+static void on_cv_edit(HbConnectView *v, gpointer ud)
 {
     HbSshPage *p = ud;
-    (void)b;
+    (void)v;
     g_signal_emit(p, sigs[SIG_EDIT_HOST], 0, p->host_id);
-}
-
-/* 连接期错误 → 错误卡片（插在日志区下方） */
-static void show_error_card(HbSshPage *p, const char *msg, const char *detail,
-                            int code)
-{
-    GtkWidget *card, *title, *exp, *foot, *dl;
-    char *markup;
-
-    if (p->err_card) {
-        gtk_widget_unparent(p->err_card);
-        p->err_card = NULL;
-    }
-    card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_widget_add_css_class(card, "connect-errcard");
-    gtk_widget_set_halign(card, GTK_ALIGN_CENTER);
-    gtk_widget_set_size_request(card, 430, -1);
-
-    markup = g_markup_printf_escaped("<b>%s</b>",
-                                     msg ? msg : "连接失败");
-    title = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(title), markup);
-    g_free(markup);
-    gtk_label_set_xalign(GTK_LABEL(title), 0);
-    gtk_label_set_wrap(GTK_LABEL(title), TRUE);
-    gtk_box_append(GTK_BOX(card), title);
-
-    if (code == HB_SSH_ERR_HOSTKEY_CHANGED) {
-        GtkWidget *w = gtk_label_new(
-            "为安全起见已阻断连接 —— 主机密钥与本地记录不符。");
-        gtk_widget_add_css_class(w, "hb-red");
-        gtk_label_set_wrap(GTK_LABEL(w), TRUE);
-        gtk_label_set_xalign(GTK_LABEL(w), 0);
-        gtk_box_append(GTK_BOX(card), w);
-    }
-    if (detail && *detail) {
-        exp = gtk_expander_new("技术详情");
-        dl = gtk_label_new(detail);
-        gtk_label_set_wrap(GTK_LABEL(dl), TRUE);
-        gtk_label_set_xalign(GTK_LABEL(dl), 0);
-        gtk_expander_set_child(GTK_EXPANDER(exp), dl);
-        gtk_widget_add_css_class(exp, "hb-dim");
-        gtk_box_append(GTK_BOX(card), exp);
-    }
-
-    foot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_widget_set_halign(foot, GTK_ALIGN_END);
-    {
-        GtkWidget *c = gtk_button_new_with_label("Close");
-        gtk_widget_add_css_class(c, "hb-btn");
-        g_signal_connect(c, "clicked", G_CALLBACK(on_errcard_close), p);
-        gtk_box_append(GTK_BOX(foot), c);
-    }
-    if (p->host_id) {
-        GtkWidget *e = gtk_button_new_with_label("编辑主机");
-        gtk_widget_add_css_class(e, "hb-btn");
-        g_signal_connect(e, "clicked", G_CALLBACK(on_errcard_edit), p);
-        gtk_box_append(GTK_BOX(foot), e);
-    }
-    {
-        GtkWidget *r = gtk_button_new_with_label("重试");
-        gtk_widget_add_css_class(r, "hb-btn");
-        gtk_widget_add_css_class(r, "primary");
-        g_signal_connect(r, "clicked", G_CALLBACK(on_errcard_retry), p);
-        gtk_box_append(GTK_BOX(foot), r);
-    }
-    gtk_box_append(GTK_BOX(card), foot);
-
-    /* 插到日志区后（connect 视图内 footer 之前） */
-    gtk_box_insert_child_after(GTK_BOX(p->connect_box),
-                               card, p->log_scroll);
-    p->err_card = card;
-    gtk_widget_set_visible(p->hide_btn, FALSE);
-    if (p->conn_foot)
-        gtk_widget_set_visible(p->conn_foot, FALSE);
 }
 
 static void on_session_ev(HbTerminal *t, const hb_sess_event *ev, gpointer ud)
@@ -706,11 +564,8 @@ static void on_ctl_stage(HbConnCtl *c, int idx, const char *text,
 {
     HbSshPage *p = ud;
     (void)c;
-    add_log_line(p, text ? text : "", mark == 'e');
-    if (idx > p->cur_stage) {
-        p->cur_stage = idx;
-        update_nodes(p);
-    }
+    hb_connect_view_stage(HB_CONNECT_VIEW(p->conn_view), idx, text,
+                          mark);
 }
 
 /* "session"：会话已创建 —— 绑终端 + 挂监控/历史 */
@@ -736,7 +591,8 @@ static void on_ctl_failed(HbConnCtl *c, int code, const char *title,
     stop_backoff(p);
     p->backoff_k = 0;
     gtk_stack_set_visible_child_name(GTK_STACK(p->stack), "connect");
-    show_error_card(p, title, details, code);
+    hb_connect_view_error(HB_CONNECT_VIEW(p->conn_view), title,
+                          details, code);
 }
 
 /* "disconnected"：已连接后掉线（可重连类）→ 指数退避 */
@@ -760,26 +616,14 @@ static void free_session(HbSshPage *p)
 static void start_connect(HbSshPage *p, gboolean is_reconnect)
 {
     hb_vt *vt;
-    if (p->err_card) {        /* 上次尝试的错误卡（含重连路径） */
-        gtk_widget_unparent(p->err_card);
-        p->err_card = NULL;
-    }
+    /* 上次尝试的错误卡（含重连路径） */
+    hb_connect_view_clear_error(HB_CONNECT_VIEW(p->conn_view));
     p->connecting = TRUE;
     p->was_reconnect = is_reconnect;
     p->reconnected_feed = is_reconnect;
     if (!is_reconnect) {
-        p->cur_stage = -1;
-        update_nodes(p);
+        hb_connect_view_reset(HB_CONNECT_VIEW(p->conn_view));
         gtk_stack_set_visible_child_name(GTK_STACK(p->stack), "connect");
-        /* 清日志 */
-        {
-            GtkWidget *ch;
-            while ((ch = gtk_widget_get_first_child(p->log_box)))
-                gtk_widget_unparent(ch);
-        }
-        gtk_widget_set_visible(p->hide_btn, TRUE);
-        if (p->conn_foot)
-            gtk_widget_set_visible(p->conn_foot, TRUE);
     }
     tab_dot(p, NULL);
 
@@ -861,19 +705,6 @@ static void on_store_changed(HbStore *st, const char *type, const char *id,
 
 /* ------------------------- 视图构建 ------------------------- */
 
-static void on_hide_log(GtkButton *b, gpointer ud)
-{
-    HbSshPage *p = ud;
-    (void)b;
-    p->hide_log = !p->hide_log;
-    gtk_button_set_label(b, p->hide_log ? "Show logs" : "Hide logs");
-    gtk_widget_set_visible(p->log_scroll, !p->hide_log);
-}
-
-static void on_start_over(GtkButton *b, gpointer ud)
-{ (void)b; start_connect((HbSshPage *)ud, FALSE); }
-static void on_close_tab(GtkButton *b, gpointer ud)
-{ (void)b; tab_close((HbSshPage *)ud); }
 static void on_reconnect_btn(GtkButton *b, gpointer ud)
 {
     HbSshPage *p = ud;
@@ -883,110 +714,6 @@ static void on_reconnect_btn(GtkButton *b, gpointer ud)
     p->dead = FALSE;
     /* 终端视图内原地重连（不跳回连接页） */
     reconnect_now(p);
-}
-
-static GtkWidget *build_connect_view(HbSshPage *p)
-{
-    GtkWidget *wrap, *head, *av, *txtcol, *nm, *sub, *track, *foot;
-    int i;
-    static const char *node_icons[] = { "link", "shield", "terminal" };
-    char *t;
-
-    wrap = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_add_css_class(wrap, "connect-wrap");
-    gtk_widget_set_vexpand(wrap, TRUE);
-
-    /* head：avatar + name + "SSH host:port" + hide-logs */
-    head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_add_css_class(head, "connect-head");
-    av = hb_os_avatar_new(p->os_key ? p->os_key : "generic", 38);
-    gtk_box_append(GTK_BOX(head), av);
-    txtcol = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-    nm = gtk_label_new(p->hname);
-    gtk_widget_add_css_class(nm, "connect-name");
-    gtk_label_set_xalign(GTK_LABEL(nm), 0);
-    gtk_box_append(GTK_BOX(txtcol), nm);
-    t = g_strdup_printf("SSH %s:%d", p->haddr, p->hport);
-    sub = gtk_label_new(t);
-    g_free(t);
-    gtk_widget_add_css_class(sub, "connect-sub");
-    gtk_label_set_xalign(GTK_LABEL(sub), 0);
-    gtk_box_append(GTK_BOX(txtcol), sub);
-    gtk_box_append(GTK_BOX(head), txtcol);
-    {
-        GtkWidget *sp = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-        gtk_widget_set_hexpand(sp, TRUE);
-        gtk_box_append(GTK_BOX(head), sp);
-    }
-    p->hide_btn = gtk_button_new_with_label("Hide logs");
-    gtk_widget_add_css_class(p->hide_btn, "hb-btn");
-    gtk_widget_add_css_class(p->hide_btn, "sm");
-    gtk_widget_set_valign(p->hide_btn, GTK_ALIGN_CENTER);
-    g_signal_connect(p->hide_btn, "clicked", G_CALLBACK(on_hide_log), p);
-    gtk_box_append(GTK_BOX(head), p->hide_btn);
-    gtk_box_append(GTK_BOX(wrap), head);
-
-    /* progress track：3 节点 + 2 连线 */
-    track = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class(track, "progress-track");
-    gtk_widget_set_halign(track, GTK_ALIGN_CENTER);
-    for (i = 0; i < 3; i++) {
-        p->node[i] = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-        gtk_widget_add_css_class(p->node[i], "node");
-        gtk_widget_add_css_class(p->node[i], "pending");
-        gtk_box_append(GTK_BOX(p->node[i]),
-                       hb_icon_new(node_icons[i], 12));
-        gtk_widget_set_size_request(p->node[i], 22, 22);
-        gtk_box_append(GTK_BOX(track), p->node[i]);
-        if (i < 2) {
-            p->bar[i] = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-            gtk_widget_add_css_class(p->bar[i], "bar");
-            gtk_widget_add_css_class(p->bar[i], "pending");
-            gtk_widget_set_size_request(p->bar[i], -1, 3);
-            gtk_widget_set_hexpand(p->bar[i], TRUE);
-            gtk_widget_set_valign(p->bar[i], GTK_ALIGN_CENTER);
-            gtk_box_append(GTK_BOX(track), p->bar[i]);
-        }
-    }
-    gtk_widget_set_size_request(track, 430, -1);
-    gtk_box_append(GTK_BOX(wrap), track);
-
-    /* 日志区 */
-    p->log_scroll = gtk_scrolled_window_new();
-    gtk_widget_add_css_class(p->log_scroll, "connect-log");
-    gtk_widget_set_size_request(p->log_scroll, 430, 220);
-    gtk_widget_set_halign(p->log_scroll, GTK_ALIGN_CENTER);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(p->log_scroll),
-        GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    p->log_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
-    gtk_widget_set_margin_start(p->log_box, 16);
-    gtk_widget_set_margin_end(p->log_box, 16);
-    gtk_widget_set_margin_top(p->log_box, 14);
-    gtk_widget_set_margin_bottom(p->log_box, 14);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(p->log_scroll),
-                                  p->log_box);
-    gtk_box_append(GTK_BOX(wrap), p->log_scroll);
-
-    /* footer（错误卡显示时隐藏 —— 卡片自带 Close/重试） */
-    foot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 9);
-    p->conn_foot = foot;
-    gtk_widget_set_halign(foot, GTK_ALIGN_CENTER);
-    gtk_widget_set_margin_top(foot, 18);
-    {
-        GtkWidget *c = gtk_button_new_with_label("Close");
-        gtk_widget_add_css_class(c, "hb-btn");
-        g_signal_connect(c, "clicked", G_CALLBACK(on_close_tab), p);
-        gtk_box_append(GTK_BOX(foot), c);
-    }
-    {
-        GtkWidget *r = gtk_button_new_with_label("Start over");
-        gtk_widget_add_css_class(r, "hb-btn");
-        gtk_widget_add_css_class(r, "primary");
-        g_signal_connect(r, "clicked", G_CALLBACK(on_start_over), p);
-        gtk_box_append(GTK_BOX(foot), r);
-    }
-    gtk_box_append(GTK_BOX(wrap), foot);
-    return wrap;
 }
 
 static GtkWidget *build_term_view(HbSshPage *p)
@@ -1211,7 +938,6 @@ static void hb_ssh_page_init(HbSshPage *p)
 {
     p->sb_lines = 10000;
     p->inbuf = g_string_new(NULL);
-    p->cur_stage = -1;
 
     gtk_orientable_set_orientation(GTK_ORIENTABLE(p),
                                    GTK_ORIENTATION_VERTICAL);
@@ -1244,8 +970,22 @@ GtkWidget *hb_ssh_page_new(HbStore *st, const hb_obj *host)
 
     /* 终端先建（连接视图也用它消费事件） */
     p->term_view = build_term_view(p);
-    p->connect_box = build_connect_view(p);
-    gtk_stack_add_named(GTK_STACK(p->stack), p->connect_box, "connect");
+    p->conn_view = hb_connect_view_new();
+    {
+        char *sub = g_strdup_printf("SSH %s:%d", p->haddr, p->hport);
+        hb_connect_view_set_head(HB_CONNECT_VIEW(p->conn_view),
+            p->os_key ? p->os_key : "generic", p->hname, sub);
+        g_free(sub);
+    }
+    hb_connect_view_set_edit_btn(HB_CONNECT_VIEW(p->conn_view),
+                                 p->host_id != NULL);
+    g_signal_connect(p->conn_view, "close",
+                     G_CALLBACK(on_cv_close), p);
+    g_signal_connect(p->conn_view, "start-over",
+                     G_CALLBACK(on_cv_start_over), p);
+    g_signal_connect(p->conn_view, "edit-host",
+                     G_CALLBACK(on_cv_edit), p);
+    gtk_stack_add_named(GTK_STACK(p->stack), p->conn_view, "connect");
     gtk_stack_add_named(GTK_STACK(p->stack), p->term_view, "term");
     gtk_stack_set_visible_child_name(GTK_STACK(p->stack), "connect");
 
@@ -1289,7 +1029,6 @@ GtkWidget *hb_ssh_page_new(HbStore *st, const hb_obj *host)
     p->changed_handler = g_signal_connect(st, "changed",
         G_CALLBACK(on_store_changed), p);
 
-    update_nodes(p);
     start_connect(p, FALSE);
     return GTK_WIDGET(p);
 }
