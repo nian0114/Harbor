@@ -602,80 +602,122 @@ static void test_shell_scripts(void)
     CHECK(hb_shell_integration_script("tcsh") == NULL);
     CHECK(hb_shell_integration_script(NULL) == NULL);
 
-    /* bash 端到端：pty 中 bash --norc -i，source 后
-     * true/false 应产生 133 A,B 提示符标记 + C,D;code 命令标记。 */
-    if (have("bash")) {
-        char *path = write_tmp(hb_shell_integration_script("bash"));
-        hb_pty_opts o = { "/bin/bash", "exec bash --norc -i",
-                          NULL, NULL, 24, 80 };
-        hb_pty *p = NULL;
-        char *buf = malloc(1 << 20);
-        size_t bl = 0;
-        int fd = -1, i;
-        const char *cmds[] = { "true\n", "false\n", "sleep 0.1\n", "exit\n" };
-        struct pollfd pfd;
-        int64_t deadline;
+}
 
-        CHECK(path != NULL);
-        CHECK(hb_pty_spawn(&o, &p) == HB_OK && p);
-        fd = hb_pty_fd(p);
-        pfd.fd = fd; pfd.events = POLLIN;
+/* 单个 shell 的 pty 端到端：spawn 一个交互 shell，(可选 prelude) → source
+ * 集成脚本 → true/false/sleep，断言输出含
+ *   133;A … 133;B … 133;C … 133;D;0 … 133;C … 133;D;1
+ * spawn    = hb_pty_opts.command（经 sh -c 执行）
+ * waitpat  = 出现即可开始输入的提示符片段
+ * prelude  = source 前要先执行的命令（zsh 要补 sysroot fpath），可 NULL */
+static void shell_e2e(const char *name, const char *spawn,
+                      const char *waitpat, const char *prelude)
+{
+    char *path = write_tmp(hb_shell_integration_script(name));
+    hb_pty_opts o = { "/bin/sh", spawn, NULL, NULL, 24, 80 };
+    hb_pty *p = NULL;
+    char *buf = malloc(1 << 20);
+    size_t bl = 0;
+    int fd = -1, i;
+    const char *cmds[] = { "true\n", "false\n", "sleep 0.1\n", "exit\n" };
+    struct pollfd pfd;
+    int64_t deadline;
 
-        /* 等初始提示符出现再 source */
-        deadline = hb_now_ms() + 4000;
-        while (hb_now_ms() < deadline && !memmem(buf, bl, "$ ", 2)) {
-            char tmp[4096]; ssize_t r;
-            if (poll(&pfd, 1, 200) <= 0) continue;
-            r = read(fd, tmp, sizeof tmp);
-            if (r > 0) { memcpy(buf + bl, tmp, (size_t)r); bl += (size_t)r; }
-        }
-        {
-            char src[600];
-            snprintf(src, sizeof src, "source %s\n", path);
-            if (write(fd, src, strlen(src)) < 0) perror("write");
-        }
-        usleep(400000);
-        for (i = 0; i < 4; i++) {
-            if (write(fd, cmds[i], strlen(cmds[i])) < 0) perror("write");
-            usleep(300000);
-        }
-        deadline = hb_now_ms() + 5000;
-        while (hb_now_ms() < deadline) {
-            char tmp[4096]; ssize_t r;
-            if (poll(&pfd, 1, 300) <= 0) continue;
-            r = read(fd, tmp, sizeof tmp);
-            if (r <= 0) break;
-            memcpy(buf + bl, tmp, (size_t)r); bl += (size_t)r;
-        }
-        buf[bl] = 0;
-        hb_pty_free(p);
+    CHECK(path != NULL);
+    if (!path) { free(buf); return; }
+    CHECK(hb_pty_spawn(&o, &p) == HB_OK && p);
+    if (!p) { unlink(path); free(path); free(buf); return; }
+    fd = hb_pty_fd(p);
+    pfd.fd = fd; pfd.events = POLLIN;
 
-        {
-            size_t rem;
-            char *a, *b, *cc, *d0, *c2, *d1;
-            a = memmem(buf, bl, "133;A", 5);
-            rem = a ? bl - (size_t)(a - buf) : 0;
-            b = a ? memmem(a, rem, "133;B", 5) : NULL;
-            rem = b ? rem - (size_t)(b - a) : 0;
-            cc = b ? memmem(b, rem, "133;C", 5) : NULL;
-            rem = cc ? rem - (size_t)(cc - b) : 0;
-            d0 = cc ? memmem(cc, rem, "133;D;0", 7) : NULL;
-            rem = d0 ? rem - (size_t)(d0 - cc) : 0;
-            c2 = d0 ? memmem(d0, rem, "133;C", 5) : NULL;
-            rem = c2 ? rem - (size_t)(c2 - d0) : 0;
-            d1 = c2 ? memmem(c2, rem, "133;D;1", 7) : NULL;
-            CHECK(a && b && cc && d0);
-            CHECK(c2 && d1);
-            if (!(a && b && cc && d0 && c2 && d1)) {
-                FILE *df = fopen("/tmp/hb_si_debug.bin", "w");
-                if (df) { fwrite(buf, 1, bl, df); fclose(df); }
-                fprintf(stderr, "si capture dumped to /tmp/hb_si_debug.bin\n");
-            }
-        }
-        unlink(path);
-        free(path);
-        free(buf);
+    /* 等初始提示符出现再输入 */
+    deadline = hb_now_ms() + 4000;
+    while (hb_now_ms() < deadline &&
+           !memmem(buf, bl, waitpat, strlen(waitpat))) {
+        char tmp[4096]; ssize_t r;
+        if (poll(&pfd, 1, 200) <= 0) continue;
+        r = read(fd, tmp, sizeof tmp);
+        if (r > 0) { memcpy(buf + bl, tmp, (size_t)r); bl += (size_t)r; }
     }
+    if (prelude) {
+        if (write(fd, prelude, strlen(prelude)) < 0) perror("write");
+        usleep(300000);
+    }
+    {
+        char src[600];
+        snprintf(src, sizeof src, "source %s\n", path);
+        if (write(fd, src, strlen(src)) < 0) perror("write");
+    }
+    usleep(500000);
+    for (i = 0; i < 4; i++) {
+        if (write(fd, cmds[i], strlen(cmds[i])) < 0) perror("write");
+        usleep(300000);
+    }
+    deadline = hb_now_ms() + 5000;
+    while (hb_now_ms() < deadline) {
+        char tmp[4096]; ssize_t r;
+        if (poll(&pfd, 1, 300) <= 0) continue;
+        r = read(fd, tmp, sizeof tmp);
+        if (r <= 0) break;
+        memcpy(buf + bl, tmp, (size_t)r); bl += (size_t)r;
+    }
+    buf[bl] = 0;
+    hb_pty_free(p);
+
+    {
+        size_t rem;
+        char *a, *b, *cc, *d0, *c2, *d1;
+        a = memmem(buf, bl, "133;A", 5);
+        rem = a ? bl - (size_t)(a - buf) : 0;
+        b = a ? memmem(a, rem, "133;B", 5) : NULL;
+        rem = b ? rem - (size_t)(b - a) : 0;
+        cc = b ? memmem(b, rem, "133;C", 5) : NULL;
+        rem = cc ? rem - (size_t)(cc - b) : 0;
+        d0 = cc ? memmem(cc, rem, "133;D;0", 7) : NULL;
+        rem = d0 ? rem - (size_t)(d0 - cc) : 0;
+        c2 = d0 ? memmem(d0, rem, "133;C", 5) : NULL;
+        rem = c2 ? rem - (size_t)(c2 - d0) : 0;
+        d1 = c2 ? memmem(c2, rem, "133;D;1", 7) : NULL;
+        fprintf(stderr, "  %s e2e: A=%d B=%d C=%d D;0=%d C2=%d D;1=%d\n",
+                name, !!a, !!b, !!cc, !!d0, !!c2, !!d1);
+        CHECK(a && b && cc && d0);
+        CHECK(c2 && d1);
+        if (!(a && b && cc && d0 && c2 && d1)) {
+            char dbg[128];
+            FILE *df;
+            snprintf(dbg, sizeof dbg, "/tmp/hb_si_%s_debug.bin", name);
+            df = fopen(dbg, "w");
+            if (df) { fwrite(buf, 1, bl, df); fclose(df); }
+            fprintf(stderr, "si capture dumped to %s\n", dbg);
+        }
+    }
+    unlink(path);
+    free(path);
+    free(buf);
+}
+
+static void test_shell_e2e(void)
+{
+    static const char *zsh_fpath =
+        "fpath=(/home/x/.local/harbor-sysroot/usr/share/zsh/functions/*"
+        "(N/) $fpath)\n";
+    if (have("bash"))
+        shell_e2e("bash", "exec bash --norc -i", "$ ", NULL);
+    else
+        printf("  bash not installed, e2e skipped\n");
+    if (have("zsh"))
+        /* add-zsh-hook 在 zsh-common 的 functions 目录；本机 zsh 的
+         * 编译内 fpath 指向 /usr/share/zsh（不存在于 sysroot 环境），
+         * 先把它补进 fpath 再 source。 */
+        shell_e2e("zsh", "exec zsh -f -i", "% ", zsh_fpath);
+    else
+        printf("  zsh not installed, e2e skipped\n");
+    if (have("fish"))
+        shell_e2e("fish",
+                  "exec env XDG_CONFIG_HOME=/tmp/hb-si-xdg fish -i",
+                  "> ", NULL);
+    else
+        printf("  fish not installed, e2e skipped\n");
 }
 
 int main(void)
@@ -684,6 +726,7 @@ int main(void)
     test_units();
     test_rule_tester();
     test_shell_scripts();
+    test_shell_e2e();
     printf("test_watch: %d checks, %d failures\n", hb_t_checks, hb_t_failures);
     TEST_RETURN();
 }

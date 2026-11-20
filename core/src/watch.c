@@ -806,10 +806,12 @@ static const char hb__si_fish[] =
 "end\n"
 "if functions -q fish_prompt\n"
 "    functions -c fish_prompt __hb_si_orig_prompt\n"
-"    function fish_prompt\n"
-"        __hb_si_orig_prompt\n"
-"        printf '\\033]133;B\\007'\n"
-"    end\n"
+"else\n"
+"    function __hb_si_orig_prompt; printf '> '; end\n"
+"end\n"
+"function fish_prompt\n"
+"    __hb_si_orig_prompt\n"
+"    printf '\\033]133;B\\007'\n"
 "end\n";
 
 const char *hb_shell_integration_script(const char *shell)
