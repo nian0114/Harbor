@@ -31,12 +31,20 @@ void hb_terminal_scroll_to_bottom(HbTerminal *t);
 /* 供页面 overlay 的 GtkScrollbar 绑定（value = scroll_off） */
 GtkAdjustment *hb_terminal_scroll_adjustment(HbTerminal *t);
 
+/* 终端自身不消费的 session 事件（STAGE/CONNECTED/ERROR/HOSTKEY/PROMPT/
+ * OSINFO 等）转发给页层；ev 为借用指针，回调返回后即清理。 */
+typedef void (*hb_terminal_event_cb)(HbTerminal *t,
+                                     const hb_sess_event *ev, gpointer ud);
+void hb_terminal_set_event_cb(HbTerminal *t, hb_terminal_event_cb cb,
+                              gpointer ud);
+
 /* signals:
  *   "title-changed" (gchar*)
  *   "exited"        (gint code)
  *   "bell"
  *   "osc133"        (gchar mark, gint code)
  *   "notify-event"        (gchar* title, gchar* body)
+ *   "dead-input"          (gchar* utf8)   会话已死后用户输入的文本
  */
 
 G_END_DECLS

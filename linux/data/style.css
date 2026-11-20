@@ -65,7 +65,7 @@ window { background-color: @hb_content; }
     padding: 0; margin-right: 6px; border-radius: 4px;
 }
 .hb-tab button.hb-tab-x:hover { opacity: 1; background-color: alpha(white, .12); }
-.hb-tab-dot { border-radius: 50%; min-width: 8px; min-height: 8px; margin-right: 6px; }
+.hb-tab-dot { border-radius: 50%; min-width: 7px; min-height: 7px; margin-right: 6px; }
 .hb-tab-dot.ok    { background-color: #2ecc71; }
 .hb-tab-dot.err   { background-color: #ff5f57; }
 .hb-tab-dot.share { background-color: #4aa3ff; animation: hb_pulse 1.6s infinite; }
@@ -287,3 +287,98 @@ button.hb-card-go:hover { background-color: @hb_blue; color: white; }
 .hb-n-title { font-size: 12.5px; font-weight: 600; color: @hb_text; }
 .hb-n-body  { font-size: 12px; color: @hb_text_2; }
 .hb-n-time  { font-size: 11px; color: @hb_text_3; }
+
+/* ---------- SSH 连接页 ---------- */
+.connect-wrap { padding: 24px; }
+.connect-head {
+    min-width: 430px; margin-top: 18px; margin-bottom: 6px;
+    margin-left: 40px; margin-right: 40px;
+}
+.connect-name { font-weight: 700; font-size: 15px; color: @hb_text; }
+.connect-sub  { font-size: 12px; color: @hb_text_3; }
+
+.progress-track { min-width: 430px; margin-top: 14px; margin-bottom: 8px; }
+.progress-track .node {
+    min-width: 22px; min-height: 22px; border-radius: 11px;
+    background-color: @hb_blue; color: white;
+}
+.progress-track .node.pending { background-color: #cfd6de; }
+.progress-track .node.done    { background-color: @hb_blue; }
+.progress-track .node.spin { animation: hb-pulse 1s infinite; }
+@keyframes hb-pulse { 50% { opacity: .45; } }
+.progress-track .bar { min-height: 3px; background-color: @hb_blue; }
+.progress-track .bar.pending { background-color: #cfd6de; }
+
+.connect-log {
+    background-color: #f4f6f8; border-radius: 10px;
+    margin-top: 6px; min-height: 180px;
+}
+.connect-log-line { font-size: 13px; color: @hb_text; }
+.connect-log-line label { font-size: 13px; }
+
+.connect-errcard {
+    background-color: #fdf0f0; border: 1px solid #f3c6c8;
+    border-radius: 10px; padding: 14px 16px; margin-top: 12px;
+}
+
+/* ---------- 模态对话框 ---------- */
+.hb-modal {
+    border-radius: 14px;
+}
+.hb-modal-header {
+    background: transparent; box-shadow: none;
+    border-bottom: 1px solid @hb_line;
+    min-height: 46px; padding: 0 8px 0 16px;
+}
+.hb-modal-title { font-weight: 700; font-size: 14px; color: @hb_text; }
+.hb-modal-footer { margin-top: 4px; }
+
+.hintbox {
+    border-radius: 9px; padding: 10px 13px;
+    font-size: 12px; line-height: 1.6;
+}
+.hintbox label { font-size: 12px; }
+.hintbox.amber { background-color: #fdf6ea; border: 1px solid #f3e2bb;
+    color: #8a6a1f; }
+.hintbox.red   { background-color: #fdefef; border: 1px solid #f3c6c8;
+    color: #a03033; }
+.hintbox.plain { background-color: #f0f6ff; border: 1px solid #d6e6fb;
+    color: #2b5c9e; }
+
+.codebox {
+    background-color: #f4f6f8; border: 1px solid @hb_line;
+    border-radius: 9px; padding: 10px 13px;
+}
+.codebox label { font-family: "Ubuntu Mono", "DejaVu Sans Mono", Menlo,
+    monospace; font-size: 12.5px; }
+
+.fingerprint-art {
+    font-family: "Ubuntu Mono", "DejaVu Sans Mono", Menlo, monospace;
+    font-size: 11px; background-color: #f4f6f8; border-radius: 9px;
+    padding: 12px; color: @hb_text_2;
+}
+
+.check-row { font-size: 13px; }
+
+button.hb-btn-small {
+    padding: 4px 10px; font-size: 12px; border-radius: 7px;
+    background-color: @hb_btn; border: none; box-shadow: none;
+}
+button.hb-btn-small:hover { background-color: @hb_btn_hover; }
+
+button.tbtn {
+    padding: 4px 10px; font-size: 12px; border-radius: 7px;
+    background-color: alpha(white, .08); border: none; box-shadow: none;
+    color: inherit;
+}
+button.tbtn:hover { background-color: alpha(white, .16); }
+
+.hb-red  { color: @hb_red; }
+.hb-dim  { color: @hb_text_3; font-size: 12px; }
+
+/* ---------- 断线重连条 ---------- */
+.hb-disc-strip {
+    background-color: #fdf3da; color: #8a6a1f;
+    padding: 6px 14px; font-size: 12.5px;
+}
+.hb-disc-strip label { font-size: 12.5px; }

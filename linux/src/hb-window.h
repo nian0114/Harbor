@@ -17,6 +17,13 @@ void hb_window_add_tab(HbWindow *win, const char *id, const char *title,
 /* dot: "ok" | "err" | "share" | NULL */
 void hb_window_set_tab_dot(HbWindow *win, const char *id, const char *dot);
 void hb_window_set_tab_title(HbWindow *win, const char *id, const char *title);
+void hb_window_set_tab_icon(HbWindow *win, const char *id, const char *icon);
+
+/* toast：经窗口顶部的 AdwToastOverlay 弹出 */
+void hb_window_toast(HbWindow *win, const char *text);
+void hb_window_toast_undo(HbWindow *win, const char *text,
+                          GCallback undo_cb, gpointer ud);
+gboolean hb_window_has_tab(HbWindow *win, const char *id);
 void hb_window_close_tab(HbWindow *win, const char *id);
 void hb_window_switch_tab(HbWindow *win, const char *id);
 

@@ -78,7 +78,7 @@ struct _HbHostsView {
 
 G_DEFINE_TYPE(HbHostsView, hb_hosts_view, GTK_TYPE_BOX)
 
-enum { SIG_CONNECT, N_SIGS };
+enum { SIG_CONNECT, SIG_QUICK, N_SIGS };
 static guint sigs[N_SIGS];
 
 static void emit_connect(HbHostsView *hv, const char *hid)
@@ -86,6 +86,67 @@ static void emit_connect(HbHostsView *hv, const char *hid)
     if (hid)
         g_signal_emit(hv, sigs[SIG_CONNECT], 0, hid);
 }
+
+static char *fold(const char *s);
+
+/* 快速连接：
+ * 1. name/address 与输入完全相等（不分大小写）的可见卡片 → 直连；
+ * 2. 否则输入像连接目标（含 @ : .）→ 交给应用层解析/建主机；
+ * 3. 否则是裸名字片段：恰好一条可见卡片才直连；0 条交给应用层；
+ *    >=2 条时保留输入不动，让用户继续缩小范围。 */
+static gboolean looks_like_target(const char *s)
+{
+    return s && (strchr(s, '@') || strchr(s, ':') || strchr(s, '.'));
+}
+
+static void quick_connect_go(HbHostsView *hv)
+{
+    const char *text = gtk_editable_get_text(GTK_EDITABLE(hv->search));
+    guint n;
+    char *ft;
+
+    if (!text || !*text)
+        return;
+    ft = fold(text);
+    n = g_list_model_get_n_items(G_LIST_MODEL(hv->sorted));
+    for (guint i = 0; i < n; i++) {
+        HbHostItem *h = g_list_model_get_item(G_LIST_MODEL(hv->sorted), i);
+        char *fn, *fa;
+        gboolean eq;
+
+        if (!h) continue;
+        fn = fold(h->name);
+        fa = fold(h->address);
+        eq = !strcmp(fn, ft) || !strcmp(fa, ft);
+        g_free(fn);
+        g_free(fa);
+        if (eq) {
+            emit_connect(hv, h->id);
+            g_object_unref(h);
+            g_free(ft);
+            gtk_editable_set_text(GTK_EDITABLE(hv->search), "");
+            return;
+        }
+        g_object_unref(h);
+    }
+    if (looks_like_target(text) || n == 0) {
+        g_signal_emit(hv, sigs[SIG_QUICK], 0, text);
+        gtk_editable_set_text(GTK_EDITABLE(hv->search), "");
+    } else if (n == 1) {
+        HbHostItem *h = g_list_model_get_item(G_LIST_MODEL(hv->sorted), 0);
+        if (h) {
+            emit_connect(hv, h->id);
+            g_object_unref(h);
+            gtk_editable_set_text(GTK_EDITABLE(hv->search), "");
+        }
+    }
+    g_free(ft);
+}
+
+static void on_search_activate(GtkSearchEntry *e, gpointer ud)
+{ (void)e; quick_connect_go(ud); }
+static void on_connect_clicked(GtkButton *b, gpointer ud)
+{ (void)b; quick_connect_go(ud); }
 
 static void on_card_dblclick(GtkGestureClick *g, int n_press,
                              double x, double y, gpointer ud)
@@ -635,6 +696,8 @@ static GtkWidget *build_quickbar(HbHostsView *hv)
         "Find a host or ssh user@hostname…", NULL);
     g_signal_connect(hv->search, "search-changed",
                      G_CALLBACK(on_search_changed), hv);
+    g_signal_connect(hv->search, "activate",
+                     G_CALLBACK(on_search_activate), hv);
     gtk_box_append(GTK_BOX(bar), hv->search);
 
     kbd = gtk_label_new("Ctrl K");
@@ -645,7 +708,7 @@ static GtkWidget *build_quickbar(HbHostsView *hv)
     conn = gtk_button_new_with_label("Connect");
     gtk_widget_add_css_class(conn, "hb-btn");
     gtk_widget_add_css_class(conn, "primary");
-    gtk_widget_set_visible(conn, FALSE);      /* ssh 单元再启用 */
+    g_signal_connect(conn, "clicked", G_CALLBACK(on_connect_clicked), hv);
     gtk_box_append(GTK_BOX(bar), conn);
     return bar;
 }
@@ -777,6 +840,9 @@ static void hb_hosts_view_dispose(GObject *o)
 static void hb_hosts_view_class_init(HbHostsViewClass *klass)
 {
     G_OBJECT_CLASS(klass)->dispose = hb_hosts_view_dispose;
+    sigs[SIG_QUICK] = g_signal_new("quick-connect", HB_TYPE_HOSTS_VIEW,
+        G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+        G_TYPE_NONE, 1, G_TYPE_STRING);
     sigs[SIG_CONNECT] = g_signal_new("connect", HB_TYPE_HOSTS_VIEW,
         G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
         G_TYPE_NONE, 1, G_TYPE_STRING);

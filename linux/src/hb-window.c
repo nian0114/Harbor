@@ -25,6 +25,7 @@ struct _HbWindow {
     AdwApplicationWindow parent;
     GtkWidget *tabstrip;     /* hbox inside scroller */
     GtkWidget *stack;
+    GtkWidget *toasts;       /* AdwToastOverlay 包住全部内容 */
     GtkWidget *badge;
     GtkWidget *bell;
     GtkWidget *vault_page;
@@ -86,6 +87,11 @@ static void free_tab_rec(HbTabRec *t)
     g_free(t);
 }
 
+gboolean hb_window_has_tab(HbWindow *win, const char *id)
+{
+    return find_tab(win, id) != NULL;
+}
+
 void hb_window_close_tab(HbWindow *win, const char *id)
 {
     HbTabRec *t = find_tab(win, id);
@@ -134,6 +140,53 @@ void hb_window_set_tab_title(HbWindow *win, const char *id, const char *title)
     if (t) gtk_label_set_label(GTK_LABEL(t->title), title);
 }
 
+void hb_window_set_tab_icon(HbWindow *win, const char *id, const char *icon)
+{
+    HbTabRec *t = find_tab(win, id);
+    GtkWidget *bb, *c;
+    if (!t || !icon || (t->icon && !strcmp(t->icon, icon)))
+        return;
+    g_free(t->icon);
+    t->icon = g_strdup(icon);
+    bb = gtk_button_get_child(GTK_BUTTON(t->main));
+    for (c = gtk_widget_get_first_child(bb); c;
+         c = gtk_widget_get_next_sibling(c)) {
+        if (HB_IS_ICON(c)) {
+            hb_icon_set_name(HB_ICON(c), icon);
+            return;
+        }
+    }
+    /* 原本没有图标：插在 dot 之后 */
+    gtk_box_insert_child_after(GTK_BOX(bb), hb_icon_new(icon, 15),
+                               t->dot);
+}
+
+/* ------------------------------- toast ------------------------------- */
+
+void hb_window_toast(HbWindow *win, const char *text)
+{
+    AdwToast *t;
+    if (!win->toasts || !text)
+        return;
+    t = adw_toast_new(text);
+    adw_toast_set_timeout(t, 4);
+    adw_toast_overlay_add_toast(ADW_TOAST_OVERLAY(win->toasts), t);
+}
+
+void hb_window_toast_undo(HbWindow *win, const char *text,
+                          GCallback undo_cb, gpointer ud)
+{
+    AdwToast *t;
+    if (!win->toasts || !text)
+        return;
+    t = adw_toast_new(text);
+    adw_toast_set_button_label(t, "撤销");
+    adw_toast_set_timeout(t, 9);
+    if (undo_cb)
+        g_signal_connect_swapped(t, "button-clicked", undo_cb, ud);
+    adw_toast_overlay_add_toast(ADW_TOAST_OVERLAY(win->toasts), t);
+}
+
 void hb_window_add_tab(HbWindow *win, const char *id, const char *title,
                        const char *icon, GtkWidget *page,
                        gboolean closable, gboolean is_term)
@@ -165,6 +218,8 @@ void hb_window_add_tab(HbWindow *win, const char *id, const char *title,
     gtk_widget_set_valign(btn_box, GTK_ALIGN_CENTER);
     t->dot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(t->dot, "hb-tab-dot");
+    gtk_widget_set_size_request(t->dot, 7, 7);
+    gtk_widget_set_valign(t->dot, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(t->dot, FALSE);
     gtk_box_append(GTK_BOX(btn_box), t->dot);
     if (icon && *icon)
@@ -515,7 +570,10 @@ static void hb_window_init(HbWindow *win)
         gtk_stack_set_transition_type(GTK_STACK(win->stack),
                                       GTK_STACK_TRANSITION_TYPE_CROSSFADE);
         adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(tv), win->stack);
-        adw_application_window_set_content(ADW_APPLICATION_WINDOW(win), tv);
+        win->toasts = adw_toast_overlay_new();
+        adw_toast_overlay_set_child(ADW_TOAST_OVERLAY(win->toasts), tv);
+        adw_application_window_set_content(ADW_APPLICATION_WINDOW(win),
+                                           win->toasts);
     }
 
     scroller = gtk_scrolled_window_new();

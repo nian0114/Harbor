@@ -9,6 +9,7 @@ extern char *hb_opt_filter;
 extern char *hb_opt_host_view;
 extern char *hb_opt_theme;
 extern char *hb_opt_open_local;
+extern char *hb_opt_connect;
 
 static gboolean parse_open_local(const gchar *n, const gchar *v,
                                  gpointer d, GError **e)
@@ -39,6 +40,8 @@ int main(int argc, char **argv)
           G_OPTION_FLAG_HIDDEN | G_OPTION_FLAG_OPTIONAL_ARG,
           G_OPTION_ARG_CALLBACK, parse_open_local,
           "open a Local terminal tab; =CMD injects CMD", "[CMD]" },
+        { "connect", 0, G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_STRING,
+          &hb_opt_connect, "quick-connect user@host[:port]", "TARGET" },
         { NULL },
     };
     GOptionContext *ctx;

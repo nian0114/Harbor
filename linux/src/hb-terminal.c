@@ -51,12 +51,16 @@ struct _HbTerminal {
     gboolean     url_hover;
     int64_t      url_r;          /* 命中 URL 的 vt 行 + 列区间 */
     int          url_c0, url_c1;
+
+    hb_terminal_event_cb ev_cb;  /* 转发终端不消费的 session 事件 */
+    gpointer     ev_ud;
 };
 
 G_DEFINE_TYPE(HbTerminal, hb_terminal, GTK_TYPE_WIDGET)
 
 enum {
-    SIG_TITLE, SIG_EXITED, SIG_BELL, SIG_OSC133, SIG_NOTIFY, N_SIGS
+    SIG_TITLE, SIG_EXITED, SIG_BELL, SIG_OSC133, SIG_NOTIFY,
+    SIG_DEAD_INPUT, N_SIGS
 };
 static guint sigs[N_SIGS];
 
@@ -266,6 +270,9 @@ static gboolean on_ev_fd(int fd, GIOCondition cond, gpointer ud)
             gtk_widget_queue_draw(GTK_WIDGET(t));
             break;
         default:
+            /* STAGE/CONNECTED/ERROR/HOSTKEY/PROMPT/OSINFO 等 → 页层消费 */
+            if (t->ev_cb)
+                t->ev_cb(t, &ev, t->ev_ud);
             break;
         }
         hb_sess_event_clear(&ev);
@@ -522,8 +529,20 @@ static gboolean on_key_pressed(GtkEventControllerKey *kc, guint keyval,
         }
     }
 
-    if (!t->sess || !hb_session_alive(t->sess))
+    if (!t->sess || !hb_session_alive(t->sess)) {
+        /* 断线时：可打印字符上报 dead-input，由页层缓冲到重连后发送 */
+        guint32 uc = gdk_keyval_to_unicode(keyval);
+        if (uc && uc >= 0x20 && uc != 0x7f && !ctrl &&
+            !(state & GDK_ALT_MASK)) {
+            char b[8];
+            int n = g_unichar_to_utf8(uc, b);
+            char *s = g_strndup(b, n);
+            g_signal_emit(t, sigs[SIG_DEAD_INPUT], 0, s);
+            g_free(s);
+            return TRUE;
+        }
         return FALSE;
+    }
 
     /* IME 先过滤（组字、输入法切换等） */
     ev = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(kc));
@@ -568,6 +587,8 @@ static void on_im_commit(GtkIMContext *im, const gchar *str, gpointer ud)
     if (t->sess && hb_session_alive(t->sess)) {
         send_input_scroll_bottom(t);
         hb_session_write(t->sess, str, strlen(str));
+    } else {
+        g_signal_emit(t, sigs[SIG_DEAD_INPUT], 0, str);
     }
 }
 
@@ -1394,6 +1415,16 @@ static void hb_terminal_class_init(HbTerminalClass *klass)
     sigs[SIG_NOTIFY] = g_signal_new("notify-event", HB_TYPE_TERMINAL,
         G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
         G_TYPE_NONE, 2, G_TYPE_STRING, G_TYPE_STRING);
+    sigs[SIG_DEAD_INPUT] = g_signal_new("dead-input", HB_TYPE_TERMINAL,
+        G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+        G_TYPE_NONE, 1, G_TYPE_STRING);
+}
+
+void hb_terminal_set_event_cb(HbTerminal *t, hb_terminal_event_cb cb,
+                              gpointer ud)
+{
+    t->ev_cb = cb;
+    t->ev_ud = ud;
 }
 
 static void hb_terminal_init(HbTerminal *t)
