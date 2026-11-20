@@ -771,7 +771,7 @@ static const char hb__si_bash[] =
 "    PROMPT_COMMAND=\"__hb_si_precmd${PROMPT_COMMAND:+;}${PROMPT_COMMAND:-}\"\n"
 "fi\n"
 "PS0='\\[\\033]133;C\\007\\]'\n"
-"PS1='\\[\\033]133;B\\007\\]'\"$PS1\"\n";
+"PS1=\"$PS1\"'\\[\\033]133;B\\007\\]'\n";
 
 static const char hb__si_zsh[] =
 "# Harbor shell integration (zsh)\n"
@@ -790,7 +790,7 @@ static const char hb__si_zsh[] =
 "__hb_si_preexec() { printf '\\033]133;C\\007'; }\n"
 "add-zsh-hook precmd  __hb_si_precmd\n"
 "add-zsh-hook preexec __hb_si_preexec\n"
-"PS1=\"%{$(printf '\\033]133;B\\007')%}$PS1\"\n";
+"PS1=\"$PS1%{$(printf '\\033]133;B\\007')%}\"\n";
 
 static const char hb__si_fish[] =
 "# Harbor shell integration (fish)\n"
