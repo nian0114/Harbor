@@ -592,6 +592,14 @@ static void act_edit(GSimpleAction *a, GVariant *p, gpointer ud)
 static void act_dup(GSimpleAction *a, GVariant *p, gpointer ud)
 { (void)a; hb_host_action_duplicate(GTK_WIDGET(ud),
       HB_HOSTS_VIEW(ud)->store, g_variant_get_string(p, NULL)); }
+static void act_sftp(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    HbHostsView *hv = ud;
+    const char *id = g_variant_get_string(p, NULL);
+    (void)a;
+    hb_host_action_sftp(GTK_WIDGET(hv), hv->store, id);
+}
+
 static void act_del(GSimpleAction *a, GVariant *p, gpointer ud)
 { (void)a; hb_host_action_delete(GTK_WIDGET(ud),
       HB_HOSTS_VIEW(ud)->store, g_variant_get_string(p, NULL)); }
@@ -635,7 +643,7 @@ static void add_view_actions(HbHostsView *hv)
     g_signal_connect(a, "activate", G_CALLBACK(act_del), hv);
     g_action_map_add_action(G_ACTION_MAP(g), G_ACTION(a));
     a = g_simple_action_new("sftp", G_VARIANT_TYPE_STRING);
-    g_simple_action_set_enabled(a, FALSE);   /* SFTP 后续版本提供 */
+    g_signal_connect(a, "activate", G_CALLBACK(act_sftp), hv);
     g_action_map_add_action(G_ACTION_MAP(g), G_ACTION(a));
     a = g_simple_action_new("newgroup", NULL);
     g_signal_connect(a, "activate", G_CALLBACK(act_newgroup), hv);

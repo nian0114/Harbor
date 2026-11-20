@@ -25,6 +25,8 @@ void hb_window_clear_watch_dot(HbWindow *win, const char *id, guint token);
 /* 当前活动 tab 的 id / page（借用指针；无活动 tab → NULL） */
 const char *hb_window_active_tab_id(HbWindow *win);
 GtkWidget *hb_window_active_page(HbWindow *win);
+/* 按 id 取 tab 页面（借用；无 → NULL） */
+GtkWidget *hb_window_tab_page(HbWindow *win, const char *id);
 void hb_window_set_tab_title(HbWindow *win, const char *id, const char *title);
 void hb_window_set_tab_icon(HbWindow *win, const char *id, const char *icon);
 

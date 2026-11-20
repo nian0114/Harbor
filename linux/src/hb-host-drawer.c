@@ -407,6 +407,8 @@ static void on_action_btn(GtkButton *b, gpointer ud)
     if (!id) return;
     if (!strcmp(what, "connect"))
         hb_host_action_connect(GTK_WIDGET(b), d->st, id);
+    else if (!strcmp(what, "sftp"))
+        hb_host_action_sftp(GTK_WIDGET(b), d->st, id);
     else if (!strcmp(what, "edit"))
         hb_host_action_edit(GTK_WIDGET(b), d->st, id);
     else if (!strcmp(what, "dup"))
@@ -495,6 +497,7 @@ HbHostDrawer *hb_host_drawer_new(HbStore *st)
     foot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(foot, "hb-drawer-foot");
     gtk_box_append(GTK_BOX(foot), foot_btn(d, "连接", NULL, "connect", "primary"));
+    gtk_box_append(GTK_BOX(foot), foot_btn(d, "SFTP", NULL, "sftp", NULL));
     gtk_box_append(GTK_BOX(foot), foot_btn(d, "编辑", NULL, "edit", NULL));
     gtk_box_append(GTK_BOX(foot), foot_btn(d, "复制", NULL, "dup", NULL));
     sp = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);

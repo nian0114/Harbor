@@ -5,6 +5,7 @@
 #include "hb-hosts-view.h"
 #include "hb-term-page.h"
 #include "hb-ssh-page.h"
+#include "hb-sftp-view.h"
 #include "hb-term-theme.h"
 #include "hb-notify.h"
 #include "hb-icons.h"
@@ -29,32 +30,6 @@ char *hb_opt_host_view;
 char *hb_opt_theme;
 char *hb_opt_open_local;    /* "" = 只开页；非空 = 启动后注入 CMD\n */
 char *hb_opt_connect;       /* --connect=user@host[:port] 启动即快速连接 */
-
-static GtkWidget *sftp_placeholder(void)
-{
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    GtkWidget *ico = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    GtkWidget *ic = hb_icon_new("folder", 24);
-    GtkWidget *t = gtk_label_new("SFTP 双栏文件管理");
-    GtkWidget *s = gtk_label_new("本地与远程文件的双栏浏览，将在 SFTP 单元实现");
-
-    gtk_widget_add_css_class(box, "hb-empty");
-    gtk_widget_add_css_class(box, "hb-content");
-    gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
-    gtk_widget_add_css_class(ico, "hb-e-ico");
-    gtk_widget_set_size_request(ico, 58, 58);
-    gtk_widget_set_halign(ico, GTK_ALIGN_CENTER);
-    gtk_widget_set_halign(ic, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(ic, GTK_ALIGN_CENTER);
-    gtk_widget_set_hexpand(ic, TRUE);
-    gtk_box_append(GTK_BOX(ico), ic);
-    gtk_widget_add_css_class(t, "hb-e-title");
-    gtk_widget_add_css_class(s, "hb-e-sub");
-    gtk_box_append(GTK_BOX(box), ico);
-    gtk_box_append(GTK_BOX(box), t);
-    gtk_box_append(GTK_BOX(box), s);
-    return box;
-}
 
 /* ------------------------------ 截图 ------------------------------ */
 
@@ -321,8 +296,13 @@ static void hb_application_activate(GApplication *app)
     vp = hb_vault_page_new();
     hb_window_add_tab(win, "vault", "Vault", "server", vp, FALSE, FALSE);
     hb_window_set_vault_page(win, vp);
-    hb_window_add_tab(win, "sftp", "SFTP", "folder",
-                      sftp_placeholder(), FALSE, FALSE);
+    {
+        GtkWidget *sv = hb_sftp_view_new(hb_store_default());
+        hb_window_add_tab(win, "sftp", "SFTP", "folder",
+                          sv, FALSE, FALSE);
+        hb_sftp_view_attach_tab(HB_SFTP_VIEW(sv),
+                                GTK_WIDGET(win), "sftp");
+    }
     hb_window_switch_tab(win, "vault");
 
     /* dev 选项 */

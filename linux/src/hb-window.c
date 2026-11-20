@@ -125,6 +125,12 @@ static void free_tab_rec(HbTabRec *t)
     g_free(t);
 }
 
+GtkWidget *hb_window_tab_page(HbWindow *win, const char *id)
+{
+    HbTabRec *t = find_tab(win, id);
+    return t ? t->page : NULL;
+}
+
 gboolean hb_window_has_tab(HbWindow *win, const char *id)
 {
     return find_tab(win, id) != NULL;

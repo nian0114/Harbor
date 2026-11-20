@@ -3,6 +3,7 @@
 #include "hb-dialogs.h"
 #include "hb-host-form.h"
 #include "hb-ssh-page.h"
+#include "hb-sftp-view.h"
 #include "hb-icons.h"
 
 #include <harbor/harbor_core.h>
@@ -74,6 +75,19 @@ void hb_host_action_connect(GtkWidget *any, HbStore *st, const char *id)
         return;
     hb_host_connect_obj(win, st, o);
     hb_obj_free(o);
+}
+
+/* 打开 SFTP tab 并预置两端 */
+void hb_host_action_sftp(GtkWidget *any, HbStore *st, const char *id)
+{
+    HbWindow *win = win_of(any);
+    GtkWidget *page;
+    (void)st;
+    if (!win) return;
+    page = hb_window_tab_page(win, "sftp");
+    if (page && HB_IS_SFTP_VIEW(page))
+        hb_sftp_view_open_host(HB_SFTP_VIEW(page), id);
+    hb_window_switch_tab(win, "sftp");
 }
 
 /* ------------------------------ 编辑 ------------------------------ */

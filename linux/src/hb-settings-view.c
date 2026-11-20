@@ -48,6 +48,7 @@ struct _HbSettingsView {
     GtkWidget   *font_lbl, *lh_lbl;
     GtkWidget   *family_dd, *sb_dd;
     GtkWidget   *blink_sw, *osc52_sw;
+    GtkWidget   *sftp_spin;
     GtkWidget   *pv_view;       /* .hb-term-view.theme-* 容器 */
     GtkWidget   *pv_term;       /* HbTerminal（预览模式） */
     char        *pv_theme_id;   /* 当前挂在 pv_view 上的 theme-* 类 */
@@ -169,6 +170,9 @@ static gboolean save_cb(gpointer ud)
             gtk_switch_get_active(GTK_SWITCH(v->blink_sw)));
         hb_obj_set_bool(o, "osc52",
             gtk_switch_get_active(GTK_SWITCH(v->osc52_sw)));
+        hb_obj_set_int(o, "sftp_concurrency",
+            (int64_t)gtk_spin_button_get_value_as_int(
+                GTK_SPIN_BUTTON(v->sftp_spin)));
         hb_vault_put(hb_store_vault(v->store), o);
         hb_obj_free(o);
     }
@@ -236,6 +240,13 @@ static void on_sw_changed(GObject *sw, GParamSpec *ps, gpointer ud)
     HbSettingsView *v = ud;
     (void)sw; (void)ps;
     apply_preview(v);
+    schedule_save(v);
+}
+
+static void on_spin_changed(GtkSpinButton *sp, gpointer ud)
+{
+    HbSettingsView *v = ud;
+    (void)sp;
     schedule_save(v);
 }
 
@@ -350,6 +361,8 @@ static void refresh(HbSettingsView *v)
                                        (guint)i);
     gtk_switch_set_active(GTK_SWITCH(v->blink_sw), blink);
     gtk_switch_set_active(GTK_SWITCH(v->osc52_sw), osc52);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(v->sftp_spin),
+        CLAMP((double)hb_obj_get_int(o, "sftp_concurrency", 3), 1, 8));
     v->updating = FALSE;
 
     apply_preview(v);
@@ -731,6 +744,29 @@ static void hb_settings_view_init(HbSettingsView *v)
         switch_row("允许远端写入剪贴板（OSC 52）",
                    "远端程序可改写本机剪贴板，仅在信任的主机上开启",
                    &v->osc52_sw, G_CALLBACK(on_sw_changed), v));
+
+    /* SFTP 并发传输数（1-8，默认 3） */
+    {
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        GtkWidget *t = gtk_label_new("SFTP 并发传输数");
+        GtkWidget *s = gtk_label_new("同一主机同时进行的传输（1-8）");
+        gtk_label_set_xalign(GTK_LABEL(t), 0);
+        gtk_box_append(GTK_BOX(col), t);
+        gtk_label_set_xalign(GTK_LABEL(s), 0);
+        gtk_widget_add_css_class(s, "hb-dim");
+        gtk_box_append(GTK_BOX(col), s);
+        gtk_widget_set_hexpand(col, TRUE);
+        gtk_box_append(GTK_BOX(row), col);
+        v->sftp_spin = gtk_spin_button_new_with_range(1, 8, 1);
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(v->sftp_spin), 3);
+        gtk_widget_set_valign(v->sftp_spin, GTK_ALIGN_CENTER);
+        g_signal_connect(v->sftp_spin, "value-changed",
+                         G_CALLBACK(on_spin_changed), v);
+        gtk_box_append(GTK_BOX(row), v->sftp_spin);
+        gtk_widget_add_css_class(row, "check-row");
+        gtk_box_append(GTK_BOX(left), row);
+    }
 
     /* Autocomplete：BETA，未实现 → insensitive，不落库 */
     {

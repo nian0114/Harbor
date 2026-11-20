@@ -16,5 +16,8 @@ void hb_host_action_edit(GtkWidget *any_widget, HbStore *st,
                          const char *id);
 void hb_host_action_duplicate(GtkWidget *any_widget, HbStore *st,
                               const char *id);
+/* 打开 SFTP tab：左=Local home，右=该主机并连接 */
+void hb_host_action_sftp(GtkWidget *any_widget, HbStore *st,
+                         const char *id);
 void hb_host_action_delete(GtkWidget *any_widget, HbStore *st,
                            const char *id);
