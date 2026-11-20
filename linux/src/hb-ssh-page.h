@@ -20,6 +20,12 @@ void hb_ssh_page_attach_tab(HbSshPage *p, GtkWidget *win, const char *tab_id);
 /* 供 dev 调试：像用户输入一样把文本写进会话 */
 void hb_ssh_page_feed_input(HbSshPage *p, const char *text);
 
+/* 活动 session（可能为 NULL：连接中/已断）—— palette snippet 用 */
+hb_session *hb_ssh_page_session(HbSshPage *p);
+
+/* 打开 scrollback 查找条（Ctrl+Shift+F / 工具栏放大镜） */
+void hb_ssh_page_find_open(HbSshPage *p);
+
 /* signals: "edit-host"(gchar *host_id) — 目前无人连接（主机 CRUD 单元预留） */
 
 G_END_DECLS

@@ -1,5 +1,6 @@
 #include "hb-term-page.h"
 #include "hb-terminal.h"
+#include "hb-find-bar.h"
 #include "hb-term-theme.h"
 #include "hb-icons.h"
 #include "hb-notify.h"
@@ -22,6 +23,7 @@ struct _HbTermPage {
     GtkWidget   *st_sb;
     GtkWidget   *st_watch;
     GtkWidget   *watch_btn;
+    GtkWidget   *find_bar;
     gulong       changed_handler;
     char        *shell_base;
     int          sb_lines;
@@ -154,6 +156,13 @@ static hb_session *watch_get_sess(gpointer ud)
 {
     HbTermPage *p = ud;
     return p->sess;
+}
+
+static void on_find_btn(GtkButton *b, gpointer ud)
+{
+    HbTermPage *p = ud;
+    (void)b;
+    hb_term_page_find_open(p);
 }
 
 static void on_watch_btn(GtkButton *b, gpointer ud)
@@ -304,6 +313,15 @@ static GtkWidget *build_toolbar(HbTermPage *p)
         gtk_widget_set_hexpand(sp, TRUE);
         gtk_box_append(GTK_BOX(bar), sp);
     }
+    {
+        GtkWidget *fb = gtk_button_new();
+        gtk_widget_add_css_class(fb, "tbtn");
+        gtk_widget_set_tooltip_text(fb, "在 scrollback 中搜索 (Ctrl+Shift+F)");
+        gtk_button_set_child(GTK_BUTTON(fb), hb_icon_new("search", 13));
+        g_signal_connect(fb, "clicked",
+                         G_CALLBACK(on_find_btn), p);
+        gtk_box_append(GTK_BOX(bar), fb);
+    }
     p->watch_btn = gtk_button_new();
     gtk_widget_add_css_class(p->watch_btn, "tbtn");
     g_signal_connect(p->watch_btn, "clicked",
@@ -387,6 +405,9 @@ static void hb_term_page_init(HbTermPage *p)
 
     gtk_box_append(GTK_BOX(p), build_toolbar(p));
 
+    p->find_bar = hb_find_bar_new();
+    gtk_box_append(GTK_BOX(p), p->find_bar);
+
     /* overlay：terminal + 右侧 overlay 滚动条 + dead 提示 */
     p->overlay = gtk_overlay_new();
     gtk_widget_set_vexpand(p->overlay, TRUE);
@@ -412,6 +433,8 @@ static void hb_term_page_init(HbTermPage *p)
 
     gtk_box_append(GTK_BOX(p), p->overlay);
     gtk_box_append(GTK_BOX(p), build_status(p));
+
+    hb_find_bar_bind(HB_FIND_BAR(p->find_bar), HB_TERMINAL(p->term));
 
     /* dead Enter 重启：capture 阶段先于终端 key handler */
     key = gtk_event_controller_key_new();
@@ -464,6 +487,11 @@ GtkWidget *hb_term_page_new_local(HbStore *st)
 }
 
 /* add_tab 之后调用：tab id 供命中路由定位角标 */
+void hb_term_page_find_open(HbTermPage *p)
+{
+    hb_find_bar_open(HB_FIND_BAR(p->find_bar));
+}
+
 void hb_term_page_attach_tab(HbTermPage *p, GtkWidget *win,
                              const char *tab_id)
 {

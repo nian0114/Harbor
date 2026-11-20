@@ -1,5 +1,6 @@
 #include "hb-ssh-page.h"
 #include "hb-terminal.h"
+#include "hb-find-bar.h"
 #include "hb-term-theme.h"
 #include "hb-icons.h"
 #include "hb-notify.h"
@@ -71,6 +72,7 @@ struct _HbSshPage {
     GtkWidget  *tt_icon;
     GtkWidget  *reconn_btn;
     GtkWidget  *watch_btn;
+    GtkWidget  *find_bar;
     GtkWidget  *st_conn;
     GtkWidget  *st_sb;
     GtkWidget  *st_watch;
@@ -805,6 +807,13 @@ static hb_session *watch_get_sess(gpointer ud)
 {
     HbSshPage *p = ud;
     return p->sess;
+}
+
+static void on_find_btn(GtkButton *b, gpointer ud)
+{
+    HbSshPage *p = ud;
+    (void)b;
+    hb_ssh_page_find_open(p);
 }
 
 static void on_watch_btn(GtkButton *b, gpointer ud)
@@ -1830,6 +1839,15 @@ static GtkWidget *build_term_view(HbSshPage *p)
     mono = hb_mono_icon_new(">_");
     gtk_widget_set_visible(mono, FALSE);
     gtk_box_append(GTK_BOX(bar), mono);
+    {
+        GtkWidget *fb = gtk_button_new();
+        gtk_widget_add_css_class(fb, "tbtn");
+        gtk_widget_set_tooltip_text(fb, "在 scrollback 中搜索 (Ctrl+Shift+F)");
+        gtk_button_set_child(GTK_BUTTON(fb), hb_icon_new("search", 13));
+        g_signal_connect(fb, "clicked",
+                         G_CALLBACK(on_find_btn), p);
+        gtk_box_append(GTK_BOX(bar), fb);
+    }
     p->watch_btn = gtk_button_new();
     gtk_widget_add_css_class(p->watch_btn, "tbtn");
     g_signal_connect(p->watch_btn, "clicked",
@@ -1848,6 +1866,10 @@ static GtkWidget *build_term_view(HbSshPage *p)
     gtk_widget_set_visible(p->reconn_btn, FALSE);
     gtk_box_append(GTK_BOX(bar), p->reconn_btn);
     gtk_box_append(GTK_BOX(box), bar);
+
+    /* scrollback 查找条（FR-20） */
+    p->find_bar = hb_find_bar_new();
+    gtk_box_append(GTK_BOX(box), p->find_bar);
 
     /* 断线重连条 */
     strip = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -1893,6 +1915,8 @@ static GtkWidget *build_term_view(HbSshPage *p)
     gtk_widget_set_visible(p->dead_lbl, FALSE);
     gtk_overlay_add_overlay(GTK_OVERLAY(p->overlay), p->dead_lbl);
     gtk_box_append(GTK_BOX(box), p->overlay);
+
+    hb_find_bar_bind(HB_FIND_BAR(p->find_bar), HB_TERMINAL(p->term));
 
     /* 缓冲输入提示 */
     p->buf_hint = gtk_label_new("输入将在重连后发送");
@@ -2083,4 +2107,16 @@ void hb_ssh_page_feed_input(HbSshPage *p, const char *text)
 {
     if (p->sess && text)
         hb_session_write(p->sess, text, strlen(text));
+}
+
+hb_session *hb_ssh_page_session(HbSshPage *p)
+{
+    return p->sess;
+}
+
+void hb_ssh_page_find_open(HbSshPage *p)
+{
+    /* 连接页/错误卡时没有终端 —— 仅 term 视图可用 */
+    if (p->find_bar)
+        hb_find_bar_open(HB_FIND_BAR(p->find_bar));
 }

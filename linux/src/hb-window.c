@@ -1,4 +1,5 @@
 #include "hb-window.h"
+#include "hb-shortcuts.h"
 #include "hb-icons.h"
 #include "hb-notify.h"
 #include "hb-vault-page.h"
@@ -29,6 +30,7 @@ struct _HbWindow {
     GtkWidget *tabstrip;     /* hbox inside scroller */
     GtkWidget *stack;
     GtkWidget *toasts;       /* AdwToastOverlay 包住全部内容 */
+    GtkWidget *overlay;      /* GtkOverlay：palette 等浮层挂载点 */
     GtkWidget *badge;
     GtkWidget *bell;
     GtkWidget *vault_page;
@@ -77,6 +79,27 @@ void hb_window_switch_tab(HbWindow *win, const char *id)
         win->active = t;
         refresh_active(win);
     }
+}
+
+void hb_window_switch_tab_n(HbWindow *win, guint idx)
+{
+    GList *l = g_list_nth(win->tabs, idx);
+    if (l)
+        hb_window_switch_tab(win, ((HbTabRec *)l->data)->id);
+}
+
+void hb_window_switch_tab_rel(HbWindow *win, int dir)
+{
+    guint n = g_list_length(win->tabs);
+    guint i = win->active ? g_list_index(win->tabs, win->active) : 0;
+    guint ni;
+    GList *l;
+    if (!n)
+        return;
+    ni = (guint)(((int)i + dir + (int)n) % (int)n);
+    l = g_list_nth(win->tabs, ni);
+    if (l)
+        hb_window_switch_tab(win, ((HbTabRec *)l->data)->id);
 }
 
 static void on_tab_click(GtkButton *b, gpointer ud)
@@ -562,43 +585,6 @@ static GtkWidget *build_plus(HbWindow *win)
     return mb;
 }
 
-/* ------------------------------ 快捷键 ------------------------------ */
-
-static gboolean on_key(GtkEventControllerKey *kc, guint keyval,
-                       guint code, GdkModifierType state, gpointer ud)
-{
-    HbWindow *win = ud;
-    guint n = g_list_length(win->tabs);
-    (void)kc; (void)code;
-    if (!(state & GDK_CONTROL_MASK))
-        return FALSE;
-    if ((state & GDK_SHIFT_MASK) &&
-        (keyval == GDK_KEY_T || keyval == GDK_KEY_t)) {
-        hb_window_open_local(win, NULL);
-        return TRUE;
-    }
-    if (keyval == GDK_KEY_Tab || keyval == GDK_KEY_ISO_Left_Tab) {
-        guint i = win->active
-            ? g_list_index(win->tabs, win->active) : 0;
-        int dir = (state & GDK_SHIFT_MASK) ? -1 : 1;
-        guint ni = (guint)(((int)i + dir + (int)n) % (int)(n ? n : 1));
-        GList *l = g_list_nth(win->tabs, ni);
-        if (l) hb_window_switch_tab(win, ((HbTabRec *)l->data)->id);
-        return TRUE;
-    }
-    if (keyval == GDK_KEY_w || keyval == GDK_KEY_W) {
-        if (win->active && win->active->closable)
-            hb_window_close_tab(win, win->active->id);
-        return TRUE;
-    }
-    if (keyval >= GDK_KEY_1 && keyval <= GDK_KEY_9) {
-        GList *l = g_list_nth(win->tabs, keyval - GDK_KEY_1);
-        if (l) hb_window_switch_tab(win, ((HbTabRec *)l->data)->id);
-        return TRUE;
-    }
-    return FALSE;
-}
-
 /* ------------------------------ 窗口 ------------------------------ */
 
 static void on_sidebar_toggle(GtkButton *b, gpointer ud)
@@ -612,6 +598,16 @@ static void on_sidebar_toggle(GtkButton *b, gpointer ud)
 void hb_window_set_vault_page(HbWindow *win, GtkWidget *vault_page)
 {
     win->vault_page = vault_page;
+}
+
+GtkWidget *hb_window_vault_page(HbWindow *win)
+{
+    return win->vault_page;
+}
+
+void hb_window_overlay_add(HbWindow *win, GtkWidget *w)
+{
+    gtk_overlay_add_overlay(GTK_OVERLAY(win->overlay), w);
 }
 
 static void hb_window_dispose(GObject *o)
@@ -634,7 +630,6 @@ static void hb_window_class_init(HbWindowClass *klass)
 static void hb_window_init(HbWindow *win)
 {
     GtkWidget *titlebar, *handle, *scroller, *side, *plus, *wctl;
-    GtkEventController *key;
 
     gtk_window_set_default_size(GTK_WINDOW(win), 1400, 870);
     gtk_widget_set_size_request(GTK_WIDGET(win), 960, 600);
@@ -652,8 +647,11 @@ static void hb_window_init(HbWindow *win)
         gtk_stack_set_transition_type(GTK_STACK(win->stack),
                                       GTK_STACK_TRANSITION_TYPE_CROSSFADE);
         adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(tv), win->stack);
+        win->overlay = gtk_overlay_new();
+        gtk_overlay_set_child(GTK_OVERLAY(win->overlay), tv);
         win->toasts = adw_toast_overlay_new();
-        adw_toast_overlay_set_child(ADW_TOAST_OVERLAY(win->toasts), tv);
+        adw_toast_overlay_set_child(ADW_TOAST_OVERLAY(win->toasts),
+                                    win->overlay);
         adw_application_window_set_content(ADW_APPLICATION_WINDOW(win),
                                            win->toasts);
     }
@@ -685,9 +683,7 @@ static void hb_window_init(HbWindow *win)
     gtk_box_append(GTK_BOX(titlebar), wctl);
 
 
-    key = gtk_event_controller_key_new();
-    g_signal_connect(key, "key-pressed", G_CALLBACK(on_key), win);
-    gtk_widget_add_controller(GTK_WIDGET(win), key);
+    hb_shortcuts_install(win);
 
     g_signal_connect(hb_notify_default(), "changed",
                      G_CALLBACK(on_notify_changed), win);

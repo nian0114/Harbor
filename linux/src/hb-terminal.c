@@ -9,6 +9,8 @@
 #define WHEEL_LINES 3
 #define BLINK_MS 530
 
+typedef struct { int64_t abs; int col, len; } HbTermFindM;
+
 struct _HbTerminal {
     GtkWidget parent;
 
@@ -52,6 +54,15 @@ struct _HbTerminal {
     int64_t      url_r;          /* 命中 URL 的 vt 行 + 列区间 */
     int          url_c0, url_c1;
 
+    /* 查找：find_ms 存绝对行（= search 时 total_pushed + vt row） */
+    char        *find_needle;
+    gboolean     find_ci;
+    HbTermFindM *find_ms;
+    size_t       find_n;
+    int          find_cur;      /* 0-based；-1 无命中 */
+    uint64_t     find_gen;      /* 上次搜索时的 vt generation */
+    guint        find_timer;
+
     hb_terminal_event_cb ev_cb;  /* 转发终端不消费的 session 事件 */
     gpointer     ev_ud;
 };
@@ -60,7 +71,7 @@ G_DEFINE_TYPE(HbTerminal, hb_terminal, GTK_TYPE_WIDGET)
 
 enum {
     SIG_TITLE, SIG_EXITED, SIG_BELL, SIG_OSC133, SIG_NOTIFY,
-    SIG_DEAD_INPUT, N_SIGS
+    SIG_DEAD_INPUT, SIG_FIND_CHANGED, N_SIGS
 };
 static guint sigs[N_SIGS];
 
@@ -206,6 +217,143 @@ static void on_adj_changed(GtkAdjustment *a, gpointer ud)
 }
 
 /* ------------------------------------------------------------------ */
+/* 查找（scrollback + 屏幕）                                            */
+/*                                                                     */
+/* hb_vt_search 返回的 row 是相对 vt 行（-sb_len..rows-1，负数=回滚区，  */
+/* -1 最新）。这里统一转绝对行 abs = total_pushed + row 存储：新输出    */
+/* 只增大 total_pushed，abs 不变 → 当前项跨 recompute 稳定；被淘汰出    */
+/* scrollback 的行 abs 保持不变但不再出现在新搜索结果里，自然消失。      */
+/* ------------------------------------------------------------------ */
+
+static void find_emit(HbTerminal *t)
+{
+    g_signal_emit(t, sigs[SIG_FIND_CHANGED], 0);
+}
+
+/* 执行搜索，结果转绝对行；keep_abs >= 0 时把 cur 定到该绝对行的命中 */
+static void find_run(HbTerminal *t, int64_t keep_abs)
+{
+    hb_vt *v = hb_session_vt(t->sess);
+    hb_vt_match *ms = NULL;
+    int64_t total;
+    size_t n, i;
+
+    g_clear_pointer(&t->find_ms, g_free);
+    t->find_n = 0;
+    t->find_cur = -1;
+    if (!v || !t->find_needle || !*t->find_needle) {
+        t->find_gen = v ? hb_vt_generation(v) : 0;
+        return;
+    }
+    n = hb_vt_search(v, t->find_needle, t->find_ci, &ms);
+    total = (int64_t)hb_vt_total_pushed(v);
+    t->find_gen = hb_vt_generation(v);
+    t->find_ms = g_new(HbTermFindM, n ? n : 1);
+    for (i = 0; i < n; i++) {
+        t->find_ms[i].abs = total + ms[i].row;   /* → 绝对行 */
+        t->find_ms[i].col = ms[i].col;
+        t->find_ms[i].len = ms[i].len;
+    }
+    g_free(ms);
+    t->find_n = n;
+    if (n) {
+        t->find_cur = 0;
+        if (keep_abs >= 0) {
+            /* 同一绝对行取第一个命中；没有就用最近的不超过它的 */
+            for (i = 0; i < n && t->find_ms[i].abs < keep_abs; i++)
+                t->find_cur = (int)i;
+            if (t->find_cur < (int)n - 1 &&
+                t->find_ms[t->find_cur].abs != keep_abs &&
+                t->find_ms[t->find_cur + 1].abs == keep_abs)
+                t->find_cur++;
+        }
+    }
+}
+
+static gboolean find_recompute_cb(gpointer ud)
+{
+    HbTerminal *t = ud;
+    hb_vt *v = t->sess ? hb_session_vt(t->sess) : NULL;
+    t->find_timer = 0;
+    if (t->find_needle && v &&
+        hb_vt_generation(v) != t->find_gen) {
+        int64_t keep = t->find_cur >= 0 ? t->find_ms[t->find_cur].abs : -1;
+        size_t old_n = t->find_n; int old_c = t->find_cur;
+        find_run(t, keep);
+        if (t->find_n != old_n || t->find_cur != old_c)
+            find_emit(t);
+        gtk_widget_queue_draw(GTK_WIDGET(t));
+    }
+    return G_SOURCE_REMOVE;
+}
+
+/* vt 有新输出：挂起（≤10Hz）一次重算 */
+static void find_schedule(HbTerminal *t)
+{
+    if (!t->find_needle || t->find_timer)
+        return;
+    t->find_timer = g_timeout_add(100, find_recompute_cb, t);
+}
+
+/* 当前命中滚到视图垂直居中 */
+static void find_scroll_cur(HbTerminal *t)
+{
+    hb_vt *v;
+    int64_t total, vrow;
+    int vrows = 0, sb = 0, off;
+    if (t->find_cur < 0 || !t->sess) return;
+    v = hb_session_vt(t->sess);
+    total = (int64_t)hb_vt_total_pushed(v);
+    sb = hb_vt_scrollback_count(v);
+    hb_vt_size(v, &vrows, NULL);
+    vrow = t->find_ms[t->find_cur].abs - total;
+    off = vrows / 2 - (int)vrow;
+    if (off < 0) off = 0;
+    if (off > sb) off = sb;
+    if (off != t->scroll_off) {
+        t->scroll_off = off;
+        sync_adj(t);
+    }
+}
+
+guint hb_terminal_find_set(HbTerminal *t, const char *needle,
+                           gboolean case_sensitive)
+{
+    gboolean empty = !needle || !*needle;
+    g_free(t->find_needle);
+    t->find_needle = empty ? NULL : g_strdup(needle);
+    t->find_ci = !case_sensitive;
+    if (t->find_timer) {
+        g_source_remove(t->find_timer);
+        t->find_timer = 0;
+    }
+    find_run(t, -1);
+    if (!empty && t->find_n)
+        find_scroll_cur(t);
+    find_emit(t);
+    gtk_widget_queue_draw(GTK_WIDGET(t));
+    return (guint)t->find_n;
+}
+
+guint hb_terminal_find_step(HbTerminal *t, int dir)
+{
+    if (!t->find_n)
+        return 0;
+    t->find_cur = (t->find_cur + (dir >= 0 ? 1 : -1) + (int)t->find_n)
+                  % (int)t->find_n;
+    find_scroll_cur(t);
+    find_emit(t);
+    gtk_widget_queue_draw(GTK_WIDGET(t));
+    return (guint)t->find_cur + 1;
+}
+
+void hb_terminal_find_counts(HbTerminal *t, guint *cur, guint *total)
+{
+    if (cur) *cur = t->find_cur >= 0 ? (guint)t->find_cur + 1 : 0;
+    if (total) *total = (guint)t->find_n;
+}
+
+/* ------------------------------------------------------------------ */
 /* 会话事件                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -225,6 +373,7 @@ static void on_output(HbTerminal *t)
     if (t->sel && t->sel_b_r >= (int64_t)t->last_total)
         t->sel = FALSE;
     t->last_total = total;
+    find_schedule(t);
     sync_adj(t);
     gtk_widget_queue_draw(GTK_WIDGET(t));
 }
@@ -290,6 +439,15 @@ void hb_terminal_set_session(HbTerminal *t, hb_session *s)
     t->dead = FALSE;
     t->scroll_off = 0;
     t->sel = FALSE;
+    /* 旧 vt 的命中随 session 一起失效 */
+    g_clear_pointer(&t->find_needle, g_free);
+    g_clear_pointer(&t->find_ms, g_free);
+    t->find_n = 0;
+    t->find_cur = -1;
+    if (t->find_timer) {
+        g_source_remove(t->find_timer);
+        t->find_timer = 0;
+    }
     if (s) {
         hb_vt *v = hb_session_vt(s);
         t->last_total = hb_vt_total_pushed(v);
@@ -1038,6 +1196,7 @@ typedef struct {
     int64_t abs_r;
     int     col;
     gboolean selected;
+    int     find;            /* 0 无 / 1 命中 / 2 当前命中 */
 } DrawCell;
 
 static void append_run(GtkSnapshot *snap, PangoContext *pctx,
@@ -1195,6 +1354,26 @@ static void hb_terminal_snapshot(GtkWidget *w, GtkSnapshot *snap)
             dc->abs_r = (int64_t)total + vrow;
             dc->col = i;
             dc->selected = sel_covers(t, dc->abs_r, i);
+            dc->find = 0;
+        }
+    }
+    /* 查找高亮：只标可见区内的命中 */
+    if (t->find_n) {
+        int64_t top = (int64_t)total - t->scroll_off;
+        int64_t bot = top + vrows - 1;
+        size_t lo = 0, hi = t->find_n, mi;
+        /* 二分第一个 abs >= top 的命中 */
+        while (lo < hi) {
+            mi = (lo + hi) / 2;
+            if (t->find_ms[mi].abs < top) lo = mi + 1; else hi = mi;
+        }
+        for (mi = lo; mi < t->find_n && t->find_ms[mi].abs <= bot; mi++) {
+            int dr = (int)(t->find_ms[mi].abs - top);
+            int c0 = t->find_ms[mi].col, k;
+            if (dr < 0 || dr >= vrows) continue;
+            for (k = 0; k < t->find_ms[mi].len && c0 + k < vcols; k++)
+                buf[dr * vcols + c0 + k].find =
+                    (int)mi == t->find_cur ? 2 : 1;
         }
     }
     hb_vt_unlock(v);
@@ -1223,9 +1402,12 @@ static void hb_terminal_snapshot(GtkWidget *w, GtkSnapshot *snap)
             gboolean hasbg;
 
             cell_colors(t, dc, &fg, &bg, &attrs);
-            hasbg = dc->selected || !same_rgba(&bg, &t->theme->bg);
+            if (dc->find == 2)
+                fg = t->theme->bg;   /* 当前命中：glyph 反色保证可读 */
+            hasbg = dc->selected || dc->find ||
+                    !same_rgba(&bg, &t->theme->bg);
 
-            /* 格背景（含选中） */
+            /* 格背景（含选中 / 查找命中） */
             if (hasbg) {
                 graphene_rect_t r = GRAPHENE_RECT_INIT(
                     (float)(PAD_X + i * t->cw),
@@ -1233,7 +1415,9 @@ static void hb_terminal_snapshot(GtkWidget *w, GtkSnapshot *snap)
                     (float)(t->cw * (dc->cell.width == 2 ? 2 : 1)),
                     (float)t->ch);
                 gtk_snapshot_append_color(snap,
-                    dc->selected ? &t->theme->selection : &bg, &r);
+                    dc->find == 2 ? &t->theme->find_cur :
+                    dc->find == 1 ? &t->theme->find :
+                    dc->selected  ? &t->theme->selection : &bg, &r);
             }
             if (dc->cell.width == 0 || (attrs & HB_ATTR_CONCEAL) ||
                 !dc->cell.chars[0]) {
@@ -1376,6 +1560,10 @@ static void hb_terminal_dispose(GObject *o)
         g_source_remove(t->flash_src);
         t->flash_src = 0;
     }
+    if (t->find_timer) {
+        g_source_remove(t->find_timer);
+        t->find_timer = 0;
+    }
     pop = g_object_get_data(G_OBJECT(t), "ctxpop");
     if (pop)
         gtk_widget_unparent(pop);
@@ -1389,6 +1577,8 @@ static void hb_terminal_finalize(GObject *o)
     HbTerminal *t = HB_TERMINAL(o);
     g_free(t->font_family);
     g_free(t->preedit);
+    g_free(t->find_needle);
+    g_free(t->find_ms);
     if (t->fdesc) pango_font_description_free(t->fdesc);
     if (t->url_re) g_regex_unref(t->url_re);
     G_OBJECT_CLASS(hb_terminal_parent_class)->finalize(o);
@@ -1418,6 +1608,9 @@ static void hb_terminal_class_init(HbTerminalClass *klass)
     sigs[SIG_DEAD_INPUT] = g_signal_new("dead-input", HB_TYPE_TERMINAL,
         G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
         G_TYPE_NONE, 1, G_TYPE_STRING);
+    sigs[SIG_FIND_CHANGED] = g_signal_new("find-changed", HB_TYPE_TERMINAL,
+        G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+        G_TYPE_NONE, 0);
 }
 
 void hb_terminal_set_event_cb(HbTerminal *t, hb_terminal_event_cb cb,

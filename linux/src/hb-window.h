@@ -51,8 +51,16 @@ gboolean hb_window_has_tab(HbWindow *win, const char *id);
 void hb_window_close_tab(HbWindow *win, const char *id);
 void hb_window_switch_tab(HbWindow *win, const char *id);
 
+/* 按序号/相对位置切 tab（快捷键用）；idx 0 = Vault。越界 no-op。 */
+void hb_window_switch_tab_n(HbWindow *win, guint idx);
+void hb_window_switch_tab_rel(HbWindow *win, int dir);
+
 /* Vault 页指针：标题栏侧栏开关要翻转它的侧栏可见性 */
 void hb_window_set_vault_page(HbWindow *win, GtkWidget *vault_page);
+GtkWidget *hb_window_vault_page(HbWindow *win);   /* borrowed，可能为 NULL */
+
+/* 全窗口浮层（palette 等）：调用方 unparent/remove 自己来关闭 */
+void hb_window_overlay_add(HbWindow *win, GtkWidget *w);
 
 /* 打开一个 Local 终端页（标题 "Local"、terminal 图标、is_term）；
  * 返回 HbTermPage widget（供 dev --open-local=CMD 注入输入）。 */

@@ -11,7 +11,7 @@ G_BEGIN_DECLS
 typedef struct {
     const char *id;
     GdkRGBA bg, fg, cursor, bar, line, border, green, dim, muted, title,
-            selection;
+            selection, find, find_cur;
     GdkRGBA ansi[16];
 } HbTermTheme;
 

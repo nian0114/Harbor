@@ -22,6 +22,9 @@ void hb_term_page_feed_input(HbTermPage *p, const char *text);
 /* 页面当前主题 id 是否已应用（dev 用） */
 hb_session *hb_term_page_session(HbTermPage *p);
 
+/* 打开 scrollback 查找条（Ctrl+Shift+F / 工具栏放大镜） */
+void hb_term_page_find_open(HbTermPage *p);
+
 G_END_DECLS
 
 #endif

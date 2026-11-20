@@ -5,6 +5,7 @@
 #include "hb-dialogs.h"
 #include "hb-window.h"
 #include "hb-icons.h"
+#include "hb-palette.h"
 
 #include <adwaita.h>
 #include <harbor/hostio.h>
@@ -1772,6 +1773,14 @@ static void on_items_changed(GListModel *m, guint pos, guint rem, guint add,
     update_body_and_title(ud);
 }
 
+static void on_pal_btn(GtkButton *b, gpointer ud)
+{
+    GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(ud));
+    (void)b;
+    if (HB_IS_WINDOW(root))
+        hb_palette_open(HB_WINDOW(root));
+}
+
 static GtkWidget *build_quickbar(HbHostsView *hv)
 {
     GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -1791,10 +1800,17 @@ static GtkWidget *build_quickbar(HbHostsView *hv)
                      G_CALLBACK(on_search_activate), hv);
     gtk_box_append(GTK_BOX(bar), hv->search);
 
-    kbd = gtk_label_new("Ctrl K");
-    gtk_widget_add_css_class(kbd, "kbd");
-    gtk_widget_set_visible(kbd, FALSE);       /* palette 单元再启用 */
-    gtk_box_append(GTK_BOX(bar), kbd);
+    {
+        GtkWidget *kb = gtk_button_new();
+        gtk_widget_add_css_class(kb, "kbd-btn");
+        gtk_widget_set_tooltip_text(kb, "命令面板 (Ctrl+K)");
+        kbd = gtk_label_new("Ctrl K");
+        gtk_widget_add_css_class(kbd, "kbd");
+        gtk_button_set_child(GTK_BUTTON(kb), kbd);
+        g_signal_connect(kb, "clicked",
+                         G_CALLBACK(on_pal_btn), hv);
+        gtk_box_append(GTK_BOX(bar), kb);
+    }
 
     conn = gtk_button_new_with_label("Connect");
     gtk_widget_add_css_class(conn, "hb-btn");

@@ -57,6 +57,9 @@ static const char *const ICON_PATHS[] = {
     "copy", "<rect x=\"9\" y=\"9\" width=\"11\" height=\"11\" rx=\"2\"/><path d=\"M5 15V5a2 2 0 0 1 2-2h10\"/>",
     "upload", "<path d=\"M12 16V4M7 9l5-5 5 5M4 20h16\"/>",
     "download", "<path d=\"M12 4v12M7 11l5 5 5-5M4 20h16\"/>",
+    "up", "<path d=\"m5.5 15 6.5-6.5L18.5 15\"/>",
+    "down", "<path d=\"m5.5 9 6.5 6.5L18.5 9\"/>",
+    "snippet", "<path d=\"m9 8-4 4 4 4M15 8l4 4-4 4\"/>",
     NULL,
 };
 
