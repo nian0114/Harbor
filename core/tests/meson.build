@@ -38,3 +38,9 @@ test_keys = executable('test_keys', 'test_keys.c',
     dependencies: harbor_core_dep,
 )
 test('keys', test_keys, timeout: 120)
+
+test_watch = executable('test_watch', 'test_watch.c',
+    c_args: '-DWATCH_SCEN_FILE="' + meson.current_source_dir() / 'data' / 'watch_scenarios.txt' + '"',
+    dependencies: harbor_core_dep,
+)
+test('watch', test_watch, timeout: 60)

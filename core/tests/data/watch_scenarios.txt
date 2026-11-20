@@ -1,0 +1,226 @@
+# Harbor watch engine — FR-13 acceptance-1 standard scenario set (20 scenarios).
+#
+# Format (one directive per line; '#' comments, blank lines ignored):
+#   scenario <name> <expect> [<signal>] [neg:<class>]
+#       expect  ok | err | none      (first hit's ok flag, or no hit at all)
+#       signal  expected hit signal  (eof|osc133|rule|idle|bell|osc9|osc777); optional
+#       neg:<class>  marks an acceptance negative class (vim|top|idle) for FP rate
+#   @<ms> out <str>             feed output bytes
+#   @<a>-<b>/<step> out <str>   feed <str> every <step> ms from a to b inclusive
+#   @<ms> in                    user input (keystroke)
+#   @<ms> 133 <mark> [<code>]   OSC 133 event (A|B|C|D; D carries exit code)
+#   @<ms> bell                  BEL
+#   @<ms> osc9 <body>           OSC 9 notification
+#   @<ms> osc777 <title>|<body> OSC 777 notify
+#   @<ms> eof <code>            session ended
+#   @<ms> end                   stop; poll the engine at every ms step up to here
+# <str> uses C escapes: \e \a \r \n \t \\ \xHH. Everything after the keyword's
+# single separating space is the string (leading spaces are preserved).
+# All scenarios run with hb_watch_cfg_defaults() (idle heuristic OFF).
+
+# ---------------------------------------------------------------- positives
+
+scenario claude_bell ok bell
+@0 out user@dev:~/proj$ 
+@1000 in
+@1100 out claude "refactor the session layer"\r\n
+@1500-40000/1500 out \r\e[2K✻ Thinking… (esc to interrupt)
+@41000 out \r\e[2K⏺ Updated src/session.c with 42 additions and 7 removals\r\n
+@42000 out ╭──────────────────────────────╮\r\n│ >                            │\r\n╰──────────────────────────────╯\r\n  ? for shortcuts
+@45000 bell
+@60000 end
+
+scenario claude_osc9 ok osc9
+@0 out user@dev:~/proj$ 
+@1000 in
+@1100 out claude\r\n
+@2000-30000/1000 out \r\e[2K✻ Working… (12s · esc to interrupt)
+@31000 out \r\e[2K⏺ Done. All 128 tests pass.\r\n
+@33000 osc9 Claude is waiting for your input
+@45000 end
+
+scenario aider_done ok rule
+@0 out user@dev:~/proj$ 
+@500 in
+@600 out aider --model sonnet\r\n
+@3000 out > 
+@4000 in
+@4100 out add retries to fetch()\r\n
+@5000-25000/700 out Editing src/fetch.py ...\r\n
+@26000 out Applied edit to src/fetch.py\r\n
+@26500 out Tokens: 12k sent, 1.2k received. Cost: $0.05 message, $0.41 session.\r\n
+@26600 out > 
+@40000 end
+
+scenario make_ok_osc133 ok osc133
+@0 133 A
+@0 out user@dev:~/src$ 
+@0 133 B
+@500 in
+@600 out make -j8\r\n
+@650 133 C
+@1000-28000/900 out cc -O2 -c src/file.c -o build/file.o\r\n
+@29000 out cc -o harbor build/*.o\r\n
+@29500 133 D 0
+@29500 133 A
+@29500 out user@dev:~/src$ 
+@29500 133 B
+@40000 end
+
+scenario make_fail_osc133 err osc133
+@0 133 A
+@0 out user@dev:~/src$ 
+@0 133 B
+@500 in
+@600 out make\r\n
+@650 133 C
+@1000-15000/800 out cc -c src/share.c\r\n
+@15500 out src/share.c:212: error: implicit declaration of 'relay_send'\r\n
+@15600 out make: *** [Makefile:12: all] Error 2\r\n
+@15700 133 D 2
+@15700 133 A
+@15700 out user@dev:~/src$ 
+@15700 133 B
+@30000 end
+
+scenario make_fail_rule err rule
+@0 out user@dev:~/src$ 
+@500 in
+@600 out make\r\n
+@1000-20000/700 out cc -c src/unit.c\r\n
+@20500 out src/unit.c:7:1: error: expected ';' before '}' token\r\n
+@20600 out make: *** [Makefile:12: all] Error 2\r\n
+@20700 out user@dev:~/src$ 
+@35000 end
+
+scenario cargo_ok ok rule
+@0 out user@dev:~/rs$ 
+@500 in
+@600 out cargo build --release\r\n
+@1000-40000/1200 out    Compiling crate v0.1.0\r\n
+@41000 out     Finished `release` profile [optimized] target(s) in 41.20s\r\n
+@41100 out user@dev:~/rs$ 
+@55000 end
+
+scenario vite_ok ok rule
+@0 out user@dev:~/web$ 
+@500 in
+@600 out npm run build\r\n
+@1000 out vite v5.2.0 building for production...\r\n
+@1500-12000/500 out \r\e[2Ktransforming (312) src/components/App.tsx
+@12500 out \r\e[2K✓ 1287 modules transformed.\r\n
+@12600 out dist/assets/index-4f3a.js   812.33 kB │ gzip: 241.10 kB\r\n
+@12700 out ✓ built in 12.34s\r\n
+@12800 out user@dev:~/web$ 
+@25000 end
+
+scenario pytest_fail err rule
+@0 out user@dev:~/py$ 
+@500 in
+@600 out pytest -q\r\n
+@1000-34000/1000 out ........................................ [ 31%]\r\n
+@34500 out FAILED tests/test_api.py::test_retry - AssertionError\r\n
+@34600 out ===== 2 failed, 126 passed in 34.56s =====\r\n
+@34700 out user@dev:~/py$ 
+@50000 end
+
+scenario pytest_ok ok rule
+@0 out user@dev:~/py$ 
+@500 in
+@600 out pytest\r\n
+@1000-34000/1000 out ........................................ [ 31%]\r\n
+@34600 out ============== 128 passed in 34.56s ==============\r\n
+@34700 out user@dev:~/py$ 
+@50000 end
+
+scenario wget_done ok rule
+@0 out user@dev:~$ 
+@500 in
+@600 out wget https://example.org/ubuntu.iso\r\n
+@1000-30000/250 out \rubuntu.iso          47%[========>          ]   2.2G  5.20MB/s    eta 7m 3s
+@30500 out \rubuntu.iso         100%[===================>]   4.6G  5.20MB/s    in 15m 2s\r\n
+@30600 out \r\n2026-11-19 10:00:00 (5.20 MB/s) - ‘ubuntu.iso’ saved [4932407296/4932407296]\r\n\r\n
+@30700 out user@dev:~$ 
+@45000 end
+
+scenario git_clone_done ok rule
+@0 out user@dev:~$ 
+@500 in
+@600 out git clone https://example.org/big.git\r\n
+@700 out Cloning into 'big'...\r\n
+@1000-20000/300 out \rReceiving objects:  63% (8812/13987), 120.12 MiB | 9.80 MiB/s
+@20500 out \rReceiving objects: 100% (13987/13987), 201.40 MiB | 9.80 MiB/s, done.\r\n
+@21000-25000/200 out \rResolving deltas:  50% (617/1234)
+@25500 out \rResolving deltas: 100% (1234/1234), done.\r\n
+@25600 out user@dev:~$ 
+@40000 end
+
+scenario ssh_exit ok eof
+@0 out user@dev:~$ 
+@1000 in
+@1100 out exit\r\nlogout\r\n
+@1200 eof 0
+@5000 end
+
+# ---------------------------------------------------------------- negatives
+
+scenario vim_open none neg:vim
+@0 out user@dev:~$ 
+@500 in
+@600 out vim notes.md\r\n
+@700 out \e[?1049h\e[H\e[2J# Notes\r\n~\r\n~\r\n~\r\n"notes.md" 3L, 40B
+@120000 end
+
+scenario vim_editing none neg:vim
+@0 out user@dev:~$ 
+@500 in
+@600 out vim main.c\r\n
+@700 out \e[?1049h\e[H\e[2Jint main(void)\r\n{\r\n    return 0;\r\n}\r\n
+@5000 in
+@5050 out \e[3;5Hreturn 1;
+@9000 in
+@9050 out \e[24;1H-- INSERT --
+@15000 in
+@15050 out \e[24;1H\e[K:w\r\n"main.c" 4L, 38B written
+@90000 end
+
+scenario top_running none neg:top
+@0 out user@dev:~$ 
+@500 in
+@600 out top\r\n
+@700 out \e[?1049h\e[H\e[2J
+@1000-120000/3000 out \e[Htop - 10:00:01 up 3 days,  2 users,  load average: 0.52, 0.41, 0.38\r\nTasks: 213 total,   1 running\r\n  PID USER      PR  NI    VIRT    RES  %CPU  COMMAND\r\n 1234 user      20   0  812340  51200   3.0  harbor\r\n
+@125000 end
+
+scenario idle_shell none neg:idle
+@0 out Last login: Thu Nov 19 10:00:00 2026\r\nuser@dev:~$ 
+@180000 end
+
+scenario ai_streaming_midtask none
+@0 out user@dev:~/proj$ 
+@500 in
+@600 out claude\r\n
+@1000-40000/400 out the previous task completed successfully, now running tests and checking the build output\r\n
+@40000 end
+
+scenario tab_completion_bell none
+@0 out user@dev:~$ 
+@1000 in
+@1050 bell
+@3000 in
+@3040 bell
+@20000 end
+
+scenario short_ls_osc133 none
+@0 133 A
+@0 out user@dev:~$ 
+@0 133 B
+@500 in
+@600 out ls\r\n
+@610 133 C
+@700 out Makefile  README.md  src\r\n
+@800 133 D 0
+@800 133 A
+@800 out user@dev:~$ 
+@800 133 B
+@20000 end
