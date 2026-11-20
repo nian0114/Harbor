@@ -322,6 +322,9 @@ static void host_to_hop(HbSshPage *p, ConnCtx *c, hb_obj *h, hb_ssh_hop *hop)
                                               kid, "passphrase");
         ctx_sec_add(c, (char *)hop->privkey);
         ctx_sec_add(c, (char *)hop->passphrase);
+    } else if (!strcmp(auth, "key")) {
+        hop->auth = HB_SSH_AUTH_KEY;
+        hop->identity_file = hb_obj_get_str(h, "identity_file");
     } else if (!strcmp(auth, "agent")) {
         hop->auth = HB_SSH_AUTH_AGENT;
     } else if (!strcmp(auth, "none")) {
@@ -842,6 +845,12 @@ static void on_errcard_close(GtkButton *b, gpointer ud)
 { (void)b; tab_close((HbSshPage *)ud); }
 static void on_errcard_retry(GtkButton *b, gpointer ud)
 { (void)b; start_connect((HbSshPage *)ud, FALSE); }
+static void on_errcard_edit(GtkButton *b, gpointer ud)
+{
+    HbSshPage *p = ud;
+    (void)b;
+    g_signal_emit(p, sigs[SIG_EDIT_HOST], 0, p->host_id);
+}
 
 /* 连接期错误 → 错误卡片（插在日志区下方） */
 static void show_error_card(HbSshPage *p, const char *msg, const char *detail,
@@ -892,6 +901,12 @@ static void show_error_card(HbSshPage *p, const char *msg, const char *detail,
         gtk_widget_add_css_class(c, "hb-btn");
         g_signal_connect(c, "clicked", G_CALLBACK(on_errcard_close), p);
         gtk_box_append(GTK_BOX(foot), c);
+    }
+    if (p->host_id) {
+        GtkWidget *e = gtk_button_new_with_label("编辑主机");
+        gtk_widget_add_css_class(e, "hb-btn");
+        g_signal_connect(e, "clicked", G_CALLBACK(on_errcard_edit), p);
+        gtk_box_append(GTK_BOX(foot), e);
     }
     {
         GtkWidget *r = gtk_button_new_with_label("重试");
@@ -1634,4 +1649,5 @@ void hb_ssh_page_attach_tab(HbSshPage *p, GtkWidget *win, const char *tab_id)
     p->win = HB_WINDOW(win);
     g_free(p->tab_id);
     p->tab_id = g_strdup(tab_id);
+    hb_window_set_tab_host(p->win, tab_id, p->host_id);
 }

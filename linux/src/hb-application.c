@@ -9,6 +9,7 @@
 #include "hb-notify.h"
 #include "hb-icons.h"
 #include "hb-dialogs.h"
+#include "hb-host-actions.h"
 
 #include <harbor/ssh.h>
 #include <string.h>
@@ -119,44 +120,6 @@ static void hb_application_startup(GApplication *app)
     hb_term_theme_install_css();
 }
 
-/* 打开一个 SSH tab（host 对象已加载）。 */
-static void open_ssh_tab(HbWindow *win, hb_obj *host)
-{
-    GtkWidget *page;
-    char *tab_id;
-    const char *name = hb_obj_get_str(host, "name");
-    const char *os = hb_obj_get_str(host, "os");
-
-    tab_id = g_strdup_printf("ssh-%s", hb_obj_id(host));
-    if (hb_window_has_tab(win, tab_id)) {
-        hb_window_switch_tab(win, tab_id);
-        g_free(tab_id);
-        return;
-    }
-    page = hb_ssh_page_new(hb_store_default(), host);
-    hb_window_add_tab(win, tab_id,
-                      name && *name ? name : hb_obj_get_str(host, "address"),
-                      hb_os_avatar_key(os && *os ? os : "generic"),
-                      page, TRUE, FALSE);
-    hb_ssh_page_attach_tab(HB_SSH_PAGE(page), GTK_WIDGET(win), tab_id);
-    hb_window_switch_tab(win, tab_id);
-    g_free(tab_id);
-}
-
-/* 按 proto 分派连接：ssh → SSH 页；local → Local 页；rdp/vnc → 占位 toast */
-static void connect_host_obj(HbWindow *win, hb_obj *o)
-{
-    const char *proto = hb_obj_get_str(o, "proto");
-    if (!proto) proto = "";
-    if (!strcmp(proto, "local")) {
-        hb_window_open_local(win, NULL);
-    } else if (!strcmp(proto, "ssh")) {
-        open_ssh_tab(win, o);
-    } else if (!strcmp(proto, "rdp") || !strcmp(proto, "vnc")) {
-        hb_toast(GTK_WIDGET(win), "远程桌面（VNC/RDP）将在后续版本提供");
-    }
-}
-
 /* Hosts 页 connect(id)：ssh → SSH 页；local → Local 页；rdp/vnc → 占位 toast */
 static void on_host_connect(GtkWidget *hv, const char *hid, gpointer ud)
 {
@@ -166,7 +129,7 @@ static void on_host_connect(GtkWidget *hv, const char *hid, gpointer ud)
     if (hb_vault_get(hb_store_vault(hb_store_default()), hid, &o) != HB_OK ||
         !o)
         return;
-    connect_host_obj(win, o);
+    hb_host_connect_obj(win, hb_store_default(), o);
     hb_obj_free(o);
 }
 
@@ -198,7 +161,7 @@ static void quick_connect(HbWindow *win, const char *text)
                  (!user || !*user || (hu && !strcmp(hu, user))))
             hit = TRUE;
         if (hit) {
-            connect_host_obj(win, objs[i]);
+            hb_host_connect_obj(win, hb_store_default(), objs[i]);
             hb_obj_list_free(objs, n);
             g_free(user); g_free(host);
             return;
@@ -220,7 +183,7 @@ static void quick_connect(HbWindow *win, const char *text)
     hb_obj_set_str(h, "os", "auto");
     hb_obj_set_str(h, "auth", "auto");
     hb_vault_put(v, h);
-    open_ssh_tab(win, h);
+    hb_host_connect_obj(win, hb_store_default(), h);
     hb_obj_free(h);
     g_free(user); g_free(host);
 }

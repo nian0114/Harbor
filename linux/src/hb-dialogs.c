@@ -423,3 +423,140 @@ void hb_toast_undo(GtkWidget *any_widget, const char *text,
     HbWindow *w = find_win(any_widget);
     if (w) hb_window_toast_undo(w, text, (GCallback)undo_cb, ud);
 }
+
+/* ============================ 通用模态 ============================ */
+
+AdwDialog *hb_modal_new(const char *title,
+                        GtkWidget **body_out, GtkWidget **foot_out)
+{
+    return ADW_DIALOG(modal_new(title, 520, body_out, foot_out));
+}
+
+/* ------------------------------ confirm ------------------------------ */
+
+typedef struct {
+    hb_dialog_bool_cb cb;
+    gpointer          ud;
+    AdwDialog        *dlg;
+    gboolean          accepted;
+} CfmData;
+
+static void cfm_cancel(GtkButton *b, CfmData *d)
+{ (void)b; d->accepted = FALSE; adw_dialog_close(d->dlg); }
+static void cfm_ok(GtkButton *b, CfmData *d)
+{ (void)b; d->accepted = TRUE;  adw_dialog_close(d->dlg); }
+static void cfm_closed(AdwDialog *dlg, CfmData *d)
+{
+    (void)dlg;
+    if (d->cb) d->cb(d->accepted, d->ud);
+    g_free(d);
+}
+
+void hb_dialog_confirm(GtkWidget *parent, const char *title,
+                       const char *markup, const char *ok_label,
+                       gboolean danger,
+                       hb_dialog_bool_cb cb, gpointer ud)
+{
+    GtkWidget *dlg, *body, *foot, *msg, *f, *ok, *cancel;
+    CfmData *d = g_new0(CfmData, 1);
+    GtkRoot *root = gtk_widget_get_root(parent);
+    d->cb = cb;
+    d->ud = ud;
+
+    dlg = modal_new(title, 420, &body, &foot);
+    d->dlg = ADW_DIALOG(dlg);
+
+    msg = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(msg), markup ? markup : "");
+    gtk_label_set_wrap(GTK_LABEL(msg), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(msg), 0);
+    gtk_widget_add_css_class(msg, "hb-modal-msg");
+    gtk_box_append(GTK_BOX(body), msg);
+
+    f = footer_new("取消", ok_label, danger ? "danger" : "primary", &ok);
+    cancel = gtk_widget_get_first_child(f);
+    g_signal_connect(cancel, "clicked", G_CALLBACK(cfm_cancel), d);
+    g_signal_connect(ok, "clicked", G_CALLBACK(cfm_ok), d);
+    gtk_widget_set_margin_start(f, 20);
+    gtk_widget_set_margin_end(f, 20);
+    gtk_widget_set_margin_top(f, 4);
+    gtk_widget_set_margin_bottom(f, 16);
+    gtk_box_append(GTK_BOX(foot), f);
+
+    g_signal_connect(dlg, "closed", G_CALLBACK(cfm_closed), d);
+    adw_dialog_present(ADW_DIALOG(dlg),
+                       GTK_IS_WIDGET(root) ? GTK_WIDGET(root) : NULL);
+}
+
+/* ------------------------------ prompt ------------------------------ */
+
+typedef struct {
+    hb_dialog_text_cb cb;
+    gpointer          ud;
+    AdwDialog        *dlg;
+    GtkWidget        *entry;
+    char             *result;
+} PrmData;
+
+static void prm_deliver(PrmData *d, const char *text)
+{
+    d->result = g_strdup(text);
+    gtk_editable_set_text(GTK_EDITABLE(d->entry), "");
+    adw_dialog_close(d->dlg);
+}
+static void prm_cancel(GtkButton *b, PrmData *d)
+{ (void)b; prm_deliver(d, NULL); }
+static void prm_ok(GtkButton *b, PrmData *d)
+{
+    (void)b;
+    prm_deliver(d, gtk_editable_get_text(GTK_EDITABLE(d->entry)));
+}
+static void prm_activate(GtkEntry *e, PrmData *d)
+{ (void)e; prm_deliver(d, gtk_editable_get_text(GTK_EDITABLE(d->entry))); }
+static void prm_closed(AdwDialog *dlg, PrmData *d)
+{
+    (void)dlg;
+    if (d->cb) d->cb(d->result, d->ud);
+    g_free(d->result);
+    g_free(d);
+}
+
+void hb_dialog_prompt(GtkWidget *parent, const char *title,
+                      const char *label, const char *initial,
+                      hb_dialog_text_cb cb, gpointer ud)
+{
+    GtkWidget *dlg, *body, *foot, *l, *f, *ok, *cancel;
+    PrmData *d = g_new0(PrmData, 1);
+    GtkRoot *root = gtk_widget_get_root(parent);
+    d->cb = cb;
+    d->ud = ud;
+
+    dlg = modal_new(title, 400, &body, &foot);
+    d->dlg = ADW_DIALOG(dlg);
+
+    if (label) {
+        l = gtk_label_new(label);
+        gtk_label_set_xalign(GTK_LABEL(l), 0);
+        gtk_widget_add_css_class(l, "hb-form-label");
+        gtk_box_append(GTK_BOX(body), l);
+    }
+    d->entry = gtk_entry_new();
+    if (initial) gtk_editable_set_text(GTK_EDITABLE(d->entry), initial);
+    g_signal_connect(d->entry, "activate", G_CALLBACK(prm_activate), d);
+    gtk_box_append(GTK_BOX(body), d->entry);
+
+    f = footer_new("取消", "确定", "primary", &ok);
+    cancel = gtk_widget_get_first_child(f);
+    g_signal_connect(cancel, "clicked", G_CALLBACK(prm_cancel), d);
+    g_signal_connect(ok, "clicked", G_CALLBACK(prm_ok), d);
+    gtk_widget_set_margin_start(f, 20);
+    gtk_widget_set_margin_end(f, 20);
+    gtk_widget_set_margin_top(f, 4);
+    gtk_widget_set_margin_bottom(f, 16);
+    gtk_box_append(GTK_BOX(foot), f);
+
+    g_signal_connect(dlg, "closed", G_CALLBACK(prm_closed), d);
+    adw_dialog_present(ADW_DIALOG(dlg),
+                       GTK_IS_WIDGET(root) ? GTK_WIDGET(root) : NULL);
+    gtk_widget_grab_focus(d->entry);
+}

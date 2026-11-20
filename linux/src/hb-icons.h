@@ -21,6 +21,9 @@ GtkWidget *hb_mono_icon_new(const char *glyph);
  * 未知 → generic。px 一般 38（头像）或更小。 */
 GtkWidget *hb_os_avatar_new(const char *os_or_proto, int px);
 
+/* 就地换键：CSS 类与字形在原地更新，不重建 widget（bind 路径用） */
+void       hb_os_avatar_set_key(GtkWidget *box, const char *os_or_proto);
+
 /* 归一化 OS/协议 → 头像键（ubuntu/generic/debian/local/vnc/rdp/win） */
 const char *hb_os_avatar_key(const char *os_or_proto);
 

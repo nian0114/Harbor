@@ -193,6 +193,16 @@ button.hb-viewbtn.on { color: @hb_blue; background-color: @hb_btn; }
 .hb-h-name { font-weight: 600; font-size: 13.5px; color: @hb_text; }
 .hb-h-sub  { font-size: 12px; color: @hb_text_3; margin-top: 2px; }
 
+/* gridview/listview 的默认 :selected 样式（灰底+边框）去掉，
+   选中态用卡片自身 1.5px 蓝边 / 行浅蓝底 */
+gridview > *:selected,
+listview > *:selected {
+    background: transparent;
+    box-shadow: none;
+}
+.hb-host-card.sel { border: 1.5px solid @hb_blue; }
+.hb-table-row.sel { background-color: #eaf2fd; }
+
 .hb-os-avatar { border-radius: 10px; color: white; }
 .hb-os-avatar.sm { border-radius: 6px; }
 .hb-os-avatar.ubuntu  { background-color: @hb_ubuntu; }
@@ -382,3 +392,62 @@ button.tbtn:hover { background-color: alpha(white, .16); }
     padding: 6px 14px; font-size: 12.5px;
 }
 .hb-disc-strip label { font-size: 12.5px; }
+
+/* ------------------------------ 主机 CRUD（Phase 2） ------------------------------ */
+
+.hb-drawer-scrim {
+    background-color: alpha(#10141c, 0.45);
+    border-radius: 0;
+}
+.hb-drawer {
+    background-color: @hb_sidebar;
+    border-left: 1px solid @hb_line;
+}
+.hb-drawer-name { font-size: 16px; font-weight: 600; }
+.hb-drawer-chip {
+    font-size: 11px; padding: 2px 8px; border-radius: 9px;
+    background-color: @hb_btn; color: @hb_text_2;
+}
+.hb-drawer-row {
+    padding: 8px 0; font-size: 12.5px;
+    border-bottom: 1px solid @hb_line;
+}
+.hb-drawer-key { font-size: 12px; color: @hb_text_3; }
+.hb-drawer-val { font-size: 12.5px; font-family: monospace; }
+.hb-drawer-foot {
+    padding: 10px 14px; border-top: 1px solid @hb_line;
+}
+.hb-iconbtn { padding: 4px; min-width: 22px; min-height: 22px; }
+.hb-iconbtn:hover { background-color: @hb_btn_hover; }
+.hb-form-label { font-size: 12px; color: @hb_text_2; }
+.hb-modal-msg { font-size: 14px; margin-bottom: 6px; }
+.hb-link {
+    padding: 0; border: none; background: none;
+    color: @hb_blue; font-size: 12px;
+}
+.hb-link:hover { text-decoration: underline; }
+.hb-jump-row {
+    padding: 5px 8px; border-radius: 7px;
+    background-color: @hb_card; border: 1px solid @hb_line;
+}
+.hb-jump-btn { padding: 2px 7px; min-height: 0; font-size: 12px; }
+.hb-color-swatch { border-radius: 13px; border: 2px solid transparent; }
+.hb-color-swatch.sel, .hb-color-none.sel {
+    border-color: @hb_blue;
+}
+.hb-color-none { padding: 3px 10px; }
+.c-red    { background-color: #e5484d; }
+.c-orange { background-color: #f0a13a; }
+.c-green  { background-color: #22a06b; }
+.c-blue   { background-color: #2f7cf6; }
+.c-purple { background-color: #8b5cf6; }
+.c-pink   { background-color: #ec4899; }
+.hb-imp-list { margin: 6px 0; }
+.hb-imp-row  { font-size: 12.5px; font-family: monospace; }
+.hb-imp-sub  { font-size: 11.5px; color: @hb_text_2; font-family: monospace; }
+.hb-ctx-menu { padding: 4px; }
+.linked button:first-child { border-radius: 8px 0 0 8px; }
+.linked menubutton > button, .linked menubutton button {
+    border-radius: 0 8px 8px 0; padding: 0 9px;
+}
+.hb-mono { font-family: monospace; font-size: 11.5px; }

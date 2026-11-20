@@ -53,6 +53,10 @@ static const char *const ICON_PATHS[] = {
     "battery", "<rect x=\"2.5\" y=\"8\" width=\"16.5\" height=\"8\" rx=\"2\"/><path d=\"M21.8 10.8v2.4\"/><rect x=\"5\" y=\"10.4\" width=\"9.5\" height=\"3.2\" rx=\".8\" fill=\"currentColor\" stroke=\"none\"/>",
     "shield", "<path d=\"M12 3l7.8 2.9v5.9c0 4.8-3.3 7.7-7.8 8.9-4.5-1.2-7.8-4.1-7.8-8.9V5.9L12 3z\"/><path d=\"m9 11.8 2.1 2.1 4-4.4\"/>",
     "plus", "<path d=\"M12 5.5v13M5.5 12h13\"/>",
+    "pencil", "<path d=\"M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1z\"/>",
+    "copy", "<rect x=\"9\" y=\"9\" width=\"11\" height=\"11\" rx=\"2\"/><path d=\"M5 15V5a2 2 0 0 1 2-2h10\"/>",
+    "upload", "<path d=\"M12 16V4M7 9l5-5 5 5M4 20h16\"/>",
+    "download", "<path d=\"M12 4v12M7 11l5 5 5-5M4 20h16\"/>",
     NULL,
 };
 
@@ -258,11 +262,35 @@ const char *hb_os_avatar_key(const char *os_or_proto)
     return "generic";
 }
 
+static const char *avatar_icon_name(const char *key)
+{
+    if (!strcmp(key, "vnc"))    return "monitor";
+    if (!strcmp(key, "rdp") ||
+        !strcmp(key, "win"))    return "win";
+    if (!strcmp(key, "ubuntu")) return "ubuntu";
+    return "asterisk";
+}
+
+static GtkWidget *avatar_glyph_new(const char *key, int px, int gpx)
+{
+    GtkWidget *glyph;
+    if (!strcmp(key, "local")) {
+        glyph = hb_mono_icon_new(">_");
+        if (px <= 26)
+            gtk_widget_add_css_class(glyph, "sm");
+    } else {
+        glyph = hb_icon_new(avatar_icon_name(key), gpx);
+    }
+    gtk_widget_set_halign(glyph, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(glyph, GTK_ALIGN_CENTER);
+    gtk_widget_set_hexpand(glyph, TRUE);
+    return glyph;
+}
+
 GtkWidget *hb_os_avatar_new(const char *os_or_proto, int px)
 {
     const char *key = hb_os_avatar_key(os_or_proto);
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    GtkWidget *glyph;
     int gpx = px >= 38 ? 20 : MAX(10, px * 53 / 100);
 
     gtk_widget_add_css_class(box, "hb-os-avatar");
@@ -279,21 +307,41 @@ GtkWidget *hb_os_avatar_new(const char *os_or_proto, int px)
     gtk_widget_set_vexpand(box, FALSE);
 
     gtk_widget_set_overflow(box, GTK_OVERFLOW_HIDDEN);
-    if (!strcmp(key, "local")) {
-        glyph = hb_mono_icon_new(">_");
-        if (px <= 26)
-            gtk_widget_add_css_class(glyph, "sm");
-    } else if (!strcmp(key, "vnc"))
-        glyph = hb_icon_new("monitor", gpx);
-    else if (!strcmp(key, "rdp") || !strcmp(key, "win"))
-        glyph = hb_icon_new("win", gpx);
-    else if (!strcmp(key, "ubuntu"))
-        glyph = hb_icon_new("ubuntu", gpx);
-    else
-        glyph = hb_icon_new("asterisk", gpx);
-    gtk_widget_set_halign(glyph, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(glyph, GTK_ALIGN_CENTER);
-    gtk_widget_set_hexpand(glyph, TRUE);
-    gtk_box_append(GTK_BOX(box), glyph);
+    g_object_set_data_full(G_OBJECT(box), "av-key", g_strdup(key), g_free);
+    g_object_set_data(G_OBJECT(box), "av-px", GINT_TO_POINTER(px));
+    gtk_box_append(GTK_BOX(box), avatar_glyph_new(key, px, gpx));
     return box;
+}
+
+void hb_os_avatar_set_key(GtkWidget *box, const char *os_or_proto)
+{
+    const char *key = hb_os_avatar_key(os_or_proto);
+    const char *old = g_object_get_data(G_OBJECT(box), "av-key");
+    GtkWidget *glyph;
+    int px, gpx;
+
+    if (!old)
+        return;                     /* 不是 hb_os_avatar_new 造的 box */
+    if (!strcmp(old, key))
+        return;
+    gtk_widget_remove_css_class(box, old);
+    gtk_widget_add_css_class(box, key);
+    g_object_set_data_full(G_OBJECT(box), "av-key", g_strdup(key), g_free);
+
+    px = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(box), "av-px"));
+    gpx = px >= 38 ? 20 : MAX(10, px * 53 / 100);
+    glyph = gtk_widget_get_first_child(box);
+    /* 同类字形原地换内容：HbIcon 只改 name；label 只改文本 */
+    if (glyph && HB_IS_ICON(glyph) && strcmp(key, "local")) {
+        hb_icon_set_name(HB_ICON(glyph), avatar_icon_name(key));
+        return;
+    }
+    if (glyph && !HB_IS_ICON(glyph) && !strcmp(key, "local")) {
+        gtk_label_set_label(GTK_LABEL(glyph), ">_");
+        return;
+    }
+    /* 字形类型变了（local ↔ 图标）才重建 */
+    if (glyph)
+        gtk_box_remove(GTK_BOX(box), glyph);
+    gtk_box_append(GTK_BOX(box), avatar_glyph_new(key, px, gpx));
 }

@@ -23,6 +23,15 @@ void hb_window_set_tab_icon(HbWindow *win, const char *id, const char *icon);
 void hb_window_toast(HbWindow *win, const char *text);
 void hb_window_toast_undo(HbWindow *win, const char *text,
                           GCallback undo_cb, gpointer ud);
+/* toast 带自定义按钮（撤销之外的动作，如"查看/编辑"） */
+void hb_window_toast_action(HbWindow *win, const char *text,
+                            const char *btn_label, int timeout,
+                            GCallback cb, gpointer ud);
+/* tab ↔ vault host 关联：删除主机时按 host_id 关页（不拼 tab id） */
+void hb_window_set_tab_host(HbWindow *win, const char *id,
+                            const char *host_id);
+void hb_window_close_host_tabs(HbWindow *win, const char *host_id);
+
 gboolean hb_window_has_tab(HbWindow *win, const char *id);
 void hb_window_close_tab(HbWindow *win, const char *id);
 void hb_window_switch_tab(HbWindow *win, const char *id);

@@ -11,6 +11,7 @@ typedef struct HbTabRec {
     HbWindow  *win;
     char      *id;
     char      *icon;
+    char      *host_id;     /* 关联 vault host（NULL=非主机页） */
     GtkWidget *page;        /* stack child */
     GtkWidget *box;         /* .hb-tab container */
     GtkWidget *main;        /* 选中按钮 */
@@ -84,6 +85,7 @@ static void free_tab_rec(HbTabRec *t)
 {
     g_free(t->id);
     g_free(t->icon);
+    g_free(t->host_id);
     g_free(t);
 }
 
@@ -120,6 +122,29 @@ static void on_close_click(GtkButton *b, gpointer ud)
     HbTabRec *t = ud;
     (void)b;
     hb_window_close_tab(t->win, t->id);
+}
+
+void hb_window_set_tab_host(HbWindow *win, const char *id,
+                            const char *host_id)
+{
+    HbTabRec *t = find_tab(win, id);
+    if (!t) return;
+    g_free(t->host_id);
+    t->host_id = g_strdup(host_id);
+}
+
+void hb_window_close_host_tabs(HbWindow *win, const char *host_id)
+{
+    GList *ids = NULL, *l;
+    if (!host_id) return;
+    for (l = win->tabs; l; l = l->next) {
+        HbTabRec *t = l->data;
+        if (t->host_id && !strcmp(t->host_id, host_id))
+            ids = g_list_prepend(ids, g_strdup(t->id));
+    }
+    for (l = ids; l; l = l->next)
+        hb_window_close_tab(win, l->data);
+    g_list_free_full(ids, g_free);
 }
 
 void hb_window_set_tab_dot(HbWindow *win, const char *id, const char *dot)
@@ -176,14 +201,21 @@ void hb_window_toast(HbWindow *win, const char *text)
 void hb_window_toast_undo(HbWindow *win, const char *text,
                           GCallback undo_cb, gpointer ud)
 {
+    hb_window_toast_action(win, text, "撤销", 9, undo_cb, ud);
+}
+
+void hb_window_toast_action(HbWindow *win, const char *text,
+                            const char *btn_label, int timeout,
+                            GCallback cb, gpointer ud)
+{
     AdwToast *t;
     if (!win->toasts || !text)
         return;
     t = adw_toast_new(text);
-    adw_toast_set_button_label(t, "撤销");
-    adw_toast_set_timeout(t, 9);
-    if (undo_cb)
-        g_signal_connect_swapped(t, "button-clicked", undo_cb, ud);
+    adw_toast_set_button_label(t, btn_label);
+    adw_toast_set_timeout(t, timeout > 0 ? timeout : 9);
+    if (cb)
+        g_signal_connect_swapped(t, "button-clicked", cb, ud);
     adw_toast_overlay_add_toast(ADW_TOAST_OVERLAY(win->toasts), t);
 }
 

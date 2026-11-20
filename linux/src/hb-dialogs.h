@@ -43,6 +43,23 @@ AdwDialog *hb_dialog_password(GtkWindow *parent,
                               gboolean show_remember,
                               hb_dialog_secret_cb cb, gpointer ud);
 
+/* 通用模态骨架：header 标题+✕ / 滚动 body / 钉底 footer，同各内置对话框。
+ * body_out/foot_out 返回两个 GtkBox 供调用方填内容。 */
+AdwDialog *hb_modal_new(const char *title,
+                        GtkWidget **body_out, GtkWidget **foot_out);
+
+/* 简单确认：取消 / ok_label（danger → 红色按钮）；cb 收 accepted。 */
+void hb_dialog_confirm(GtkWidget *parent, const char *title,
+                       const char *markup, const char *ok_label,
+                       gboolean danger,
+                       hb_dialog_bool_cb cb, gpointer ud);
+
+/* 单行输入：取消 / 确定；cb 收文本或 NULL（取消）。 */
+typedef void (*hb_dialog_text_cb)(const char *text_or_null, gpointer ud);
+void hb_dialog_prompt(GtkWidget *parent, const char *title,
+                      const char *label, const char *initial,
+                      hb_dialog_text_cb cb, gpointer ud);
+
 /* toast（委托给所在窗口的 AdwToastOverlay） */
 void hb_toast(GtkWidget *any_widget, const char *text);
 typedef void (*hb_toast_undo_cb)(gpointer ud);
