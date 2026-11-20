@@ -1,9 +1,11 @@
 #include "test.h"
 
 #include "harbor/session.h"
+#include "harbor/watch.h"
 
 #include <poll.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -307,6 +309,227 @@ static void test_watch_off(void)
     hb_session_free(s);
 }
 
+/* ------------------------------ Shell History（FR-08） ------------------------------ */
+
+/* 逐字符走 hb_session_unichar + ENTER（同终端真实输入路径） */
+static void hist_type(hb_session *s, const char *str)
+{
+    const char *p;
+    for (p = str; *p; p++)
+        /* GTK 对需 Shift 的字符（大写、"、:、| …）带 Shift 修饰位，照样模拟 */
+        hb_session_unichar(s, (uint32_t)(unsigned char)*p,
+                           (isupper((unsigned char)*p) ||
+                            strchr("~!@#$%^&*()_+{}|:\"<>?", *p))
+                               ? HB_MOD_SHIFT : 0);
+}
+
+static void hist_enter(hb_session *s)
+{
+    hb_session_key(s, HB_KEY_ENTER, 0);
+}
+
+static void hist_type_cmd(hb_session *s, const char *cmd)
+{
+    hist_type(s, cmd);
+    usleep(200000);                    /* 等回显回环（真实键入必有此延迟） */
+    hist_enter(s);
+}
+
+static void hist_stash(hb_session *s, char cmds[][256], int *n, int max)
+{
+    hb_sess_event ev;
+    while (hb_session_next_event(s, &ev)) {
+        if (ev.type == HB_SESS_EV_COMMAND && *n < max) {
+            const char *t = ev.text ? ev.text : "";
+            strncpy(cmds[*n], t, 255);
+            cmds[*n][255] = 0;
+            (*n)++;
+        }
+        hb_sess_event_clear(&ev);
+    }
+}
+
+/* 等到下一个 OSC133 'B'（提示符画完），最长 timeout_ms；
+ * 期间到达的 COMMAND 事件一并收集进 cmds，不丢弃。 */
+static int wait_osc_b(hb_session *s, char cmds[][256], int *n, int max,
+                      int timeout_ms)
+{
+    int waited = 0;
+    while (waited < timeout_ms) {
+        hb_sess_event ev;
+        while (hb_session_next_event(s, &ev)) {
+            int is_b = ev.type == HB_SESS_EV_OSC133 && ev.mark == 'B';
+            if (ev.type == HB_SESS_EV_COMMAND && *n < max) {
+                const char *t = ev.text ? ev.text : "";
+                strncpy(cmds[*n], t, 255);
+                cmds[*n][255] = 0;
+                (*n)++;
+            }
+            hb_sess_event_clear(&ev);
+            if (is_b)
+                return 1;
+        }
+        usleep(20000);
+        waited += 20;
+    }
+    return 0;
+}
+
+/* 收集 timeout_ms 内全部 COMMAND 文本（其余事件丢弃）。
+ * *n 为起始下标（之前 wait_osc_b 可能已收集过）。 */
+static int hist_collect(hb_session *s, char cmds[][256], int *n, int max,
+                        int timeout_ms)
+{
+    int waited = 0;
+    while (waited < timeout_ms) {
+        hist_stash(s, cmds, n, max);
+        usleep(20000);
+        waited += 20;
+    }
+    return *n;
+}
+
+static int hist_has(char cmds[][256], int n, const char *want)
+{
+    int i;
+    for (i = 0; i < n; i++)
+        if (strcmp(cmds[i], want) == 0)
+            return 1;
+    return 0;
+}
+
+static int wait_prompt(hb_session *s, int timeout_ms)
+{
+    int waited = 0;
+    hb_sess_event ev;
+    while (waited < timeout_ms && !screen_has(s, "$")) {
+        while (hb_session_next_event(s, &ev))
+            hb_sess_event_clear(&ev);
+        usleep(100000);
+        waited += 100;
+    }
+    while (hb_session_next_event(s, &ev))
+        hb_sess_event_clear(&ev);
+    return 1;
+}
+
+static hb_session *spawn_bash(void)
+{
+    hb_pty_opts o = { .shell = "/bin/sh",
+                      .command = "exec bash --norc -i",
+                      .rows = 24, .cols = 80 };
+    return hb_session_new_local(&o, 200);
+}
+
+/* 回退启发式：普通命令采集；read -s 密码不采；[sudo] password 提示不采；
+ * 前导空格（ignorespace）不采。 */
+static void test_history_heuristic(void)
+{
+    hb_session *s;
+    char cmds[16][256];
+    int n;
+
+    s = spawn_bash();
+    CHECK(s != NULL);
+    if (!s)
+        return;
+    hb_session_set_history(s, true);
+    wait_prompt(s, 4000);
+
+    hist_type_cmd(s, "echo hist-a");
+    usleep(500000);
+
+    /* read -s：秘密无回显 → 不采（read 命令本身是会采集的） */
+    hist_type_cmd(s, "read -s -p \"Password: \" x");
+    usleep(600000);
+    hist_type(s, "s3cret-hist");
+    usleep(300000);                    /* 若会回显此刻必已到达 */
+    hist_enter(s);
+    usleep(600000);
+
+    /* read -p（有回显）但提示是密码样式 → 不采 */
+    hist_type_cmd(s, "read -p \"[sudo] password for x: \" y");
+    usleep(600000);
+    hist_type(s, "sudo-secret-99");
+    usleep(300000);
+    hist_enter(s);
+    usleep(600000);
+
+    hist_type_cmd(s, " echo spaced-out");    /* 前导空格 → 不采 */
+    usleep(500000);
+    hist_type_cmd(s, "echo hist-b");
+    usleep(800000);
+
+    n = 0;
+    hist_collect(s, cmds, &n, 16, 1500);
+    CHECK(hist_has(cmds, n, "echo hist-a"));
+    CHECK(hist_has(cmds, n, "read -s -p \"Password: \" x"));
+    CHECK(hist_has(cmds, n, "read -p \"[sudo] password for x: \" y"));
+    CHECK(hist_has(cmds, n, "echo hist-b"));
+    CHECK(!hist_has(cmds, n, "s3cret-hist"));
+    CHECK(!hist_has(cmds, n, "sudo-secret-99"));
+    CHECK(!hist_has(cmds, n, " echo spaced-out"));
+    CHECK(!hist_has(cmds, n, "echo spaced-out"));   /* trim 后也不应出现 */
+    hb_session_close(s);
+    hb_session_free(s);
+}
+
+/* OSC 133：集成脚本下命令取自 B..C 回显；C 之后的输入（如 read 的应答）
+ * 绝不入史。 */
+static void test_history_osc133(void)
+{
+    char tmp[] = "/tmp/hb-si-XXXXXX";
+    hb_session *s;
+    char cmds[16][256];
+    int n = 0, fd;
+    const char *script = hb_shell_integration_script("bash");
+    char src[700];
+
+    if (!script) {
+        fprintf(stderr, "  bash integration script missing, skipped\n");
+        return;
+    }
+    fd = mkstemp(tmp);
+    CHECK(fd >= 0);
+    if (fd < 0)
+        return;
+    if (write(fd, script, strlen(script)) < 0) perror("write");
+    close(fd);
+
+    s = spawn_bash();
+    CHECK(s != NULL);
+    if (!s) { unlink(tmp); return; }
+    hb_session_set_history(s, true);
+    wait_prompt(s, 4000);
+
+    snprintf(src, sizeof src, "source %s\n", tmp);
+    hb_session_write(s, src, strlen(src));
+    CHECK(wait_osc_b(s, cmds, &n, 16, 4000));  /* source 完成 + 带 B 的提示符 */
+
+    hist_type_cmd(s, "echo osc-abc");
+    CHECK(wait_osc_b(s, cmds, &n, 16, 4000));
+
+    /* read 的应答在 C 之后输入 → 不采集 */
+    hist_type_cmd(s, "read -p \"answer: \" v");
+    usleep(600000);
+    hist_type(s, "post-c-secret");
+    usleep(300000);
+    hist_enter(s);
+    CHECK(wait_osc_b(s, cmds, &n, 16, 4000));
+
+    hist_type_cmd(s, "echo osc-tail");
+    usleep(800000);
+
+    hist_collect(s, cmds, &n, 16, 1500);
+    CHECK(hist_has(cmds, n, "echo osc-abc"));
+    CHECK(hist_has(cmds, n, "read -p \"answer: \" v"));
+    CHECK(hist_has(cmds, n, "echo osc-tail"));
+    CHECK(!hist_has(cmds, n, "post-c-secret"));
+    hb_session_close(s);
+    hb_session_free(s);
+    unlink(tmp);
+}
+
 int main(void)
 {
     test_local_exit();
@@ -314,6 +537,8 @@ int main(void)
     test_vt_reuse();
     test_watch_session();
     test_watch_off();
+    test_history_heuristic();
+    test_history_osc133();
     fprintf(stderr, "test_session: %d checks, %d failures\n",
             hb_t_checks, hb_t_failures);
     TEST_RETURN();

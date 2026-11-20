@@ -3,6 +3,7 @@
 #include "session_priv.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
@@ -55,6 +56,29 @@ struct hb_session {
      * set_watch 换引擎也在 mu 内完成。watch_next = poll 建议的下个检查时刻。 */
     hb_watch *watch;
     int64_t   watch_next;
+
+    /* Shell History 命令采集（FR-08）。
+     * hist_on 由 UI 线程在 mu 下设置；
+     * osc_* 仅 session 线程触碰（vt 事件置标志，feed 后提取屏幕文本）；
+     * hl_* 仅 UI 线程输入路径触碰，echo 判定标志例外地在 mu 下同步。 */
+    bool hist_on;
+    bool osc133_seen;            /* 见过任一 'B' → OSC 133 路径接管 */
+    bool osc_b_valid;
+    int  osc_b_row, osc_b_col;
+    uint64_t osc_b_pushed;
+    bool osc_c_flag;
+    int  osc_c_row, osc_c_col;
+    uint64_t osc_c_pushed;
+    /* C 到达时快照的 B 位置：同一 feed 块里下一个提示符的 B
+     * 会覆盖 osc_b_*，待提取的区间必须有自己的副本。 */
+    int  osc_pb_row, osc_pb_col;
+    uint64_t osc_pb_pushed;
+
+    char  *hl; size_t hl_len, hl_cap;  /* 启发式累积的输入行（utf8） */
+    bool   hl_bad;                     /* 方向/历史/Tab/控制键 → 行不可信 */
+    bool   hl_typed;                   /* 行内有可打印输入 */
+    int    hl_srow, hl_scol;           /* 首次输入的屏幕位置（=提示行尾） */
+    uint64_t hl_pushed;
 };
 
 /* ------------------------------ 事件队列 ------------------------------ */
@@ -129,6 +153,210 @@ void hb__session_emit(hb_session *s, hb_sess_ev_type type, char mark, int code,
                       const char *text, const char *text2)
 {
     hb__session_emit_ex(s, type, mark, code, text, text2, NULL);
+}
+
+/* ------------------------------ Shell History（FR-08） ------------------------------
+ * 两条采集路径：
+ *  - OSC 133：见过 'B' 后，命令 = 屏幕上 B→C 之间的回显文本（取 vt 已有解析，
+ *    不复制转义状态机）。位置按 total_pushed 换算回滚屏差。
+ *  - 回退启发式：用户输入拼行；Enter 时在 密码提示/备用屏/不可信行/无前导空格/
+ *    no-echo 等条件下才 emit。 */
+
+static void hist_line_reset(hb_session *s)
+{
+    s->hl_len = 0;
+    if (s->hl)
+        s->hl[0] = 0;
+    s->hl_bad = false;
+    s->hl_typed = false;
+    s->hl_srow = -1;
+}
+
+static void hist_sample_pos(hb_session *s)
+{
+    int r, c, shape;
+    bool vis, bl;
+    hb_vt_cursor(s->vt, &r, &c, &vis, &bl, &shape);
+    s->hl_srow = r;
+    s->hl_scol = c;
+    s->hl_pushed = hb_vt_total_pushed(s->vt);
+}
+
+static void hist_put(hb_session *s, const char *utf8, size_t n)
+{
+    if (s->hl_len == 0)
+        hist_sample_pos(s);
+    if (s->hl_len + n + 1 > s->hl_cap) {
+        size_t nc = s->hl_cap ? s->hl_cap * 2 : 256;
+        char *nb;
+        while (s->hl_len + n + 1 > nc)
+            nc *= 2;
+        nb = realloc(s->hl, nc);
+        if (!nb)
+            return;
+        s->hl = nb;
+        s->hl_cap = nc;
+    }
+    memcpy(s->hl + s->hl_len, utf8, n);
+    s->hl_len += n;
+    s->hl[s->hl_len] = 0;
+    s->hl_typed = true;
+}
+
+/* 删最后一个 utf8 codepoint */
+static void hist_bs(hb_session *s)
+{
+    if (!s->hl_len)
+        return;
+    do {
+        s->hl_len--;
+    } while (s->hl_len &&
+         ((unsigned char)s->hl[s->hl_len] & 0xc0) == 0x80);
+    s->hl[s->hl_len] = 0;
+}
+
+/* 密码/敏感提示检测：输入起点之前的屏幕行文本含关键词且以 :/： 结尾。
+ * （read -p "[sudo] password for x:" 这类有回显的提示也覆盖） */
+static int ci_has(const char *hay, const char *needle)
+{
+    size_t hl = strlen(hay), nl = strlen(needle), i, j;
+    if (!nl || nl > hl)
+        return 0;
+    for (i = 0; i + nl <= hl; i++) {
+        for (j = 0; j < nl; j++) {
+            char a = hay[i + j], b = needle[j];
+            if (a >= 'A' && a <= 'Z') a += 32;
+            if (b >= 'A' && b <= 'Z') b += 32;
+            if (a != b)
+                break;
+        }
+        if (j == nl)
+            return 1;
+    }
+    return 0;
+}
+
+static bool hist_secret_prompt(hb_session *s)
+{
+    static const char *KWS[] = {
+        "pass", "password", "passphrase", "密码", "口令", "pin",
+        "token", "otp", "verification code"
+    };
+    char *t;
+    bool sec = false;
+    size_t n, i;
+    long r;
+
+    if (s->hl_srow < 0)
+        return false;
+    r = s->hl_srow - (long)(hb_vt_total_pushed(s->vt) - s->hl_pushed);
+    t = hb_vt_get_text(s->vt, (int)r, 0, (int)r, s->hl_scol, true);
+    if (!t)
+        return false;
+    n = strlen(t);
+    while (n && (t[n - 1] == ' ' || t[n - 1] == '\t'))
+        n--;
+    /* 必须以 ':' 或 '：'(EF BC 9A) 结尾 */
+    if ((n >= 1 && t[n - 1] == ':') ||
+        (n >= 3 && !memcmp(t + n - 3, "\xef\xbc\x9a", 3))) {
+        for (i = 0; i < sizeof KWS / sizeof KWS[0] && !sec; i++)
+            sec = ci_has(t, KWS[i]);
+    }
+    free(t);
+    return sec;
+}
+
+/* no-echo 判定（密码/隐藏输入）：键入期间光标没动 = 输入未被回显。
+ * read -s / stty -echo 之类；比"等输出字节"更直接（Enter 自身换行不算）。 */
+static bool hist_noecho(hb_session *s)
+{
+    int r, c, shape;
+    bool vis, bl;
+    if (!s->hl_typed || s->hl_srow < 0)
+        return false;
+    hb_vt_cursor(s->vt, &r, &c, &vis, &bl, &shape);
+    return (hb_vt_total_pushed(s->vt) + (uint64_t)r) ==
+               (s->hl_pushed + (uint64_t)s->hl_srow) &&
+           c == s->hl_scol;
+}
+
+/* Enter：按回退启发式决定是否上报命令（OSC 133 见过 'B' 后交给 OSC 路径）。 */
+static void hist_finish_line(hb_session *s)
+{
+    bool emit_it;
+
+    if (!s->hist_on)
+        return;
+    emit_it = !s->osc133_seen && !s->hl_bad && s->hl_len &&
+              s->hl[0] != ' ' && !hist_noecho(s) &&
+              !hb_vt_altscreen(s->vt) && !hist_secret_prompt(s);
+    if (emit_it)
+        hb__session_emit(s, HB_SESS_EV_COMMAND, 0, 0, s->hl, NULL);
+    hist_line_reset(s);
+}
+
+/* write/paste 路径的原始字节流（IME commit / 粘贴文本） */
+static void hist_bytes(hb_session *s, const char *data, size_t len)
+{
+    size_t i;
+    for (i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)data[i];
+        if (c == '\r' || c == '\n')
+            hist_finish_line(s);
+        else if (c == 0x08 || c == 0x7f)
+            hist_bs(s);
+        else if (c == 0x03 || c == 0x15)        /* ^C ^U */
+            hist_line_reset(s);
+        else if (c == 0x09)                    /* Tab 补全 → 行不可信 */
+            s->hl_bad = true;
+        else if (c < 0x20 || c == 0x1b)
+            s->hl_bad = true;
+        else
+            hist_put(s, data + i, 1);
+    }
+}
+
+/* session 线程：feed 之后处理 OSC 133 C 提取 */
+static void hist_after_feed(hb_session *s)
+{
+    bool c;
+    int cr, cc;
+    uint64_t cp;
+
+    int br, bc;
+    uint64_t bp;
+
+    pthread_mutex_lock(&s->mu);
+    c = s->hist_on && s->osc_c_flag;
+    s->osc_c_flag = false;
+    cr = s->osc_c_row;
+    cc = s->osc_c_col;
+    cp = s->osc_c_pushed;
+    br = s->osc_pb_row;
+    bc = s->osc_pb_col;
+    bp = s->osc_pb_pushed;
+    pthread_mutex_unlock(&s->mu);
+    if (!c)
+        return;
+    {
+        uint64_t pn = hb_vt_total_pushed(s->vt);
+        long r0 = br - (long)(pn - bp);
+        long r1 = cr - (long)(pn - cp);
+        char *txt = hb_vt_get_text(s->vt, (int)r0, bc,
+                                   (int)r1, cc, false);
+        if (txt) {
+            char *b = txt, *e;
+            while (*b == ' ' || *b == '\t' || *b == '\r' || *b == '\n')
+                b++;
+            e = b + strlen(b);
+            while (e > b && (e[-1] == ' ' || e[-1] == '\t' ||
+                             e[-1] == '\r' || e[-1] == '\n'))
+                *--e = 0;
+            if (*b && !hb_vt_altscreen(s->vt))
+                hb__session_emit(s, HB_SESS_EV_COMMAND, 0, 0, b, NULL);
+            free(txt);
+        }
+    }
 }
 
 /* WATCH 事件：hit 需要深拷贝（emit_ex 的 text 槽位不够） */
@@ -371,6 +599,24 @@ static void sess_vt_event(const hb_vt_event *ev, void *ud)
     case HB_VT_EV_OSC133:
         pthread_mutex_lock(&s->mu);
         if (s->watch) hb_watch_osc133(s->watch, ev->mark, ev->code, hb_now_ms());
+        if (s->hist_on) {
+            if (ev->mark == 'B') {
+                s->osc133_seen = true;
+                s->osc_b_valid = true;
+                s->osc_b_row = ev->row;
+                s->osc_b_col = ev->col;
+                s->osc_b_pushed = ev->pushed;
+            } else if (ev->mark == 'C' && s->osc_b_valid) {
+                s->osc_c_flag = true;
+                s->osc_c_row = ev->row;
+                s->osc_c_col = ev->col;
+                s->osc_c_pushed = ev->pushed;
+                s->osc_pb_row = s->osc_b_row;
+                s->osc_pb_col = s->osc_b_col;
+                s->osc_pb_pushed = s->osc_b_pushed;
+                s->osc_b_valid = false;
+            }
+        }
         pthread_mutex_unlock(&s->mu);
         hb__session_emit(s, HB_SESS_EV_OSC133, ev->mark, ev->code, NULL, NULL);
         break;
@@ -554,6 +800,7 @@ static void *sess_thread(void *arg)
                     tf(s, buf, len, td);
                 watch_feed(s, buf, len);
                 hb_vt_feed(s->vt, buf, len);
+                hist_after_feed(s);
                 out_dirty = true;
             }
         }
@@ -781,12 +1028,34 @@ void hb_session_set_watch(hb_session *s, const hb_watch_cfg *cfg)
     if (nw && write(s->cmd_w, &w, 1) < 0) {}
 }
 
+void hb_session_set_history(hb_session *s, bool on)
+{
+    if (!s)
+        return;
+    pthread_mutex_lock(&s->mu);
+    s->hist_on = on;
+    if (!on) {
+        s->osc_c_flag = false;
+        s->osc_b_valid = false;
+        s->osc133_seen = false;
+    }
+    pthread_mutex_unlock(&s->mu);
+    if (!on) {
+        s->hl_len = 0;
+        if (s->hl) s->hl[0] = 0;
+        s->hl_bad = s->hl_typed = false;
+        s->hl_srow = -1;
+    }
+}
+
 void hb_session_write(hb_session *s, const char *data, size_t len)
 {
     char w = 'w';
     if (!s || !data)
         return;
     watch_input(s);
+    if (s->hist_on)
+        hist_bytes(s, data, len);
     pthread_mutex_lock(&s->mu);
     if (s->wq_len + len > s->wq_cap) {
         size_t ncap = (s->wq_len + len) * 2 + 256;
@@ -809,14 +1078,60 @@ void hb_session_key(hb_session *s, hb_key key, int mods)
     if (!s || !s->vt)
         return;
     watch_input(s);
+    if (s->hist_on) {
+        if (mods)
+            s->hl_bad = true;
+        else if (key == HB_KEY_ENTER)
+            hist_finish_line(s);
+        else if (key == HB_KEY_BACKSPACE)
+            hist_bs(s);
+        else
+            s->hl_bad = true;
+    }
     hb_vt_key(s->vt, key, mods);
 }
 
 void hb_session_unichar(hb_session *s, uint32_t c, int mods)
 {
+    char u8[4];
     if (!s || !s->vt)
         return;
     watch_input(s);
+    if (s->hist_on) {
+        if ((mods & ~HB_MOD_SHIFT) == 0 && c >= 0x20 && c != 0x7f) {
+            u8[0] = 0;
+            {
+                /* utf8 编码（与 vt.c 同款） */
+                size_t n;
+                if (c < 0x80) {
+                    u8[0] = (char)c;
+                    n = 1;
+                } else if (c < 0x800) {
+                    u8[0] = (char)(0xc0 | (c >> 6));
+                    u8[1] = (char)(0x80 | (c & 0x3f));
+                    n = 2;
+                } else if (c < 0x10000) {
+                    u8[0] = (char)(0xe0 | (c >> 12));
+                    u8[1] = (char)(0x80 | ((c >> 6) & 0x3f));
+                    u8[2] = (char)(0x80 | (c & 0x3f));
+                    n = 3;
+                } else {
+                    u8[0] = (char)(0xf0 | (c >> 18));
+                    u8[1] = (char)(0x80 | ((c >> 12) & 0x3f));
+                    u8[2] = (char)(0x80 | ((c >> 6) & 0x3f));
+                    u8[3] = (char)(0x80 | (c & 0x3f));
+                    n = 4;
+                }
+                hist_put(s, u8, n);
+            }
+        } else if ((c & 0x7f) == 0x03 || (c & 0x7f) == 0x15 ||
+                   ((mods & HB_MOD_CTRL) &&
+                    ((c & ~0x20u) == 'C' || (c & ~0x20u) == 'U')))
+            /* ^C/^U：控制字节或 Ctrl+字母两种入径都要清行重录 */
+            hist_line_reset(s);
+        else
+            s->hl_bad = true;                  /* Ctrl/Meta 编辑/搜索等 */
+    }
     hb_vt_unichar(s->vt, c, mods);
 }
 
@@ -825,6 +1140,8 @@ void hb_session_paste(hb_session *s, const char *utf8)
     if (!s || !s->vt)
         return;
     watch_input(s);
+    if (s->hist_on && utf8)
+        hist_bytes(s, utf8, strlen(utf8));
     hb_vt_paste(s->vt, utf8);
 }
 
@@ -900,6 +1217,7 @@ void hb_session_free(hb_session *s)
         hb_secret_free(s->reply_secret);
     if (s->watch)
         hb_watch_free(s->watch);
+    free(s->hl);
     hb_vt_free(s->vt);
     pthread_cond_destroy(&s->reply_cv);
     pthread_mutex_destroy(&s->mu);

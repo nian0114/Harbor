@@ -100,6 +100,13 @@ static void emit(hb_vt *v, hb_vt_ev_type type, char mark, int code,
 {
     hb_vt_event ev = { .type = type, .mark = mark, .code = code,
                        .text = t1, .text2 = t2 };
+    if (type == HB_VT_EV_OSC133) {
+        VTermPos pos;
+        vterm_state_get_cursorpos(v->state, &pos);
+        ev.row = pos.row;
+        ev.col = pos.col;
+        ev.pushed = v->total_pushed;
+    }
     if (v->ev_fn)
         v->ev_fn(&ev, v->ev_ud);
 }

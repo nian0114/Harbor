@@ -51,6 +51,9 @@ typedef enum {
     HB_SESS_EV_OSINFO,
     /* 完成监控命中（FR-13）：watch 指向深拷贝的 hb_watch_hit（owned）。 */
     HB_SESS_EV_WATCH,
+    /* Shell History 命令采集（FR-08）：text = 命令行。
+     * OSC 133 时取自 B..C 回显文本；否则用输入启发式（密码提示不采）。 */
+    HB_SESS_EV_COMMAND,
 } hb_sess_ev_type;
 
 typedef struct {
@@ -107,6 +110,10 @@ void hb_session_set_tap(hb_session *s, hb_session_tap_fn fn, void *ud);
  * 运行中调用安全：引擎替换原子发生在 session 互斥锁内。
  * 命中经 HB_SESS_EV_WATCH 上报（EOF hit 保证在 EXIT 之前）。 */
 void hb_session_set_watch(hb_session *s, const hb_watch_cfg *cfg);
+
+/* Shell History 采集开关（默认关）。开启后每执行一条命令发
+ * HB_SESS_EV_COMMAND；密码/敏感输入不入事件（启发式 + OSC 133 都过滤）。 */
+void hb_session_set_history(hb_session *s, bool on);
 
 #ifdef __cplusplus
 }

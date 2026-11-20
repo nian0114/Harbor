@@ -1438,6 +1438,8 @@ hb_err hb_vault_log_add(hb_vault *v, const hb_log *l, int64_t *out_id)
     sqlite3_finalize(st);
     if (e == HB_OK && out_id)
         *out_id = sqlite3_last_insert_rowid(v->db);
+    if (e == HB_OK)
+        notify(v, "log", NULL);
     return e;
 }
 
@@ -1456,6 +1458,8 @@ hb_err hb_vault_log_finish(hb_vault *v, int64_t id, const char *result,
     sqlite3_bind_int64(st, 4, duration_s);
     e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
     sqlite3_finalize(st);
+    if (e == HB_OK && sqlite3_changes(v->db))
+        notify(v, "log", NULL);
     return e;
 }
 
@@ -1470,6 +1474,8 @@ hb_err hb_vault_log_set_saved(hb_vault *v, int64_t id, bool saved)
     sqlite3_bind_int(st, 2, saved ? 1 : 0);
     e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
     sqlite3_finalize(st);
+    if (e == HB_OK && sqlite3_changes(v->db))
+        notify(v, "log", NULL);
     return e;
 }
 
@@ -1693,7 +1699,23 @@ hb_err hb_vault_log_purge(hb_vault *v, int retention_days)
     sqlite3_bind_int64(st, 1, cutoff);
     e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
     sqlite3_finalize(st);
+    if (e == HB_OK && sqlite3_changes(v->db))
+        notify(v, "log", NULL);
     return e;
+}
+
+hb_err hb_vault_log_clear(hb_vault *v)
+{
+    char *err = NULL;
+    if (!v)
+        return HB_ERR_INVALID;
+    if (sqlite3_exec(v->db, "DELETE FROM logs", NULL, NULL, &err)
+        != SQLITE_OK) {
+        sqlite3_free(err);
+        return HB_ERR_DB;
+    }
+    notify(v, "log", NULL);
+    return HB_OK;
 }
 
 /* ------------------------------- history ------------------------------- */
@@ -1706,7 +1728,7 @@ hb_err hb_vault_history_add(hb_vault *v, const char *host_id, const char *cmd)
     char *trimmed;
     size_t tlen;
 
-    if (!v || !host_id || !cmd)
+    if (!v || !cmd)
         return HB_ERR_INVALID;
 
     /* trim */
@@ -1724,14 +1746,15 @@ hb_err hb_vault_history_add(hb_vault *v, const char *host_id, const char *cmd)
     if (!trimmed)
         return HB_ERR_NOMEM;
 
-    /* 同一 host 的最近一条相同则跳过 */
+    /* 同一 host 的最近一条相同则跳过（IS 兼容 NULL host_id = 本地） */
     if (sqlite3_prepare_v2(v->db,
-            "SELECT cmd FROM history WHERE host_id=?1 ORDER BY id DESC LIMIT 1",
+            "SELECT cmd FROM history WHERE host_id IS ?1 ORDER BY id DESC LIMIT 1",
             -1, &st, NULL) != SQLITE_OK) {
         free(trimmed);
         return HB_ERR_DB;
     }
-    sqlite3_bind_text(st, 1, host_id, -1, SQLITE_TRANSIENT);
+    if (host_id)
+        sqlite3_bind_text(st, 1, host_id, -1, SQLITE_TRANSIENT);
     if (sqlite3_step(st) == SQLITE_ROW) {
         const char *last = (const char *)sqlite3_column_text(st, 0);
         if (last && strcmp(last, trimmed) == 0) {
@@ -1754,6 +1777,8 @@ hb_err hb_vault_history_add(hb_vault *v, const char *host_id, const char *cmd)
     e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
     sqlite3_finalize(st);
     free(trimmed);
+    if (e == HB_OK)
+        notify(v, "history", NULL);
     return e;
 }
 
@@ -1797,5 +1822,81 @@ hb_err hb_vault_history_search(hb_vault *v, const char *prefix_or_substr,
     sqlite3_finalize(st);
     *out = arr;
     *n = cnt;
+    return HB_OK;
+}
+
+hb_err hb_vault_history_foreach(hb_vault *v, const char *substr,
+                                const char *host_id,
+                                hb_history_cb cb, void *ud)
+{
+    sqlite3_stmt *st;
+    char *sql = NULL;
+    hb_err e = HB_OK;
+    int go = 1;
+
+    if (!v || !cb)
+        return HB_ERR_INVALID;
+    {
+        const char *w_sub = (substr && *substr)
+            ? " AND instr(cmd,?2)>0" : "";
+        const char *w_host = host_id ? (*host_id ? " AND host_id=?3"
+                                                : " AND host_id IS NULL")
+                                     : "";
+        sql = sqlite3_mprintf(
+            "SELECT id,ts,host_id,cmd FROM history WHERE 1%w%w"
+            " ORDER BY id DESC", w_sub, w_host);
+    }
+    if (!sql)
+        return HB_ERR_NOMEM;
+    if (sqlite3_prepare_v2(v->db, sql, -1, &st, NULL) != SQLITE_OK) {
+        sqlite3_free(sql);
+        return HB_ERR_DB;
+    }
+    sqlite3_free(sql);
+    if (substr && *substr)
+        sqlite3_bind_text(st, 2, substr, -1, SQLITE_TRANSIENT);
+    if (host_id && *host_id)
+        sqlite3_bind_text(st, 3, host_id, -1, SQLITE_TRANSIENT);
+    while (go && sqlite3_step(st) == SQLITE_ROW) {
+        hb_history_entry ent;
+        ent.id = sqlite3_column_int64(st, 0);
+        ent.ts = sqlite3_column_int64(st, 1);
+        ent.host_id = (const char *)sqlite3_column_text(st, 2);
+        ent.cmd = (const char *)sqlite3_column_text(st, 3);
+        if (!cb(&ent, ud))
+            go = 0;
+    }
+    sqlite3_finalize(st);
+    return e;
+}
+
+hb_err hb_vault_history_delete(hb_vault *v, int64_t id)
+{
+    sqlite3_stmt *st;
+    hb_err e;
+    if (!v)
+        return HB_ERR_INVALID;
+    if (sqlite3_prepare_v2(v->db, "DELETE FROM history WHERE id=?1",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HB_ERR_DB;
+    sqlite3_bind_int64(st, 1, id);
+    e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
+    sqlite3_finalize(st);
+    if (e == HB_OK && sqlite3_changes(v->db))
+        notify(v, "history", NULL);
+    return e;
+}
+
+hb_err hb_vault_history_clear(hb_vault *v)
+{
+    char *err = NULL;
+    if (!v)
+        return HB_ERR_INVALID;
+    if (sqlite3_exec(v->db, "DELETE FROM history", NULL, NULL, &err)
+        != SQLITE_OK) {
+        sqlite3_free(err);
+        return HB_ERR_DB;
+    }
+    notify(v, "history", NULL);
     return HB_OK;
 }

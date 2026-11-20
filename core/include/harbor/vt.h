@@ -58,6 +58,8 @@ typedef struct {
     int   code;
     const char *text;   /* 仅回调期间有效 */
     const char *text2;
+    int   row, col;     /* OSC133：发出该标记瞬间的光标位置 */
+    uint64_t pushed;    /* OSC133：当刻 hb_vt_total_pushed（供行号换算） */
 } hb_vt_event;
 
 /* 终端应发回 pty/channel 的字节（键盘、鼠标、DA 应答等） */

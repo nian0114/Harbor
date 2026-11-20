@@ -126,14 +126,26 @@ hb_err hb_vault_log_export_csv(hb_vault *v, char **out);
 hb_err hb_vault_log_export_json(hb_vault *v, char **out);
 /* retention_days <= 0 表示不清理。 */
 hb_err hb_vault_log_purge(hb_vault *v, int retention_days);
+/* 全量删除日志（“清空日志”）；与 purge 不同不受保留期影响。 */
+hb_err hb_vault_log_clear(hb_vault *v);
 
 /* --------------------------------- 历史 ---------------------------------- */
 
-/* 忽略空白命令；同一 host_id 连续重复命令不入库。 */
+/* 忽略空白命令；同一 host_id 连续重复命令不入库。host_id NULL = 本地会话。 */
 hb_err hb_vault_history_add(hb_vault *v, const char *host_id, const char *cmd);
 /* 子串匹配、最近优先、去重；结果用 hb_strfreev 释放。 */
 hb_err hb_vault_history_search(hb_vault *v, const char *prefix_or_substr, size_t limit,
                                char ***out, size_t *n);
+
+typedef struct { int64_t id, ts; const char *host_id, *cmd; } hb_history_entry;
+typedef bool (*hb_history_cb)(const hb_history_entry *e, void *ud);
+/* newest first；substr NULL/"" = 全部，host_id NULL = 全部主机、
+ * "" = 仅本地（host_id IS NULL）。回调返回 false 停止；字符串借用。 */
+hb_err hb_vault_history_foreach(hb_vault *v, const char *substr,
+                                const char *host_id,
+                                hb_history_cb cb, void *ud);
+hb_err hb_vault_history_delete(hb_vault *v, int64_t id);
+hb_err hb_vault_history_clear(hb_vault *v);
 
 #ifdef __cplusplus
 }
