@@ -1398,6 +1398,14 @@ hb_err hb_vault_settings(hb_vault *v, hb_obj **out)
     hb_obj_set_bool(o, "close_to_tray", true);
     hb_obj_set_str(o, "notify_body", "full");
     hb_obj_set_bool(o, "watch_default_ssh", true);
+    hb_obj_set_bool(o, "watch_default_local", false);
+    hb_obj_set_int(o, "watch_min_duration_s", 5);
+    hb_obj_set_bool(o, "watch_idle", false);
+    hb_obj_set_int(o, "watch_idle_n", 10);
+    hb_obj_set_int(o, "watch_idle_m", 5);
+    hb_obj_set_bool(o, "watch_focus_dnd", true);
+    hb_obj_set_str(o, "watch_dnd", "");
+    hb_obj_set_bool(o, "watch_sound", false);
     hb_obj_set_bool(o, "osc52", false);
     hb_obj_set_bool(o, "cursor_blink", true);
     *out = o;

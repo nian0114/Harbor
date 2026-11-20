@@ -198,11 +198,122 @@ static void test_vt_reuse(void)
     hb_session_free(sa);
 }
 
+/* FR-13：watch 引擎接入 session。
+ * 用 sh 脚本在一条命令里输出 aider 完成行、响铃并 exit 3 ——
+ * 期望：rule hit → （可选 BEL）→ EOF hit(exit_code 3, ok=false) → EXIT，
+ * EOF hit 必须排在 EXIT 之前。cfg 用 min_duration=0 以压缩时间线。 */
+static void test_watch_session(void)
+{
+    hb_pty_opts o = { .shell = "/bin/sh",
+        .command = "sleep 0.3; "
+                   "printf 'Tokens: 1k sent, 1k received.\\n'; "
+                   "sleep 0.1; exit 3",
+        .rows = 10, .cols = 60 };
+    hb_session *s;
+    hb_watch_cfg c;
+    hb_sess_event evs[64];
+    hb_sess_event *watch1 = NULL, *eof_hit = NULL, *exit_ev = NULL;
+    int n, i, saw_rule = 0;
+
+    hb_watch_cfg_defaults(&c);
+    c.min_duration_ms = 0;
+    c.confirm_quiet_ms = 50;
+    s = hb_session_new_local(&o, 100);
+    CHECK(s != NULL);
+    hb_session_set_watch(s, &c);
+    hb_session_write(s, "x\n", 2);   /* 用户输入 → armed */
+
+    n = drain_events(s, evs, 64, 4000);
+    for (i = 0; i < n; i++) {
+        if (evs[i].type == HB_SESS_EV_WATCH && !watch1)
+            watch1 = &evs[i];
+        if (evs[i].type == HB_SESS_EV_EXIT)
+            exit_ev = &evs[i];
+    }
+    /* rule hit（aider）应在 EOF hit 前出现且是第一个 WATCH */
+    CHECK(watch1 != NULL);
+    if (watch1) {
+        saw_rule = watch1->watch &&
+                   watch1->watch->signal == HB_WATCH_SIG_RULES;
+        CHECK(saw_rule);
+        if (watch1->watch && watch1->watch->rule)
+            CHECK_EQ_STR(watch1->watch->rule, "aider");
+    }
+    /* 队列里最后一个 WATCH 必须是 EOF（exit 3 → ok=false），且在 EXIT 前 */
+    for (i = 0; i < n; i++)
+        if (evs[i].type == HB_SESS_EV_WATCH &&
+            evs[i].watch && evs[i].watch->signal == HB_WATCH_SIG_EOF)
+            eof_hit = &evs[i];
+    CHECK(eof_hit != NULL);
+    if (eof_hit) {
+        CHECK(eof_hit->watch->exit_code == 3);
+        CHECK(!eof_hit->watch->ok);
+        CHECK(exit_ev != NULL && eof_hit < exit_ev);
+    }
+    for (i = 0; i < n; i++)
+        hb_sess_event_clear(&evs[i]);
+    hb_session_free(s);
+}
+
+/* set_watch(NULL) 中途关闭：之后不再有 WATCH 事件 */
+static void test_watch_off(void)
+{
+    hb_pty_opts o = { .shell = "/bin/sh", .command = "cat",
+                      .rows = 10, .cols = 60 };
+    hb_session *s;
+    hb_watch_cfg c;
+    hb_sess_event ev;
+    int i, saw = 0;
+
+    hb_watch_cfg_defaults(&c);
+    c.min_duration_ms = 0;
+    c.confirm_quiet_ms = 50;
+    s = hb_session_new_local(&o, 100);
+    CHECK(s != NULL);
+    hb_session_set_watch(s, &c);
+    hb_session_write(s, "Tokens: 2k sent, 1k received.\n", 30);
+    usleep(600000);
+    while (hb_session_next_event(s, &ev)) {   /* 先排干第一只 hit */
+        if (ev.type == HB_SESS_EV_WATCH)
+            saw = 1;
+        hb_sess_event_clear(&ev);
+    }
+    CHECK(saw);                               /* 开着确实打得出 */
+
+    hb_session_set_watch(s, NULL);            /* 关掉 */
+    hb_session_write(s, "Tokens: 3k sent, 1k received.\n", 30);
+    hb_session_close(s);
+    saw = 0;
+    for (i = 0; i < 150; i++) {               /* ~3s 内不应再有 WATCH */
+        while (hb_session_next_event(s, &ev)) {
+            if (ev.type == HB_SESS_EV_WATCH &&
+                ev.watch && ev.watch->signal == HB_WATCH_SIG_RULES)
+                saw = 1;
+            hb_sess_event_clear(&ev);
+        }
+        if (!hb_session_alive(s)) {
+            /* 排干残余再判 */
+            while (hb_session_next_event(s, &ev)) {
+                if (ev.type == HB_SESS_EV_WATCH &&
+                    ev.watch && ev.watch->signal == HB_WATCH_SIG_RULES)
+                    saw = 1;
+                hb_sess_event_clear(&ev);
+            }
+            break;
+        }
+        usleep(20000);
+    }
+    CHECK(!saw);
+    hb_session_free(s);
+}
+
 int main(void)
 {
     test_local_exit();
     test_local_interactive();
     test_vt_reuse();
+    test_watch_session();
+    test_watch_off();
     fprintf(stderr, "test_session: %d checks, %d failures\n",
             hb_t_checks, hb_t_failures);
     TEST_RETURN();

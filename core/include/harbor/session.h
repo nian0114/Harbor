@@ -4,6 +4,7 @@
 #include "common.h"
 #include "pty.h"
 #include "vt.h"
+#include "watch.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,6 +49,8 @@ typedef enum {
      *   text  /etc/os-release 的 ID（"ubuntu"/"debian"/…）
      *   text2 PRETTY_NAME */
     HB_SESS_EV_OSINFO,
+    /* 完成监控命中（FR-13）：watch 指向深拷贝的 hb_watch_hit（owned）。 */
+    HB_SESS_EV_WATCH,
 } hb_sess_ev_type;
 
 typedef struct {
@@ -56,6 +59,7 @@ typedef struct {
     int    code;
     char  *text, *text2;    /* owned；hb_sess_event_clear 释放 */
     char  *extra;           /* owned；HOSTKEY 的 known_hosts 行 + randomart */
+    hb_watch_hit *watch;    /* owned；仅 HB_SESS_EV_WATCH */
     int64_t ts_ms;
 } hb_sess_event;
 
@@ -98,6 +102,11 @@ void hb_session_free(hb_session *s);    /* join 线程；close 与否都安全 *
 /* 原始输出 tap：在 session 线程上、vt feed 之前调用（watch 引擎挂这里）。 */
 typedef void (*hb_session_tap_fn)(hb_session *s, const char *bytes, size_t len, void *ud);
 void hb_session_set_tap(hb_session *s, hb_session_tap_fn fn, void *ud);
+
+/* NULL cfg = 关闭完成监控；非 NULL 深拷贝并立即在 session 线程生效。
+ * 运行中调用安全：引擎替换原子发生在 session 互斥锁内。
+ * 命中经 HB_SESS_EV_WATCH 上报（EOF hit 保证在 EXIT 之前）。 */
+void hb_session_set_watch(hb_session *s, const hb_watch_cfg *cfg);
 
 #ifdef __cplusplus
 }

@@ -50,6 +50,11 @@ struct hb_session {
 
     hb_session_tap_fn tap;
     void *tap_ud;
+
+    /* 完成监控引擎（FR-13）：仅 session 线程在 mu 下触碰；
+     * set_watch 换引擎也在 mu 内完成。watch_next = poll 建议的下个检查时刻。 */
+    hb_watch *watch;
+    int64_t   watch_next;
 };
 
 /* ------------------------------ 事件队列 ------------------------------ */
@@ -59,7 +64,12 @@ void hb_sess_event_clear(hb_sess_event *ev)
     free(ev->text);
     free(ev->text2);
     free(ev->extra);
+    if (ev->watch) {
+        hb_watch_hit_clear(ev->watch);
+        free(ev->watch);
+    }
     ev->text = ev->text2 = ev->extra = NULL;
+    ev->watch = NULL;
 }
 
 static char *xstrndup(const char *s, size_t n)
@@ -119,6 +129,87 @@ void hb__session_emit(hb_session *s, hb_sess_ev_type type, char mark, int code,
                       const char *text, const char *text2)
 {
     hb__session_emit_ex(s, type, mark, code, text, text2, NULL);
+}
+
+/* WATCH 事件：hit 需要深拷贝（emit_ex 的 text 槽位不够） */
+static void emit_watch_hit(hb_session *s, const hb_watch_hit *hit)
+{
+    ev_node *n;
+    char w = 'e';
+    hb_watch_hit *cp;
+    if (!s || !hit)
+        return;
+    n = calloc(1, sizeof *n);
+    cp = calloc(1, sizeof *cp);
+    if (!n || !cp) { free(n); free(cp); return; }
+    *cp = *hit;
+    cp->rule    = hit->rule    ? xstrndup(hit->rule, strlen(hit->rule))       : NULL;
+    cp->line    = hit->line    ? xstrndup(hit->line, strlen(hit->line))       : NULL;
+    cp->command = hit->command ? xstrndup(hit->command, strlen(hit->command)) : NULL;
+    cp->title   = hit->title   ? xstrndup(hit->title, strlen(hit->title))     : NULL;
+    n->ev.type = HB_SESS_EV_WATCH;
+    n->ev.watch = cp;
+    n->ev.ts_ms = hb_now_ms();
+
+    pthread_mutex_lock(&s->mu);
+    if (s->ev_tail)
+        s->ev_tail->next = n;
+    else
+        s->ev_head = n;
+    s->ev_tail = n;
+    pthread_mutex_unlock(&s->mu);
+    if (write(s->ev_w, &w, 1) < 0) {}
+}
+
+/* 引擎全部调用都收拢在 mu 内，替换/销毁才与线程安全。 */
+static void watch_feed(hb_session *s, const char *bytes, size_t len)
+{
+    pthread_mutex_lock(&s->mu);
+    if (s->watch)
+        hb_watch_feed(s->watch, bytes, len, hb_now_ms());
+    pthread_mutex_unlock(&s->mu);
+}
+
+static void watch_input(hb_session *s)
+{
+    pthread_mutex_lock(&s->mu);
+    if (s->watch)
+        hb_watch_input(s->watch, hb_now_ms());
+    pthread_mutex_unlock(&s->mu);
+}
+
+/* 排空命中队列并更新建议轮询时刻；session 线程每轮循环后调用。 */
+static void watch_drain(hb_session *s)
+{
+    for (;;) {
+        hb_watch_hit hit;
+        int64_t nx = -1;
+        bool got = false;
+        memset(&hit, 0, sizeof hit);
+        pthread_mutex_lock(&s->mu);
+        if (s->watch) {
+            got = hb_watch_poll(s->watch, hb_now_ms(), &hit, &nx);
+            if (!got)
+                s->watch_next = nx;
+        } else {
+            s->watch_next = -1;
+        }
+        pthread_mutex_unlock(&s->mu);
+        if (!got)
+            break;
+        emit_watch_hit(s, &hit);
+        hb_watch_hit_clear(&hit);
+    }
+}
+
+/* 会话终结：EOF hit 必须先于 EXIT 进队列。 */
+static void watch_finish(hb_session *s, int code)
+{
+    pthread_mutex_lock(&s->mu);
+    if (s->watch)
+        hb_watch_eof(s->watch, code, hb_now_ms());
+    pthread_mutex_unlock(&s->mu);
+    watch_drain(s);
 }
 
 /* ------------------------------ 应答管道 ------------------------------ */
@@ -269,15 +360,25 @@ static void sess_vt_event(const hb_vt_event *ev, void *ud)
     hb_session *s = ud;
     switch (ev->type) {
     case HB_VT_EV_BELL:
+        pthread_mutex_lock(&s->mu);
+        if (s->watch) hb_watch_bell(s->watch, hb_now_ms());
+        pthread_mutex_unlock(&s->mu);
         hb__session_emit(s, HB_SESS_EV_BELL, 0, 0, NULL, NULL);
         break;
     case HB_VT_EV_TITLE:
         hb__session_emit(s, HB_SESS_EV_TITLE, 0, 0, ev->text, NULL);
         break;
     case HB_VT_EV_OSC133:
+        pthread_mutex_lock(&s->mu);
+        if (s->watch) hb_watch_osc133(s->watch, ev->mark, ev->code, hb_now_ms());
+        pthread_mutex_unlock(&s->mu);
         hb__session_emit(s, HB_SESS_EV_OSC133, ev->mark, ev->code, NULL, NULL);
         break;
     case HB_VT_EV_NOTIFY:
+        pthread_mutex_lock(&s->mu);
+        if (s->watch)
+            hb_watch_notify(s->watch, ev->text, ev->text2, hb_now_ms());
+        pthread_mutex_unlock(&s->mu);
         hb__session_emit(s, HB_SESS_EV_NOTIFY, 0, 0, ev->text, ev->text2);
         break;
     case HB_VT_EV_CLIPBOARD:
@@ -366,6 +467,7 @@ static void *sess_thread(void *arg)
             s->exited = true;
             s->exit_code = -1;
             pthread_mutex_unlock(&s->mu);
+            watch_finish(s, -1);
             hb__session_emit(s, HB_SESS_EV_EXIT, 0, -1, "connect failed", NULL);
             free(buf);
             return NULL;
@@ -374,7 +476,7 @@ static void *sess_thread(void *arg)
 
     for (;;) {
         struct pollfd pf[2];
-        int nfd;
+        int nfd, tmo;
         char cmds[64];
         ssize_t nr;
 
@@ -384,7 +486,16 @@ static void *sess_thread(void *arg)
         pf[1].fd = s->tr.fd(s->tr.ctx);
         pf[1].events = POLLIN | (sess_pending_write(s) ? POLLOUT : 0);
         pf[1].revents = 0;
-        nfd = poll(pf, 2, s->tr.tick ? s->tr.tick(s->tr.ctx) : -1);
+        /* poll 超时 = min(传输层 tick, watch 建议的下个检查时刻) */
+        tmo = s->tr.tick ? s->tr.tick(s->tr.ctx) : -1;
+        pthread_mutex_lock(&s->mu);
+        if (s->watch && s->watch_next >= 0) {
+            int64_t wms = s->watch_next - hb_now_ms();
+            int wt = wms <= 0 ? 0 : (wms > 60000 ? 60000 : (int)wms);
+            tmo = (tmo < 0) ? wt : (wt < tmo ? wt : tmo);
+        }
+        pthread_mutex_unlock(&s->mu);
+        nfd = poll(pf, 2, tmo);
         if (nfd < 0) {
             if (errno == EINTR)
                 continue;
@@ -441,6 +552,7 @@ static void *sess_thread(void *arg)
                 pthread_mutex_unlock(&s->mu);
                 if (tf)
                     tf(s, buf, len, td);
+                watch_feed(s, buf, len);
                 hb_vt_feed(s->vt, buf, len);
                 out_dirty = true;
             }
@@ -458,6 +570,7 @@ static void *sess_thread(void *arg)
             hb__session_emit(s, HB_SESS_EV_OUTPUT, 0, 0, NULL, NULL);
             out_dirty = false;
         }
+        watch_drain(s);
         if (eof)
             break;
     }
@@ -489,6 +602,7 @@ static void *sess_thread(void *arg)
     s->exited = true;
     s->exit_code = code;
     pthread_mutex_unlock(&s->mu);
+    watch_finish(s, code);            /* EOF hit 先于 EXIT */
     hb__session_emit(s, HB_SESS_EV_EXIT, 0, code,
                      s->tr.exit_text ? s->tr.exit_text(s->tr.ctx)
                                      : "process exited",
@@ -532,6 +646,7 @@ hb_session *hb_session_new_transport(hb_session_transport *tr,
     pthread_cond_init(&s->reply_cv, NULL);
     s->pend_rows = 0;
     s->exit_code = -1;
+    s->watch_next = -1;
 
     {
         int p[2];
@@ -647,11 +762,31 @@ hb_vt *hb_session_steal_vt(hb_session *s)
     return v;
 }
 
+void hb_session_set_watch(hb_session *s, const hb_watch_cfg *cfg)
+{
+    hb_watch *nw, *old;
+    char w = 'w';
+    if (!s)
+        return;
+    /* 引擎构造（regex 编译）可在锁外做；替换在锁内是原子的。 */
+    nw = cfg ? hb_watch_new(cfg) : NULL;
+    pthread_mutex_lock(&s->mu);
+    old = s->watch;
+    s->watch = nw;
+    s->watch_next = -1;
+    pthread_mutex_unlock(&s->mu);
+    if (old)
+        hb_watch_free(old);
+    /* 唤醒 session 线程重算 poll 超时 */
+    if (nw && write(s->cmd_w, &w, 1) < 0) {}
+}
+
 void hb_session_write(hb_session *s, const char *data, size_t len)
 {
     char w = 'w';
     if (!s || !data)
         return;
+    watch_input(s);
     pthread_mutex_lock(&s->mu);
     if (s->wq_len + len > s->wq_cap) {
         size_t ncap = (s->wq_len + len) * 2 + 256;
@@ -673,6 +808,7 @@ void hb_session_key(hb_session *s, hb_key key, int mods)
 {
     if (!s || !s->vt)
         return;
+    watch_input(s);
     hb_vt_key(s->vt, key, mods);
 }
 
@@ -680,6 +816,7 @@ void hb_session_unichar(hb_session *s, uint32_t c, int mods)
 {
     if (!s || !s->vt)
         return;
+    watch_input(s);
     hb_vt_unichar(s->vt, c, mods);
 }
 
@@ -687,6 +824,7 @@ void hb_session_paste(hb_session *s, const char *utf8)
 {
     if (!s || !s->vt)
         return;
+    watch_input(s);
     hb_vt_paste(s->vt, utf8);
 }
 
@@ -749,6 +887,10 @@ void hb_session_free(hb_session *s)
         free(n->ev.text);
         free(n->ev.text2);
         free(n->ev.extra);
+        if (n->ev.watch) {
+            hb_watch_hit_clear(n->ev.watch);
+            free(n->ev.watch);
+        }
         free(n);
     }
     close(s->cmd_r); close(s->cmd_w);
@@ -756,6 +898,8 @@ void hb_session_free(hb_session *s)
     free(s->wq);
     if (s->reply_secret)
         hb_secret_free(s->reply_secret);
+    if (s->watch)
+        hb_watch_free(s->watch);
     hb_vt_free(s->vt);
     pthread_cond_destroy(&s->reply_cv);
     pthread_mutex_destroy(&s->mu);
