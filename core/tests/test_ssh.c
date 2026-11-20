@@ -6,6 +6,7 @@
 #include "test.h"
 
 #include "harbor/ssh.h"
+#include "harbor/keys.h"
 #include "harbor/vt.h"
 
 #include <errno.h>
@@ -99,6 +100,8 @@ static char fix_art[4096];           /* ssh-keygen -lv 的 randomart 框 */
 static char fix_key[16384];
 static char fix_key_enc[16384];
 static char fix_key_bad[16384];
+static char fix_pem_key[16384];          /* ssh-keygen -m PEM -N pw RSA */
+static hb_key_info fix_k_ed, fix_k_p256, fix_k_rsa;   /* hb_key_generate */
 
 static void field_dup(const char *line, int field, char *out, size_t cap)
 {
@@ -158,9 +161,21 @@ static void fixture_setup(void)
          fix_dir);
     KGEN("/usr/bin/ssh-keygen -t ed25519 -N '' -f %s/badkey -q", fix_dir);
     KGEN("/usr/bin/ssh-keygen -t ed25519 -N '' -f %s/hostkey2 -q", fix_dir);
+    /* 加密 PEM RSA（privkey + passphrase 认证测试用） */
+    KGEN("/usr/bin/ssh-keygen -t rsa -b 2048 -m PEM -N 'pwpem12' "
+         "-f %s/pem_rsa -q", fix_dir);
 #undef KGEN
 
-    /* authorized_keys = client.pub + client_enc.pub（badkey 不在列） */
+    /* 内存生成的 key（都在 authorized_keys 里） */
+    if (hb_key_generate(HB_KEY_ED25519, 0, NULL, &fix_k_ed) != HB_OK ||
+        hb_key_generate(HB_KEY_ECDSA_P256, 0, NULL, &fix_k_p256) != HB_OK ||
+        hb_key_generate(HB_KEY_RSA, 3072, NULL, &fix_k_rsa) != HB_OK) {
+        fprintf(stderr, "hb_key_generate failed\n");
+        exit(1);
+    }
+
+    /* authorized_keys = client.pub + client_enc.pub + 新 key
+     *（badkey 不在列） */
     {
         FILE *f;
         snprintf(path, sizeof path, "%s/authorized_keys", fix_dir);
@@ -168,6 +183,11 @@ static void fixture_setup(void)
         snprintf(path, sizeof path, "%s/client.pub", fix_dir);
         fputs(slurp(path), f);
         snprintf(path, sizeof path, "%s/client_enc.pub", fix_dir);
+        fputs(slurp(path), f);
+        fprintf(f, "%s\n%s\n%s\n",
+                fix_k_ed.public_line, fix_k_p256.public_line,
+                fix_k_rsa.public_line);
+        snprintf(path, sizeof path, "%s/pem_rsa.pub", fix_dir);
         fputs(slurp(path), f);
         fclose(f);
         snprintf(path, sizeof path, "%s/authorized_keys", fix_dir);
@@ -232,6 +252,8 @@ static void fixture_setup(void)
     snprintf(fix_key_enc, sizeof fix_key_enc, "%s", slurp(path));
     snprintf(path, sizeof path, "%s/badkey", fix_dir);
     snprintf(fix_key_bad, sizeof fix_key_bad, "%s", slurp(path));
+    snprintf(path, sizeof path, "%s/pem_rsa", fix_dir);
+    snprintf(fix_pem_key, sizeof fix_pem_key, "%s", slurp(path));
 
     /* 启动 sshd */
     fix_sshd = fork();
@@ -279,6 +301,9 @@ static void fixture_teardown(void)
     }
     snprintf(cmd, sizeof cmd, "rm -rf %s", fix_dir);
     system(cmd);
+    hb_key_info_clear(&fix_k_ed);
+    hb_key_info_clear(&fix_k_p256);
+    hb_key_info_clear(&fix_k_rsa);
 }
 
 /* ------------------------------ 事件驱动 ------------------------------ */
@@ -600,6 +625,72 @@ static void test_key_prompt_cancel(void)
     CHECK(d.prompt_n >= 2);
     CHECK_EQ_INT(d.err_code, HB_SSH_ERR_CANCELLED);
     CHECK_EQ_INT(d.connected, 0);
+    hb_session_free(s);
+}
+
+/* 5c. 内存密钥认证：hb_key_generate 的 ed25519 / ecdsa p256 / rsa3072 */
+static void genkey_auth(const char *privkey_text, const char *tag)
+{
+    hb_ssh_opts o = base_opts();
+    hb_session *s;
+    drv d;
+    const char *kl[] = { fix_khline };
+    char want[64];
+
+    o.known_lines = kl;
+    o.nknown = 1;
+    o.target.privkey = privkey_text;
+    snprintf(want, sizeof want, "echo %s; exit 0", tag);
+    o.command = want;
+    drv_init(&d);
+    s = hb_session_new_ssh(&o, 24, 80, 200);
+    CHECK(s != NULL);
+    if (!s)
+        return;
+    CHECK(drv_run(s, &d, 10000));
+    CHECK_EQ_INT(d.connected, 1);
+    CHECK_EQ_INT(d.exit_code, 0);
+    CHECK_EQ_INT(d.prompt_n, 0);
+    {
+        hb_vt_match *m = NULL;
+        size_t n;
+        hb_vt_lock(hb_session_vt(s));
+        n = hb_vt_search(hb_session_vt(s), tag, false, &m);
+        free(m);
+        hb_vt_unlock(hb_session_vt(s));
+        CHECK(n > 0);
+    }
+    hb_session_free(s);
+}
+static void test_genkey_auths(void)
+{
+    genkey_auth(fix_k_ed.private_text, "ged25519");
+    genkey_auth(fix_k_p256.private_text, "gecp256");
+    genkey_auth(fix_k_rsa.private_text, "grsa3072");
+}
+
+/* 5d. 加密 PEM 私钥文本 + passphrase 直给 → 连上（无 PROMPT） */
+static void test_pem_enc_auth(void)
+{
+    hb_ssh_opts o = base_opts();
+    hb_session *s;
+    drv d;
+    const char *kl[] = { fix_khline };
+
+    o.known_lines = kl;
+    o.nknown = 1;
+    o.target.privkey = fix_pem_key;
+    o.target.passphrase = "pwpem12";
+    o.command = "echo pemok; exit 0";
+    drv_init(&d);
+    s = hb_session_new_ssh(&o, 24, 80, 200);
+    CHECK(s != NULL);
+    if (!s)
+        return;
+    CHECK(drv_run(s, &d, 10000));
+    CHECK_EQ_INT(d.connected, 1);
+    CHECK_EQ_INT(d.exit_code, 0);
+    CHECK_EQ_INT(d.prompt_n, 0);
     hb_session_free(s);
 }
 
@@ -1046,6 +1137,8 @@ int main(void)
     test_unknown_reject();
     test_key_prompt_ok();
     test_key_prompt_cancel();
+    test_genkey_auths();
+    test_pem_enc_auth();
     test_auth_failed();
     test_refused_resolve();
     test_proxyjump();

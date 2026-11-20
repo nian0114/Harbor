@@ -18,6 +18,7 @@ typedef enum {
     HB_ERR_NOT_FOUND,
     HB_ERR_INVALID,
     HB_ERR_EXISTS,
+    HB_ERR_PASSPHRASE,
 } hb_err;
 
 const char *hb_strerror(hb_err e);

@@ -19,6 +19,7 @@ const char *hb_strerror(hb_err e)
     case HB_ERR_NOT_FOUND: return "not found";
     case HB_ERR_INVALID:   return "invalid argument";
     case HB_ERR_EXISTS:    return "already exists";
+    case HB_ERR_PASSPHRASE:return "wrong passphrase";
     }
     return "unknown error";
 }

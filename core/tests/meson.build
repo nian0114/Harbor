@@ -33,3 +33,8 @@ test_hostio = executable('test_hostio', 'test_hostio.c',
     dependencies: harbor_core_dep,
 )
 test('hostio', test_hostio)
+
+test_keys = executable('test_keys', 'test_keys.c',
+    dependencies: harbor_core_dep,
+)
+test('keys', test_keys, timeout: 120)

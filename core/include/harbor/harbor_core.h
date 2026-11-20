@@ -8,5 +8,6 @@
 #include "session.h"
 #include "ssh.h"
 #include "hostio.h"
+#include "keys.h"
 
 #endif
