@@ -319,7 +319,9 @@ static char *ren_variant(const char *base, int n)
     const char *bn = base_name(base);
     size_t dl = (size_t)(bn - base);
     const char *dot = strrchr(bn, '.');
-    size_t stem = dot ? (size_t)(dot - bn) : strlen(bn);
+    size_t stem;
+    if (dot == bn) dot = NULL;      /* 点文件无扩展名：.bashrc→.bashrc (1) */
+    stem = dot ? (size_t)(dot - bn) : strlen(bn);
     char tmp[64], *p;
     size_t need;
     if (!n)

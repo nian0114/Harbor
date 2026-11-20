@@ -511,6 +511,35 @@ static void test_main_ops(void)
             CHECK(fexists(want));
         }
     }
+    /* 点文件不算扩展名：.bashrc → ".bashrc (1)" */
+    joinp(p2, sizeof p2, RD, "cf/.bashrc");
+    wfile(p2, 8, 0644, 99);
+    joinp(p, sizeof p, LD, "cf");
+    q = hb_sftp_upload(s, p, p2, HB_SFTP_RENAME);
+    r = wait_done(s, &d, q, 15000);
+    CHECK(r && r->status == HB_SFTP_OK);
+    {
+        char want[PATH_MAX];
+        joinp(want, sizeof want, RD, "cf/.bashrc (1)");
+        if (r) {
+            CHECK_EQ_STR(r->path, want);
+            CHECK(fexists(want));
+        }
+    }
+    /* 多段扩展按最后一段切：archive.tar.gz → "archive.tar (1).gz" */
+    joinp(p2, sizeof p2, RD, "cf/archive.tar.gz");
+    wfile(p2, 8, 0644, 99);
+    q = hb_sftp_upload(s, p, p2, HB_SFTP_RENAME);
+    r = wait_done(s, &d, q, 15000);
+    CHECK(r && r->status == HB_SFTP_OK);
+    {
+        char want[PATH_MAX];
+        joinp(want, sizeof want, RD, "cf/archive.tar (1).gz");
+        if (r) {
+            CHECK_EQ_STR(r->path, want);
+            CHECK(fexists(want));
+        }
+    }
 
     /* ---- T6: 目录递归上传 + 下载 ---- */
     {
