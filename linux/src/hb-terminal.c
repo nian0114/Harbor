@@ -15,6 +15,8 @@ struct _HbTerminal {
     GtkWidget parent;
 
     hb_session *sess;            /* borrowed */
+    hb_vt      *preview_vt;      /* 预览模式：无会话的内部 vt（设置页） */
+    char       *preview_text;    /* 预览 ANSI 文本；尺寸变化时重喂 */
     guint       ev_source;
 
     const HbTermTheme *theme;
@@ -110,6 +112,14 @@ static gboolean same_rgba(const GdkRGBA *a, const GdkRGBA *b)
         && fabs(a->blue - b->blue) < 0.004 && fabs(a->alpha - b->alpha) < 0.004;
 }
 
+/* 渲染/滚动/查找走"当前 vt"：预览模式用内部 vt，否则用 session 的 */
+static hb_vt *term_vt(HbTerminal *t)
+{
+    if (t->preview_vt)
+        return t->preview_vt;
+    return t->sess ? hb_session_vt(t->sess) : NULL;
+}
+
 /* ------------------------------------------------------------------ */
 /* 字体度量                                                            */
 /* ------------------------------------------------------------------ */
@@ -155,9 +165,10 @@ void hb_terminal_set_theme(HbTerminal *t, const HbTermTheme *theme)
 
 void hb_terminal_set_osc52(HbTerminal *t, gboolean allowed)
 {
+    hb_vt *v;
     t->osc52 = allowed;
-    if (t->sess)
-        hb_vt_set_osc52_allowed(hb_session_vt(t->sess), allowed);
+    if ((v = term_vt(t)))
+        hb_vt_set_osc52_allowed(v, allowed);
 }
 
 void hb_terminal_set_cursor_blink(HbTerminal *t, gboolean enabled)
@@ -172,9 +183,8 @@ void hb_terminal_set_cursor_blink(HbTerminal *t, gboolean enabled)
 
 static void sync_adj(HbTerminal *t)
 {
-    int sb = 0;
-    if (t->sess)
-        sb = hb_vt_scrollback_count(hb_session_vt(t->sess));
+    hb_vt *v = term_vt(t);
+    int sb = v ? hb_vt_scrollback_count(v) : 0;
     gtk_adjustment_configure(t->adj, (double)t->scroll_off,
         0.0, (double)sb, 1.0, (double)t->rows, (double)t->rows);
 }
@@ -190,10 +200,9 @@ void hb_terminal_scroll_to_bottom(HbTerminal *t)
 
 static void scroll_lines(HbTerminal *t, double nlines)
 {
-    int sb = 0;
+    hb_vt *v = term_vt(t);
+    int sb = v ? hb_vt_scrollback_count(v) : 0;
     int64_t off;
-    if (t->sess)
-        sb = hb_vt_scrollback_count(hb_session_vt(t->sess));
     t->wheel_acc += nlines;
     off = t->scroll_off - (int64_t)t->wheel_acc;
     t->wheel_acc -= (int64_t)t->wheel_acc;
@@ -233,7 +242,7 @@ static void find_emit(HbTerminal *t)
 /* 执行搜索，结果转绝对行；keep_abs >= 0 时把 cur 定到该绝对行的命中 */
 static void find_run(HbTerminal *t, int64_t keep_abs)
 {
-    hb_vt *v = hb_session_vt(t->sess);
+    hb_vt *v = term_vt(t);
     hb_vt_match *ms = NULL;
     int64_t total;
     size_t n, i;
@@ -273,7 +282,7 @@ static void find_run(HbTerminal *t, int64_t keep_abs)
 static gboolean find_recompute_cb(gpointer ud)
 {
     HbTerminal *t = ud;
-    hb_vt *v = t->sess ? hb_session_vt(t->sess) : NULL;
+    hb_vt *v = term_vt(t);
     t->find_timer = 0;
     if (t->find_needle && v &&
         hb_vt_generation(v) != t->find_gen) {
@@ -301,8 +310,9 @@ static void find_scroll_cur(HbTerminal *t)
     hb_vt *v;
     int64_t total, vrow;
     int vrows = 0, sb = 0, off;
-    if (t->find_cur < 0 || !t->sess) return;
-    v = hb_session_vt(t->sess);
+    if (t->find_cur < 0) return;
+    v = term_vt(t);
+    if (!v) return;
     total = (int64_t)hb_vt_total_pushed(v);
     sb = hb_vt_scrollback_count(v);
     hb_vt_size(v, &vrows, NULL);
@@ -464,6 +474,39 @@ void hb_terminal_set_session(HbTerminal *t, hb_session *s)
 hb_session *hb_terminal_get_session(HbTerminal *t)
 {
     return t->sess;
+}
+
+/* 预览 vt 重建：按当前尺寸新建再喂文本。resize 会把顶行推入 scrollback
+ * （xterm 语义），预览内容会"消失"，所以尺寸变化时重建而非 resize。 */
+static void preview_rebuild(HbTerminal *t)
+{
+    int rows = t->rows > 0 ? t->rows : 24;
+    int cols = t->cols > 0 ? t->cols : 80;
+
+    if (!t->preview_text)
+        return;
+    g_clear_pointer(&t->preview_vt, hb_vt_free);
+    t->preview_vt = hb_vt_new(rows, cols, 256);
+    if (t->preview_vt) {
+        hb_vt_feed(t->preview_vt, t->preview_text,
+                   strlen(t->preview_text));
+        t->last_total = hb_vt_total_pushed(t->preview_vt);
+    }
+}
+
+/* 预览模式（设置页）：无会话的内部 vt。feed 一段 ANSI 文本后静态渲染，
+ * 输入天然被忽略（所有输入路径都走 t->sess）。实心块光标 + 闪烁。 */
+void hb_terminal_set_preview(HbTerminal *t, const char *ansi_text)
+{
+    g_free(t->preview_text);
+    t->preview_text = g_strdup(ansi_text);
+    preview_rebuild(t);
+    t->focused = TRUE;           /* 块光标（非空心） */
+    t->blink_vis = TRUE;
+    if (!t->blink_src)
+        t->blink_src = g_timeout_add(BLINK_MS, blink_cb, t);
+    sync_adj(t);
+    gtk_widget_queue_draw(GTK_WIDGET(t));
 }
 
 /* ------------------------------------------------------------------ */
@@ -770,8 +813,8 @@ static gboolean blink_cb(gpointer ud)
     HbTerminal *t = ud;
     hb_vt *v;
     int r, c; bool vis, blink; int shape;
-    if (!t->sess) return G_SOURCE_REMOVE;
-    v = hb_session_vt(t->sess);
+    v = term_vt(t);
+    if (!v) return G_SOURCE_REMOVE;
     hb_vt_cursor(v, &r, &c, &vis, &blink, &shape);
     if (!blink || !t->cursor_blink_set)
         return G_SOURCE_CONTINUE;
@@ -1167,12 +1210,15 @@ static void hb_terminal_size_allocate(GtkWidget *w, int width, int height,
     rows = (int)((height - 2 * PAD_Y) / t->ch);
     if (cols < 2) cols = 2;
     if (rows < 2) rows = 2;
-    if ((cols != t->cols || rows != t->rows) && t->sess) {
+    if (cols != t->cols || rows != t->rows) {
         t->cols = cols; t->rows = rows;
-        hb_session_resize(t->sess, rows, cols);
+        if (t->sess)
+            hb_session_resize(t->sess, rows, cols);
+        else if (t->preview_text)
+            preview_rebuild(t);
+        else if (t->preview_vt)
+            hb_vt_resize(t->preview_vt, rows, cols);
         sync_adj(t);
-    } else {
-        t->cols = cols; t->rows = rows;
     }
     /* IM 候选窗位置 */
     if (t->sess) {
@@ -1327,9 +1373,9 @@ static void hb_terminal_snapshot(GtkWidget *w, GtkSnapshot *snap)
     int d, i;
     double base_y;
 
-    if (!t->sess)
+    v = term_vt(t);
+    if (!v)
         return;
-    v = hb_session_vt(t->sess);
 
     /* 锁内只拷数据 */
     hb_vt_lock(v);
@@ -1569,6 +1615,7 @@ static void hb_terminal_dispose(GObject *o)
         gtk_widget_unparent(pop);
     g_clear_object(&t->im);
     g_clear_object(&t->adj);
+    g_clear_pointer(&t->preview_vt, hb_vt_free);
     G_OBJECT_CLASS(hb_terminal_parent_class)->dispose(o);
 }
 
@@ -1578,6 +1625,7 @@ static void hb_terminal_finalize(GObject *o)
     g_free(t->font_family);
     g_free(t->preedit);
     g_free(t->find_needle);
+    g_free(t->preview_text);
     g_free(t->find_ms);
     if (t->fdesc) pango_font_description_free(t->fdesc);
     if (t->url_re) g_regex_unref(t->url_re);

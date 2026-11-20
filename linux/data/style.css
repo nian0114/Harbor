@@ -399,6 +399,47 @@ button.tbtn:hover { background-color: alpha(white, .16); }
 .hb-red  { color: @hb_red; }
 .hb-dim  { color: @hb_text_3; font-size: 12px; }
 
+/* ---------- 外观与终端设置页（FR-21） ---------- */
+.panel {
+    background-color: @hb_card; border-radius: 12px; padding: 18px;
+    box-shadow: 0 1px 2px alpha(black, .05);
+}
+.set-h4 { font-size: 13.5px; color: @hb_text; }
+.p-sub { font-size: 12px; color: @hb_text_3; margin-top: -4px; }
+
+button.theme-card {
+    border: 1.5px solid @hb_line; background-color: @hb_card;
+    border-radius: 11px; padding: 8px;
+}
+button.theme-card.on {
+    border-color: @accent_bg_color;
+    box-shadow: 0 0 0 3px alpha(@accent_bg_color, .14);
+}
+button.theme-card.on .tc-name { color: @accent_bg_color; }
+button.theme-card.on .tc-check { opacity: 1; }
+.theme-prev {
+    border-radius: 8px; padding: 8px 10px; min-height: 44px;
+}
+.theme-prev label {
+    font-family: "Ubuntu Mono", "DejaVu Sans Mono", Menlo, monospace;
+    font-size: 10.5px;
+}
+.tc-name { font-size: 12px; color: @hb_text; }
+.tc-check { opacity: 0; color: @accent_bg_color; }
+
+.slider-row { margin-top: 6px; }
+.sl-title { font-size: 12.5px; font-weight: 600; color: @hb_text_2; }
+.sl-val {
+    font-family: "Ubuntu Mono", "DejaVu Sans Mono", Menlo, monospace;
+    font-size: 12px; color: @accent_bg_color; font-weight: 600;
+}
+.beta {
+    font-size: 9.5px; border: 1px solid @hb_line; border-radius: 4px;
+    padding: 1px 5px; color: @hb_text_3;
+}
+.pref-preview { border-radius: 11px; border: 1px solid @hb_line;
+    padding: 1px; }
+
 /* ---------- 断线重连条 ---------- */
 .hb-disc-strip {
     background-color: #fdf3da; color: #8a6a1f;

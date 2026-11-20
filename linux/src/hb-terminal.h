@@ -23,6 +23,10 @@ void hb_terminal_set_font(HbTerminal *t, const char *family,
 void hb_terminal_set_osc52(HbTerminal *t, gboolean allowed);
 void hb_terminal_set_cursor_blink(HbTerminal *t, gboolean enabled);
 
+/* 预览模式：无会话的内部 vt，feed 一段 ANSI 文本静态渲染（设置页）。
+ * 输入被忽略；实心块光标按 cursor_blink 设置闪烁。 */
+void hb_terminal_set_preview(HbTerminal *t, const char *ansi_text);
+
 void hb_terminal_copy_clipboard(HbTerminal *t);
 void hb_terminal_paste_clipboard(HbTerminal *t);
 void hb_terminal_select_all(HbTerminal *t);

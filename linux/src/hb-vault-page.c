@@ -2,6 +2,7 @@
 #include "hb-icons.h"
 #include "hb-hosts-view.h"
 #include "hb-keychain-view.h"
+#include "hb-settings-view.h"
 #include "hb-store.h"
 
 #include <stdio.h>
@@ -206,11 +207,16 @@ static void hb_vault_page_init(HbVaultPage *vp)
     gtk_stack_add_named(GTK_STACK(vp->stack), vp->hosts_view, "hosts");
     gtk_stack_add_named(GTK_STACK(vp->stack),
         hb_keychain_view_new(hb_store_default()), "keys");
-    for (i = 2; i < N_SECTIONS; i++)
-        gtk_stack_add_named(GTK_STACK(vp->stack),
-            empty_page(SECTIONS[i].id, SECTIONS[i].label,
-                       SECTIONS[i].icon, SECTIONS[i].fr),
-            SECTIONS[i].id);
+    for (i = 2; i < N_SECTIONS; i++) {
+        GtkWidget *page;
+        if (!strcmp(SECTIONS[i].id, "appearance"))
+            page = hb_settings_view_new();
+        else
+            page = empty_page(SECTIONS[i].id, SECTIONS[i].label,
+                              SECTIONS[i].icon, SECTIONS[i].fr);
+        gtk_stack_add_named(GTK_STACK(vp->stack), page,
+                            SECTIONS[i].id);
+    }
     gtk_box_append(GTK_BOX(vp), vp->stack);
     hb_vault_page_set_section(vp, "hosts");
 }
