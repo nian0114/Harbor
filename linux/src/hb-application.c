@@ -181,6 +181,17 @@ static void hb_application_startup(GApplication *app)
     hb_store_default();          /* vault 打开 + 首次播种 */
     hb_notify_default();
 
+    /* FR-10：启动时按 log_retention_days（默认 90；<=0 = 永久）清理日志 */
+    {
+        hb_obj *o = NULL;
+        hb_vault *v = hb_store_vault(hb_store_default());
+        if (hb_vault_settings(v, &o) == HB_OK && o) {
+            hb_vault_log_purge(v, (int)hb_obj_get_int(
+                                   o, "log_retention_days", 90));
+            hb_obj_free(o);
+        }
+    }
+
     sa = g_simple_action_new("show-tab", G_VARIANT_TYPE_STRING);
     g_signal_connect(sa, "activate", G_CALLBACK(on_show_tab), app);
     g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));

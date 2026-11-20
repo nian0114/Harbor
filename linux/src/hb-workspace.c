@@ -15,6 +15,7 @@
 #include "hb-icons.h"
 #include "hb-window.h"
 #include "hb-dialogs.h"
+#include "hb-snippet-send.h"
 
 #include <harbor/vault.h>
 #include <string.h>
@@ -70,6 +71,7 @@ struct _HbWorkspace {
 G_DEFINE_TYPE(HbWorkspace, hb_workspace, GTK_TYPE_BOX)
 
 static void focus_pane(HbWorkspace *ws, WsNode *n, gboolean grab);
+static void fill_snippets(HbWorkspace *ws);
 
 /* ------------------------------ 小工具 ------------------------------ */
 
@@ -407,6 +409,8 @@ static void focus_pane(HbWorkspace *ws, WsNode *n, gboolean grab)
         HbTerminal *t = hb_session_page_terminal(page_of(n));
         hb_find_bar_bind(HB_FIND_BAR(ws->find_bar), t);
     }
+    if (ws->snip_list)
+        fill_snippets(ws);   /* scope 跟随焦点 host */
     if (grab) {
         HbTerminal *t = hb_session_page_terminal(page_of(n));
         if (t) gtk_widget_grab_focus(GTK_WIDGET(t));
@@ -784,42 +788,81 @@ static void on_search_btn(GtkButton *b, gpointer ud)
 
 /* ------------------------------ 助手栏 ------------------------------ */
 
-static void snip_send(HbWorkspace *ws, const char *body)
+guint hb_workspace_paste_all(HbWorkspace *ws, const char *text, gboolean run)
 {
     GList *l;
-    if (!body || !*body) return;
+    guint n = 0;
+    if (!text || !*text) return 0;
     for (l = ws->leaves; l; l = l->next) {
-        WsNode *n = l->data;
+        WsNode *n2 = l->data;
         HbTerminal *t;
         hb_session *s;
-        if (!ws->broadcast && n != ws->focused) continue;
-        t = hb_session_page_terminal(page_of(n));
+        t = hb_session_page_terminal(page_of(n2));
         s = t ? hb_terminal_get_session(t) : NULL;
-        if (s && hb_session_alive(s))
-            hb_session_paste(s, body);      /* 不带换行：留在提示符 */
+        if (s && hb_session_alive(s)) {
+            hb_session_paste(s, text);      /* 不带换行：留在提示符 */
+            if (run)
+                hb_session_key(s, HB_KEY_ENTER, 0);
+            n++;
+        }
     }
+    return n;
 }
 
 static void on_snip_btn(GtkButton *b, gpointer ud)
 {
     HbWorkspace *ws = ud;
-    snip_send(ws, g_object_get_data(G_OBJECT(b), "body"));
+    const char *sid = g_object_get_data(G_OBJECT(b), "sid");
+    GtkWidget *win = gtk_widget_get_ancestor(GTK_WIDGET(ws),
+                                             HB_TYPE_WINDOW);
+    if (win)
+        hb_snippet_send(win, ws->store, sid);
+}
+
+/* 焦点 pane 的 host_id / host.group（scope 过滤用）；local → NULL/NULL */
+static void focused_host_info(HbWorkspace *ws,
+                              const char **host_id, const char **group)
+{
+    static char grp[128];
+    hb_obj *h = NULL;
+    *host_id = NULL;
+    *group = NULL;
+    grp[0] = 0;
+    if (!ws->focused)
+        return;
+    *host_id = hb_session_page_host_id(page_of(ws->focused));
+    if (!*host_id || !ws->store)
+        return;
+    if (hb_vault_get(hb_store_vault(ws->store), *host_id, &h) == HB_OK && h) {
+        const char *g = hb_obj_get_str(h, "group");
+        if (g && *g) {
+            snprintf(grp, sizeof grp, "%s", g);
+            *group = grp;
+        }
+        hb_obj_free(h);
+    }
 }
 
 static void fill_snippets(HbWorkspace *ws)
 {
     GtkWidget *c;
     hb_obj **objs;
-    size_t n = 0, i;
+    size_t n = 0, i, shown = 0;
+    const char *host_id, *group;
     while ((c = gtk_widget_get_first_child(ws->snip_list)))
         gtk_box_remove(GTK_BOX(ws->snip_list), c);
     if (!ws->store) return;
+    focused_host_info(ws, &host_id, &group);
     objs = hb_store_list(ws->store, "snippet", &n);
     for (i = 0; objs && i < n; i++) {
         hb_obj *s = objs[i];
         const char *title = hb_obj_get_str(s, "title");
         const char *body = hb_obj_get_str(s, "body");
+        const char *scope = hb_obj_get_str(s, "scope");
         GtkWidget *b, *r, *t, *d;
+        if (!hb_snippet_scope_match(scope, host_id, group))
+            continue;
+        shown++;
         b = gtk_button_new();
         gtk_widget_add_css_class(b, "assist-item");
         r = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
@@ -834,14 +877,14 @@ static void fill_snippets(HbWorkspace *ws)
         gtk_label_set_single_line_mode(GTK_LABEL(d), TRUE);
         gtk_box_append(GTK_BOX(r), d);
         gtk_button_set_child(GTK_BUTTON(b), r);
-        g_object_set_data_full(G_OBJECT(b), "body",
-                               g_strdup(body ? body : ""), g_free);
+        g_object_set_data_full(G_OBJECT(b), "sid",
+                               g_strdup(hb_obj_id(s)), g_free);
         g_signal_connect(b, "clicked", G_CALLBACK(on_snip_btn), ws);
         gtk_box_append(GTK_BOX(ws->snip_list), b);
     }
     if (objs) hb_obj_list_free(objs, n);
-    if (!n) {
-        GtkWidget *l = gtk_label_new("暂无 Snippet");
+    if (!shown) {
+        GtkWidget *l = gtk_label_new("暂无匹配 Snippet");
         gtk_widget_add_css_class(l, "assist-item-sub");
         gtk_box_append(GTK_BOX(ws->snip_list), l);
     }

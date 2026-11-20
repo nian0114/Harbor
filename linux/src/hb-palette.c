@@ -12,6 +12,8 @@
 #include "hb-term-page.h"
 #include "hb-ssh-page.h"
 #include "hb-workspace.h"
+#include "hb-session-page.h"
+#include "hb-snippet-send.h"
 
 #include <harbor/session.h>
 #include <string.h>
@@ -177,21 +179,44 @@ static void collect_items(PalCtx *c, GPtrArray *out)
         g_free(kw);
     }
 
-    /* 3. snippets */
-    objs = hb_store_list(c->store, "snippet", &n);
-    for (i = 0; objs && i < n; i++) {
-        hb_obj *s = objs[i];
-        const char *id    = hb_obj_id(s);
-        const char *title = hb_obj_get_str(s, "title");
-        const char *body  = hb_obj_get_str(s, "body");
-        char *kw = g_strdup_printf("%s %s", title ? title : "",
-                                   body ? body : "");
-        g_ptr_array_add(out, item_new(PAL_SNIPPET, "snippet", NULL,
-            title && *title ? title : "snippet",
-            "发送 Snippet", kw, id, ord++));
-        g_free(kw);
+    /* 3. snippets（scope 匹配焦点会话 host：global / host:<id> / group:<g>） */
+    {
+        const char *fhost = NULL, *fgroup = NULL;
+        GtkWidget *pg = hb_window_active_session_page(c->win);
+        hb_obj *fh = NULL;
+        static char fgrp[128];
+        fgrp[0] = 0;
+        if (pg && HB_IS_SESSION_PAGE(pg))
+            fhost = hb_session_page_host_id(HB_SESSION_PAGE(pg));
+        if (fhost &&
+            hb_vault_get(hb_store_vault(c->store), fhost,
+                         &fh) == HB_OK && fh) {
+            const char *g = hb_obj_get_str(fh, "group");
+            if (g && *g) {
+                snprintf(fgrp, sizeof fgrp, "%s", g);
+                fgroup = fgrp;
+            }
+            hb_obj_free(fh);
+        }
+        objs = hb_store_list(c->store, "snippet", &n);
+        for (i = 0; objs && i < n; i++) {
+            hb_obj *s = objs[i];
+            const char *id    = hb_obj_id(s);
+            const char *title = hb_obj_get_str(s, "title");
+            const char *body  = hb_obj_get_str(s, "body");
+            const char *scope = hb_obj_get_str(s, "scope");
+            char *kw;
+            if (!hb_snippet_scope_match(scope, fhost, fgroup))
+                continue;
+            kw = g_strdup_printf("%s %s", title ? title : "",
+                                 body ? body : "");
+            g_ptr_array_add(out, item_new(PAL_SNIPPET, "snippet", NULL,
+                title && *title ? title : "snippet",
+                "发送 Snippet", kw, id, ord++));
+            g_free(kw);
+        }
+        if (objs) hb_obj_list_free(objs, n);
     }
-    if (objs) hb_obj_list_free(objs, n);
 
     /* 4. commands */
     g_ptr_array_add(out, item_new(PAL_CMD, "terminal", NULL,
@@ -349,17 +374,6 @@ static void on_row_enter(GtkEventControllerMotion *m, double x, double y,
 
 /* ------------------------- 执行 ------------------------- */
 
-static hb_session *active_term_session(PalCtx *c)
-{
-    /* workspace tab → 焦点 pane 的 session */
-    GtkWidget *page = hb_window_active_session_page(c->win);
-    if (page && HB_IS_TERM_PAGE(page))
-        return hb_term_page_session(HB_TERM_PAGE(page));
-    if (page && HB_IS_SSH_PAGE(page))
-        return hb_ssh_page_session(HB_SSH_PAGE(page));
-    return NULL;
-}
-
 static void csv_save_done(GObject *src, GAsyncResult *res, gpointer ud)
 {
     HbWindow *win = HB_WINDOW(ud);
@@ -416,23 +430,9 @@ static void run_item(PalCtx *c, PalItem *it)
         if (vp)
             hb_vault_page_set_section(HB_VAULT_PAGE(vp), id);
     } else if (kind == PAL_SNIPPET) {
-        hb_session *sess = active_term_session(c);
-        hb_obj *o = NULL;
-        const char *body;
-        if (!sess) {
-            pal_close(c);
-            hb_window_toast(win, "没有活动终端");
-        } else if (hb_vault_get(hb_store_vault(st), id, &o) == HB_OK &&
-                   o && (body = hb_obj_get_str(o, "body")) && *body) {
-            char *copy = g_strdup(body);   /* close 后 o/it 都可能释放 */
-            pal_close(c);
-            hb_session_paste(sess, copy);  /* 不带换行：留在提示符不执行 */
-            g_free(copy);
-        } else {
-            pal_close(c);
-            hb_window_toast(win, "Snippet 为空");
-        }
-        if (o) hb_obj_free(o);
+        pal_close(c);
+        /* 共享发送流：变量对话框 / run / broadcast 确认 / 无终端 toast */
+        hb_snippet_send(GTK_WIDGET(win), st, id);
     } else if (kind == PAL_CMD) {
         if (!strcmp(id, "local")) {
             pal_close(c);

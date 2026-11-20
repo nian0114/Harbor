@@ -3,6 +3,9 @@
 #include "hb-hosts-view.h"
 #include "hb-keychain-view.h"
 #include "hb-settings-view.h"
+#include "hb-snippets-view.h"
+#include "hb-known-view.h"
+#include "hb-logs-view.h"
 #include "hb-store.h"
 
 #include <stdio.h>
@@ -211,6 +214,12 @@ static void hb_vault_page_init(HbVaultPage *vp)
         GtkWidget *page;
         if (!strcmp(SECTIONS[i].id, "appearance"))
             page = hb_settings_view_new();
+        else if (!strcmp(SECTIONS[i].id, "snippets"))
+            page = hb_snippets_view_new(hb_store_default());
+        else if (!strcmp(SECTIONS[i].id, "known_hosts"))
+            page = hb_known_view_new(hb_store_default());
+        else if (!strcmp(SECTIONS[i].id, "logs"))
+            page = hb_logs_view_new(hb_store_default());
         else
             page = empty_page(SECTIONS[i].id, SECTIONS[i].label,
                               SECTIONS[i].icon, SECTIONS[i].fr);

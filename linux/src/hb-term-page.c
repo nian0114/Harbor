@@ -37,6 +37,8 @@ struct _HbTermPage {
     /* FR-13 完成监控（会话级状态，重连/重启后重挂） */
     gboolean     watch_on;
     unsigned     watch_signals;
+    /* FR-08 shell history 采集（settings.history_enabled） */
+    gboolean     hist_on;
     char        *tab_id;
     HbWindow    *win;
 };
@@ -213,6 +215,9 @@ static void on_session_ev(HbTerminal *t, const hb_sess_event *ev,
     (void)t;
     if (ev->type == HB_SESS_EV_WATCH && ev->watch && p->tab_id)
         hb_watch_route(GTK_WIDGET(p), p->tab_id, "Local", ev->watch);
+    else if (ev->type == HB_SESS_EV_COMMAND && ev->text && *ev->text)
+        /* FR-08 shell history：host_id NULL = 本地（密码已被会话过滤） */
+        hb_vault_history_add(hb_store_vault(p->store), NULL, ev->text);
 }
 
 /* 重启本地会话（保留 scrollback：旧会话已死 → 偷 vt 复用） */
@@ -227,6 +232,7 @@ static gboolean restart_local(HbTermPage *p)
         if (reuse) hb_vt_free(reuse);
         return FALSE;
     }
+    hb_session_set_history(ns, p->hist_on);
     if (p->sess) {
         hb_session_close(p->sess);
         hb_session_free(p->sess);
@@ -272,7 +278,10 @@ static void apply_settings(HbTermPage *p)
         blink = hb_obj_get_bool(o, "cursor_blink", true);
         osc52 = hb_obj_get_bool(o, "osc52", false);
         p->sb_lines = (int)hb_obj_get_int(o, "scrollback", 10000);
+        p->hist_on = hb_obj_get_bool(o, "history_enabled", true);
     }
+    if (p->sess)
+        hb_session_set_history(p->sess, p->hist_on);
     if (!theme_id || !*theme_id) theme_id = "harbor";
     if (!family || !*family) family = "Monospace";
     if (hb_opt_theme)
@@ -533,6 +542,8 @@ GtkWidget *hb_term_page_new_local(HbStore *st)
     }
 
     p->sess = spawn_local(p, NULL);
+    if (p->sess)
+        hb_session_set_history(p->sess, p->hist_on);
     hb_terminal_set_session(HB_TERMINAL(p->term), p->sess);
     hb_terminal_set_event_cb(HB_TERMINAL(p->term), on_session_ev, p);
     watch_apply_session(p);

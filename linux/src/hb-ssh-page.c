@@ -8,6 +8,7 @@
 #include "hb-window.h"
 #include "hb-watch-ui.h"
 #include "hb-session-page.h"
+#include "hb-snippet-send.h"
 
 #include <harbor/ssh.h>
 #include <harbor/keys.h>
@@ -89,6 +90,9 @@ struct _HbSshPage {
     /* FR-13 完成监控（会话级状态，重连后重挂到新 session） */
     gboolean    watch_on;
     unsigned    watch_signals;
+
+    /* FR-08 shell history 采集（settings.history_enabled） */
+    gboolean    hist_on;
 
     /* 自动重连 */
     guint       backoff_src;
@@ -1022,22 +1026,12 @@ static void on_connected(HbSshPage *p)
     if (p->host_id &&
         hb_vault_get(hb_store_vault(p->store), p->host_id, &h) == HB_OK && h) {
         hb_obj_set_int(h, "last_connected", g_get_real_time() / 1000);
-        /* startup_snippet */
+        /* startup_snippet：共享发送流（变量 / run） */
         {
             const char *snid = hb_obj_get_str(h, "startup_snippet");
-            if (snid && *snid) {
-                hb_obj *sn = NULL;
-                if (hb_vault_get(hb_store_vault(p->store), snid, &sn) == HB_OK
-                    && sn) {
-                    const char *body = hb_obj_get_str(sn, "body");
-                    if (body && *body) {
-                        char *line = g_strconcat(body, "\n", NULL);
-                        hb_session_write(p->sess, line, strlen(line));
-                        g_free(line);
-                    }
-                    hb_obj_free(sn);
-                }
-            }
+            if (snid && *snid)
+                hb_snippet_send_to_session(GTK_WIDGET(p), p->sess,
+                                           p->store, snid);
         }
         hb_vault_put(hb_store_vault(p->store), h);
         hb_obj_free(h);
@@ -1368,6 +1362,13 @@ static void on_session_ev(HbTerminal *t, const hb_sess_event *ev, gpointer ud)
                            ev->watch);
         break;
 
+    case HB_SESS_EV_COMMAND:
+        /* FR-08 shell history：命令事件入库（密码等已被会话过滤） */
+        if (ev->text && *ev->text)
+            hb_vault_history_add(hb_store_vault(p->store),
+                                 p->host_id, ev->text);
+        break;
+
     default:
         break;
     }
@@ -1568,6 +1569,7 @@ static void continue_connect(HbSshPage *p)
         return;
     }
     hb_terminal_set_session(HB_TERMINAL(p->term), p->sess);
+    hb_session_set_history(p->sess, p->hist_on);
     watch_apply_session(p);       /* 监控状态随（重）连重挂 */
     set_status(p, "● 连接中…", "hb-term-warn");
 }
@@ -1656,7 +1658,10 @@ static void apply_settings(HbSshPage *p)
         blink = hb_obj_get_bool(o, "cursor_blink", true);
         osc52 = hb_obj_get_bool(o, "osc52", false);
         p->sb_lines = (int)hb_obj_get_int(o, "scrollback", 10000);
+        p->hist_on = hb_obj_get_bool(o, "history_enabled", true);
     }
+    if (p->sess)
+        hb_session_set_history(p->sess, p->hist_on);
     if (!theme_id || !*theme_id) theme_id = "harbor";
     if (!family || !*family) family = "Monospace";
     if (hb_opt_theme) theme_id = hb_opt_theme;

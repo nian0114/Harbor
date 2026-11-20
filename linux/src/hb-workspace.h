@@ -51,6 +51,10 @@ GtkWidget *hb_workspace_resolve_page(GtkWidget *page);
 void     hb_workspace_toggle_focus_mode(HbWorkspace *w);
 gboolean hb_workspace_is_focus_mode(HbWorkspace *w);
 gboolean hb_workspace_is_broadcast(HbWorkspace *w);
+/* 把 text 粘贴进所有存活 pane（run=TRUE 时各 pane 再补 Enter）。
+ * 返回送达 pane 数。共享 snippet 发送流的 broadcast 路径用。 */
+guint    hb_workspace_paste_all(HbWorkspace *w, const char *text,
+                                gboolean run);
 void     hb_workspace_move_focus(HbWorkspace *w, int dir); /* 0左 1右 2上 3下 */
 void     hb_workspace_open_find(HbWorkspace *w);
 
