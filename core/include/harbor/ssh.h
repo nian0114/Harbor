@@ -34,6 +34,11 @@ typedef struct {
     const char *label;           /* 日志显示名，如主机别名 */
 } hb_ssh_hop;
 
+typedef enum {
+    HB_SSH_MODE_SHELL = 0,  /* 交互 shell / exec（默认） */
+    HB_SSH_MODE_SFTP        /* SFTP 子系统：无 PTY，detect_os 忽略 */
+} hb_ssh_mode;
+
 typedef struct {
     hb_ssh_hop         target;
     const hb_ssh_hop  *jumps;      /* 外 → 内排列的 ProxyJump 链 */
@@ -47,11 +52,16 @@ typedef struct {
     const char        *command;               /* NULL = 交互 shell；否则 exec */
     hb_vt             *reuse_vt;   /* 非 NULL → 复用 vt（重连保 scrollback） */
     bool               detect_os;  /* 认证后探测 /etc/os-release → OSINFO 事件 */
+    hb_ssh_mode        mode;       /* HB_SSH_MODE_*，默认 SHELL */
 } hb_ssh_opts;
 
 /* 深拷贝 opts（密钥/密码进 sodium 锁定内存，认证后即擦除）。 */
 hb_session *hb_session_new_ssh(const hb_ssh_opts *opts,
                                int rows, int cols, int scrollback_lines);
+
+/* SFTP 模式会话 = new_ssh(mode=SFTP)：无 PTY/终端，结果经
+ * HB_SESS_EV_SFTP 事件上报；API 见 harbor/sftp.h。 */
+hb_session *hb_session_new_sftp(const hb_ssh_opts *opts);
 
 /* 错误类别：作为 HB_SESS_EV_ERROR 事件的 code。 */
 typedef enum {

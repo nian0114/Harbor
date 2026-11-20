@@ -1,5 +1,6 @@
 #include "harbor/session.h"
 
+#include "harbor/sftp.h"
 #include "session_priv.h"
 
 #include <errno.h>
@@ -52,6 +53,8 @@ struct hb_session {
     hb_session_tap_fn tap;
     void *tap_ud;
 
+    void *udata;            /* transport 私有数据（SFTP 引擎） */
+
     /* 完成监控引擎（FR-13）：仅 session 线程在 mu 下触碰；
      * set_watch 换引擎也在 mu 内完成。watch_next = poll 建议的下个检查时刻。 */
     hb_watch *watch;
@@ -91,6 +94,10 @@ void hb_sess_event_clear(hb_sess_event *ev)
     if (ev->watch) {
         hb_watch_hit_clear(ev->watch);
         free(ev->watch);
+    }
+    if (ev->sftp) {
+        hb_sftp_result_free(ev->sftp);
+        ev->sftp = NULL;
     }
     ev->text = ev->text2 = ev->extra = NULL;
     ev->watch = NULL;
@@ -387,6 +394,64 @@ static void emit_watch_hit(hb_session *s, const hb_watch_hit *hit)
     s->ev_tail = n;
     pthread_mutex_unlock(&s->mu);
     if (write(s->ev_w, &w, 1) < 0) {}
+}
+
+/* SFTP 结果事件：r 的所有权移交事件队列 */
+void hb__session_emit_sftp(hb_session *s, struct hb_sftp_result *r)
+{
+    ev_node *n;
+    char w = 'e';
+    if (!s || !r)
+        return;
+    n = calloc(1, sizeof *n);
+    if (!n) {
+        hb_sftp_result_free(r);
+        return;
+    }
+    n->ev.type = HB_SESS_EV_SFTP;
+    n->ev.sftp = r;
+    n->ev.ts_ms = hb_now_ms();
+    pthread_mutex_lock(&s->mu);
+    if (s->ev_tail)
+        s->ev_tail->next = n;
+    else
+        s->ev_head = n;
+    s->ev_tail = n;
+    pthread_mutex_unlock(&s->mu);
+    if (write(s->ev_w, &w, 1) < 0) {}
+}
+
+void hb__session_set_udata(hb_session *s, void *p)
+{
+    if (!s)
+        return;
+    pthread_mutex_lock(&s->mu);
+    s->udata = p;
+    pthread_mutex_unlock(&s->mu);
+}
+
+void *hb__session_udata(hb_session *s)
+{
+    void *p;
+    if (!s)
+        return NULL;
+    pthread_mutex_lock(&s->mu);
+    p = s->udata;
+    pthread_mutex_unlock(&s->mu);
+    return p;
+}
+
+void hb__session_wake(hb_session *s)
+{
+    char w = 'w';
+    if (!s)
+        return;
+    if (write(s->cmd_w, &w, 1) < 0) {}
+}
+
+int hb__session_cmd_fd(hb_session *s)
+{
+    return s ? s->cmd_r : -1;
 }
 
 /* 引擎全部调用都收拢在 mu 内，替换/销毁才与线程安全。 */
@@ -718,6 +783,22 @@ static void *sess_thread(void *arg)
             free(buf);
             return NULL;
         }
+    }
+
+    /* 自定义 run 循环（SFTP）：接管线程直到关闭/断线，返回值即 EXIT code */
+    if (s->tr.run) {
+        int rc = s->tr.run(s->tr.ctx, s);
+        pthread_mutex_lock(&s->mu);
+        s->exited = true;
+        s->exit_code = rc;
+        pthread_mutex_unlock(&s->mu);
+        watch_finish(s, rc);
+        hb__session_emit(s, HB_SESS_EV_EXIT, 0, rc,
+                         s->tr.exit_text ? s->tr.exit_text(s->tr.ctx)
+                                         : "session ended",
+                         NULL);
+        free(buf);
+        return NULL;
     }
 
     for (;;) {
@@ -1208,6 +1289,8 @@ void hb_session_free(hb_session *s)
             hb_watch_hit_clear(n->ev.watch);
             free(n->ev.watch);
         }
+        if (n->ev.sftp)
+            hb_sftp_result_free(n->ev.sftp);
         free(n);
     }
     close(s->cmd_r); close(s->cmd_w);

@@ -54,7 +54,11 @@ typedef enum {
     /* Shell History 命令采集（FR-08）：text = 命令行。
      * OSC 133 时取自 B..C 回显文本；否则用输入启发式（密码提示不采）。 */
     HB_SESS_EV_COMMAND,
+    /* SFTP 请求结果（FR-05）：sftp 指向 hb_sftp_result（owned）。 */
+    HB_SESS_EV_SFTP,
 } hb_sess_ev_type;
+
+struct hb_sftp_result;
 
 typedef struct {
     hb_sess_ev_type type;
@@ -63,6 +67,7 @@ typedef struct {
     char  *text, *text2;    /* owned；hb_sess_event_clear 释放 */
     char  *extra;           /* owned；HOSTKEY 的 known_hosts 行 + randomart */
     hb_watch_hit *watch;    /* owned；仅 HB_SESS_EV_WATCH */
+    struct hb_sftp_result *sftp;    /* owned；仅 HB_SESS_EV_SFTP */
     int64_t ts_ms;
 } hb_sess_event;
 

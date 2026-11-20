@@ -29,6 +29,11 @@ typedef struct {
      * PROMPT / ERROR 事件；失败时 transport 自己 emit 过 ERROR，
      * 返回非 0 线程只补一条 EXIT(-1)。可为 NULL。 */
     int      (*connect)(void *ctx, hb_session *s);
+
+    /* 可选：connect 成功后接管 session 线程，用自己的 poll 循环替代
+     * terminal read/feed（SFTP 引擎）。直到关闭/取消/断线才返回，
+     * 返回值作为 EXIT 事件 code。可为 NULL。 */
+    int      (*run)(void *ctx, hb_session *s);
 } hb_session_transport;
 
 /* 构造通用 session：vt 尺寸 rows×cols + scrollback 行；立即起线程。
@@ -36,6 +41,17 @@ typedef struct {
 hb_session *hb_session_new_transport(hb_session_transport *tr,
                                      int rows, int cols, int scrollback_lines,
                                      hb_vt *reuse_vt);
+
+/* transport 私有数据指针（SFTP 引擎经它把 hb_sftp_* API 路由到会话）。
+ * session 线程与 UI 线程都可安全访问（存取在 mu 内）。 */
+void  hb__session_set_udata(hb_session *s, void *p);
+void *hb__session_udata(hb_session *s);
+/* UI 线程戳醒 session 线程（请求入队/取消后）。 */
+void  hb__session_wake(hb_session *s);
+int   hb__session_cmd_fd(hb_session *s);   /* 命令管道读端（供 tr.run poll） */
+/* SFTP 请求结果事件（HB_SESS_EV_SFTP）：r 由事件队列接管所有权。 */
+struct hb_sftp_result;
+void  hb__session_emit_sftp(hb_session *s, struct hb_sftp_result *r);
 
 /* 供 transport 使用：推一个事件到 UI 队列（做字符串拷贝）。 */
 void hb__session_emit(hb_session *s, hb_sess_ev_type type, char mark, int code,

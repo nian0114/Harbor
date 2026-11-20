@@ -54,3 +54,9 @@ test_snippet = executable('test_snippet', 'test_snippet.c',
     dependencies: harbor_core_dep,
 )
 test('snippet', test_snippet)
+
+test_sftp = executable('test_sftp', 'test_sftp.c', 'sshd_fixture.c',
+    include_directories: include_directories('../src'),
+    dependencies: harbor_core_dep,
+)
+test('sftp', test_sftp, timeout: 120)
