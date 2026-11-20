@@ -208,6 +208,15 @@ void hb_window_toast_action(HbWindow *win, const char *text,
                             const char *btn_label, int timeout,
                             GCallback cb, gpointer ud)
 {
+    hb_window_toast_action2(win, text, btn_label, timeout, cb,
+                            NULL, ud);
+}
+
+void hb_window_toast_action2(HbWindow *win, const char *text,
+                             const char *btn_label, int timeout,
+                             GCallback cb, GDestroyNotify destroy,
+                             gpointer ud)
+{
     AdwToast *t;
     if (!win->toasts || !text)
         return;
@@ -216,6 +225,9 @@ void hb_window_toast_action(HbWindow *win, const char *text,
     adw_toast_set_timeout(t, timeout > 0 ? timeout : 9);
     if (cb)
         g_signal_connect_swapped(t, "button-clicked", cb, ud);
+    if (destroy)
+        g_signal_connect_swapped(t, "dismissed",
+                                 G_CALLBACK(destroy), ud);
     adw_toast_overlay_add_toast(ADW_TOAST_OVERLAY(win->toasts), t);
 }
 

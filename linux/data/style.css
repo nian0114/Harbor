@@ -253,6 +253,12 @@ button.hb-card-go {
 }
 button.hb-card-go:hover { background-color: @hb_blue; color: white; }
 
+.pill { border-radius: 9px; padding: 2px 9px; font-size: 11px;
+    font-weight: 600; }
+.pill.on  { background-color: #e6f6ee; color: #1d7a4f; }
+.pill.off { background-color: #f0f3f7; color: @hb_text_3; }
+.fingerprint-art { font-family: "Ubuntu Mono", "DejaVu Sans Mono",
+    Menlo, monospace; font-size: 11px; line-height: 1.15; }
 .hb-table { background-color: @hb_card; border-radius: 10px;
     box-shadow: 0 1px 2px alpha(black, .05); }
 .hb-table-head { background-color: #fbfcfd; border-bottom: 1px solid @hb_line; }

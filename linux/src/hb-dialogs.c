@@ -16,6 +16,7 @@ static GtkWidget *modal_new(const char *title, int width,
     dlg = adw_dialog_new();
     gtk_widget_add_css_class(GTK_WIDGET(dlg), "hb-modal");
     adw_dialog_set_content_width(dlg, width);
+    adw_dialog_set_follows_content_size(dlg, TRUE);
 
     hb = gtk_header_bar_new();
     gtk_widget_add_css_class(hb, "hb-modal-header");
@@ -424,6 +425,16 @@ void hb_toast_undo(GtkWidget *any_widget, const char *text,
     if (w) hb_window_toast_undo(w, text, (GCallback)undo_cb, ud);
 }
 
+void hb_toast_undo_destroy(GtkWidget *any_widget, const char *text,
+                           hb_toast_undo_cb undo_cb,
+                           GDestroyNotify destroy, gpointer ud)
+{
+    HbWindow *w = find_win(any_widget);
+    if (w)
+        hb_window_toast_action2(w, text, "撤销", 9,
+                                (GCallback)undo_cb, destroy, ud);
+}
+
 /* ============================ 通用模态 ============================ */
 
 AdwDialog *hb_modal_new(const char *title,
@@ -452,14 +463,31 @@ static void cfm_closed(AdwDialog *dlg, CfmData *d)
     g_free(d);
 }
 
-void hb_dialog_confirm(GtkWidget *parent, const char *title,
-                       const char *markup, const char *ok_label,
-                       gboolean danger,
-                       hb_dialog_bool_cb cb, gpointer ud)
+/* 对话框的承载 widget：parent 尚未挂进窗口层级时（如新 tab 建页即刻
+ * 连接 —— hb_ssh_page_new 在入树前跑 start_connect），退回应用活动
+ * 窗口；否则 adw_dialog_present(NULL) 会创建一个独立顶层窗，无 WM
+ * 时落在 (0,0) 被主窗遮住、不可见却吃掉所有输入。 */
+static GtkWidget *dialog_parent(GtkWidget *parent)
+{
+    GtkRoot *r = parent ? gtk_widget_get_root(parent) : NULL;
+    GApplication *app;
+    GtkWindow *w;
+    if (GTK_IS_WIDGET(r))
+        return GTK_WIDGET(r);
+    app = g_application_get_default();
+    if (GTK_IS_APPLICATION(app) &&
+        (w = gtk_application_get_active_window(GTK_APPLICATION(app))))
+        return GTK_WIDGET(w);
+    return NULL;
+}
+
+AdwDialog *hb_dialog_confirm(GtkWidget *parent, const char *title,
+                             const char *markup, const char *ok_label,
+                             gboolean danger,
+                             hb_dialog_bool_cb cb, gpointer ud)
 {
     GtkWidget *dlg, *body, *foot, *msg, *f, *ok, *cancel;
     CfmData *d = g_new0(CfmData, 1);
-    GtkRoot *root = gtk_widget_get_root(parent);
     d->cb = cb;
     d->ud = ud;
 
@@ -484,8 +512,41 @@ void hb_dialog_confirm(GtkWidget *parent, const char *title,
     gtk_box_append(GTK_BOX(foot), f);
 
     g_signal_connect(dlg, "closed", G_CALLBACK(cfm_closed), d);
-    adw_dialog_present(ADW_DIALOG(dlg),
-                       GTK_IS_WIDGET(root) ? GTK_WIDGET(root) : NULL);
+    adw_dialog_present(ADW_DIALOG(dlg), dialog_parent(parent));
+    return ADW_DIALOG(dlg);
+}
+
+/* 只读纯文本信息框（导入警告等）：文本不解析 Pango markup，
+ * 任何文件/vault 内容都能安全显示。 */
+void hb_dialog_text(GtkWidget *parent, const char *title, const char *text)
+{
+    GtkWidget *dlg, *body, *foot, *msg, *f, *ok;
+
+    dlg = modal_new(title, 420, &body, &foot);
+
+    msg = gtk_label_new(text ? text : "");
+    gtk_label_set_wrap(GTK_LABEL(msg), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(msg), 0);
+    gtk_label_set_selectable(GTK_LABEL(msg), TRUE);
+    gtk_widget_add_css_class(msg, "hb-modal-msg");
+    gtk_box_append(GTK_BOX(body), msg);
+
+    f = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_add_css_class(f, "hb-modal-footer");
+    gtk_widget_set_halign(f, GTK_ALIGN_END);
+    ok = gtk_button_new_with_label("关闭");
+    gtk_widget_add_css_class(ok, "hb-btn");
+    gtk_widget_add_css_class(ok, "primary");
+    gtk_box_append(GTK_BOX(f), ok);
+    g_signal_connect_swapped(ok, "clicked",
+                             G_CALLBACK(adw_dialog_close), dlg);
+    gtk_widget_set_margin_start(f, 20);
+    gtk_widget_set_margin_end(f, 20);
+    gtk_widget_set_margin_top(f, 4);
+    gtk_widget_set_margin_bottom(f, 16);
+    gtk_box_append(GTK_BOX(foot), f);
+
+    adw_dialog_present(ADW_DIALOG(dlg), dialog_parent(parent));
 }
 
 /* ------------------------------ prompt ------------------------------ */
@@ -527,7 +588,6 @@ void hb_dialog_prompt(GtkWidget *parent, const char *title,
 {
     GtkWidget *dlg, *body, *foot, *l, *f, *ok, *cancel;
     PrmData *d = g_new0(PrmData, 1);
-    GtkRoot *root = gtk_widget_get_root(parent);
     d->cb = cb;
     d->ud = ud;
 
@@ -556,7 +616,6 @@ void hb_dialog_prompt(GtkWidget *parent, const char *title,
     gtk_box_append(GTK_BOX(foot), f);
 
     g_signal_connect(dlg, "closed", G_CALLBACK(prm_closed), d);
-    adw_dialog_present(ADW_DIALOG(dlg),
-                       GTK_IS_WIDGET(root) ? GTK_WIDGET(root) : NULL);
+    adw_dialog_present(ADW_DIALOG(dlg), dialog_parent(parent));
     gtk_widget_grab_focus(d->entry);
 }

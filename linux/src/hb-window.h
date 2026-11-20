@@ -27,6 +27,12 @@ void hb_window_toast_undo(HbWindow *win, const char *text,
 void hb_window_toast_action(HbWindow *win, const char *text,
                             const char *btn_label, int timeout,
                             GCallback cb, gpointer ud);
+/* 同 toast_action，但 toast 消失（超时/点按钮/手动关）时用
+ * destroy(ud) 释放用户数据。 */
+void hb_window_toast_action2(HbWindow *win, const char *text,
+                             const char *btn_label, int timeout,
+                             GCallback cb, GDestroyNotify destroy,
+                             gpointer ud);
 /* tab ↔ vault host 关联：删除主机时按 host_id 关页（不拼 tab id） */
 void hb_window_set_tab_host(HbWindow *win, const char *id,
                             const char *host_id);

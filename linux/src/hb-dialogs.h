@@ -48,11 +48,16 @@ AdwDialog *hb_dialog_password(GtkWindow *parent,
 AdwDialog *hb_modal_new(const char *title,
                         GtkWidget **body_out, GtkWidget **foot_out);
 
-/* 简单确认：取消 / ok_label（danger → 红色按钮）；cb 收 accepted。 */
-void hb_dialog_confirm(GtkWidget *parent, const char *title,
-                       const char *markup, const char *ok_label,
-                       gboolean danger,
-                       hb_dialog_bool_cb cb, gpointer ud);
+/* 简单确认：取消 / ok_label（danger → 红色按钮）；cb 收 accepted。
+ * markup 按 Pango markup 解析 —— 拼入用户/文件数据必须先 escape。
+ * 返回 present 出去的对话框，便于调用方跟踪/强关（可忽略）。 */
+AdwDialog *hb_dialog_confirm(GtkWidget *parent, const char *title,
+                             const char *markup, const char *ok_label,
+                             gboolean danger,
+                             hb_dialog_bool_cb cb, gpointer ud);
+
+/* 只读纯文本信息框（导入警告等）：text 不解析 markup，安全显示任意内容。 */
+void hb_dialog_text(GtkWidget *parent, const char *title, const char *text);
 
 /* 单行输入：取消 / 确定；cb 收文本或 NULL（取消）。 */
 typedef void (*hb_dialog_text_cb)(const char *text_or_null, gpointer ud);
@@ -65,6 +70,10 @@ void hb_toast(GtkWidget *any_widget, const char *text);
 typedef void (*hb_toast_undo_cb)(gpointer ud);
 void hb_toast_undo(GtkWidget *any_widget, const char *text,
                    hb_toast_undo_cb undo_cb, gpointer ud);
+/* 带资源回收的 undo toast：toast 消失时 destroy(ud)（撤销点没点都会跑）。 */
+void hb_toast_undo_destroy(GtkWidget *any_widget, const char *text,
+                           hb_toast_undo_cb undo_cb,
+                           GDestroyNotify destroy, gpointer ud);
 
 G_END_DECLS
 

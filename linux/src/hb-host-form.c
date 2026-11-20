@@ -1,4 +1,5 @@
 #include "hb-host-form.h"
+#include "hb-keychain-view.h"
 #include "hb-dialogs.h"
 #include "hb-window.h"
 
@@ -46,7 +47,10 @@ typedef struct {
     GtkWidget *pw_e, *pw_clear;
     gboolean   had_secret, pw_cleared;
     GtkWidget *key_dd;
-    GPtrArray *key_ids;      /* 与 key_dd model 对齐 */
+    GPtrArray *key_ids;      /* 与 key_dd model 对齐（末位 NULL = 生成新密钥） */
+    guint      key_prev;     /* 最后一个有效选择（取消生成时回退） */
+    gboolean   key_building;
+    GtkWidget *parent_w;     /* 打开方 widget（嵌套 dialog 的 present 父级） */
     GtkWidget *ident_e;
 
     GtkWidget *jump_rows;
@@ -395,13 +399,12 @@ static void key_rebuild(HostForm *f, const char *select_id)
     size_t n = 0, i;
     guint sel = 0;
 
+    f->key_building = TRUE;
     g_ptr_array_set_size(f->key_ids, 0);
     sl = gtk_string_list_new(NULL);
     ks = hb_store_list(f->st, "key", &n);
-    if (n == 0) {
+    if (n == 0)
         gtk_string_list_append(sl, "Keychain 中暂无密钥");
-        gtk_widget_set_sensitive(f->key_dd, FALSE);
-    }
     for (i = 0; i < n; i++) {
         const char *nm = hb_obj_get_str(ks[i], "name");
         const char *fp = hb_obj_get_str(ks[i], "fingerprint");
@@ -415,9 +418,40 @@ static void key_rebuild(HostForm *f, const char *select_id)
         if (select_id && !strcmp(hb_obj_id(ks[i]), select_id))
             sel = i;
     }
+    /* 末位："生成新密钥…"（key_ids 里为 NULL 哨兵） */
+    gtk_string_list_append(sl, "生成新密钥…");
+    g_ptr_array_add(f->key_ids, NULL);
+    gtk_widget_set_sensitive(f->key_dd, TRUE);
     gtk_drop_down_set_model(GTK_DROP_DOWN(f->key_dd), G_LIST_MODEL(sl));
     gtk_drop_down_set_selected(GTK_DROP_DOWN(f->key_dd), sel);
+    f->key_prev = sel;
+    f->key_building = FALSE;
     if (ks) hb_obj_list_free(ks, n);
+}
+
+/* "生成新密钥…" 完成回调：选中新 key；取消 → 回到之前的选择 */
+static void genkey_done(const char *new_id, gpointer ud)
+{
+    HostForm *f = ud;
+    if (new_id)
+        key_rebuild(f, new_id);
+    else
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(f->key_dd),
+                                   f->key_prev);
+}
+
+static void on_keydd_sel(GtkDropDown *dd, GParamSpec *ps, gpointer ud)
+{
+    HostForm *f = ud;
+    guint i = gtk_drop_down_get_selected(dd);
+    (void)ps;
+    if (f->key_building || i >= f->key_ids->len)
+        return;
+    if (g_ptr_array_index(f->key_ids, i) == NULL)
+        hb_keychain_generate_dialog(f->parent_w, f->st,
+                                    genkey_done, f);
+    else
+        f->key_prev = i;
 }
 
 static void snip_rebuild(HostForm *f, const char *select_id)
@@ -822,6 +856,7 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
 
     f->st = st;
     f->v = hb_store_vault(st);
+    f->parent_w = parent;
     f->key_ids = g_ptr_array_new_with_free_func(g_free);
     f->jump_cand = g_ptr_array_new_with_free_func(g_free);
     f->jump_sel = g_ptr_array_new_with_free_func(g_free);
@@ -925,6 +960,8 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     gtk_box_append(GTK_BOX(b), f->pw_box);
     f->key_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     f->key_dd = GTK_WIDGET(gtk_drop_down_new(NULL, NULL));
+    g_signal_connect(f->key_dd, "notify::selected",
+                     G_CALLBACK(on_keydd_sel), f);
     gtk_box_append(GTK_BOX(f->key_box), f->key_dd);
     {
         GtkWidget *kr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);

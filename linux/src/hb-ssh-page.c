@@ -7,6 +7,7 @@
 #include "hb-window.h"
 
 #include <harbor/ssh.h>
+#include <harbor/keys.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -87,8 +88,15 @@ struct _HbSshPage {
 
     /* 待保存的"记住"凭据（CONNECTED 后写入） */
     char       *pend_secret;    /* malloc 文本；写完即清 */
-    char       *pend_key_id;    /* passphrase → key 对象 id；密码 → host id */
+    char       *pend_key_id;    /* passphrase → key/host id；密码 → host id */
     gboolean    pend_is_pass;
+
+    /* PROMPT 归属 + 首次使用补元数据 + 使用前确认 */
+    char      **hop_ids;        /* hop 下标 → host 对象 id（jumps + target） */
+    char      **conn_key_ids;   /* 本次连接用到的 key 对象 id（strv） */
+    char       *prompt_key_id;  /* 当前 PROMPT 归属的 key 对象 id（无=NULL） */
+    char       *fill_key_id;    /* 已提示口令的 key 对象（CONNECTED 补元数据） */
+    char       *fill_pass;      /* 该口令副本（用后抹掉） */
 
     /* HOSTKEY 事件挂起期间的暂存（对话框 cb 用） */
     char       *pending_line;
@@ -238,6 +246,9 @@ typedef struct {
     char      **secrets;       /* 全部 strdup 的 secret（target+jumps） */
     size_t      nsec, capsec;
     char      **known;         /* known_lines 深拷贝 */
+    char      **hop_ids;       /* strdup：jumps + target 的 host 对象 id */
+    char      **key_ids;       /* strdup：用到的 key 对象 id（可能含 NULL 跳） */
+    size_t      nhops;
     char       *missing_jump;  /* jump id 不在 vault → 连接前报错 */
 } ConnCtx;
 
@@ -255,11 +266,19 @@ static void conn_ctx_free(ConnCtx *c)
     if (!c) return;
     for (i = 0; c->known && c->known[i]; i++) free(c->known[i]);
     free(c->known);
-    for (i = 0; i < c->nsec; i++) wipe_free(c->secrets[i]);
+    for (i = 0; i < c->nsec; i++) hb_secret_free(c->secrets[i]);
     free(c->secrets);
     for (i = 0; c->jhosts && c->jhosts[i]; i++) hb_obj_free(c->jhosts[i]);
     free(c->jhosts);
     free(c->jumps);
+    if (c->hop_ids) {
+        for (i = 0; i <= c->nhops; i++) free(c->hop_ids[i]);
+        free(c->hop_ids);
+    }
+    if (c->key_ids) {
+        for (i = 0; i <= c->nhops; i++) free(c->key_ids[i]);
+        free(c->key_ids);
+    }
     free(c->missing_jump);
     free(c);
 }
@@ -325,6 +344,10 @@ static void host_to_hop(HbSshPage *p, ConnCtx *c, hb_obj *h, hb_ssh_hop *hop)
     } else if (!strcmp(auth, "key")) {
         hop->auth = HB_SSH_AUTH_KEY;
         hop->identity_file = hb_obj_get_str(h, "identity_file");
+        /* 主机级 "passphrase" secret：identity_file 的"记住口令" */
+        hop->passphrase = hb_vault_get_secret(hb_store_vault(p->store),
+                                            hb_obj_id(h), "passphrase");
+        ctx_sec_add(c, (char *)hop->passphrase);
     } else if (!strcmp(auth, "agent")) {
         hop->auth = HB_SSH_AUTH_AGENT;
     } else if (!strcmp(auth, "none")) {
@@ -332,6 +355,9 @@ static void host_to_hop(HbSshPage *p, ConnCtx *c, hb_obj *h, hb_ssh_hop *hop)
     } else {
         hop->auth = HB_SSH_AUTH_AUTO;
         hop->identity_file = hb_obj_get_str(h, "identity_file");
+        hop->passphrase = hb_vault_get_secret(hb_store_vault(p->store),
+                                            hb_obj_id(h), "passphrase");
+        ctx_sec_add(c, (char *)hop->passphrase);
     }
 }
 
@@ -354,6 +380,14 @@ static ConnCtx *build_ctx(HbSshPage *p, hb_obj **target_host_out)
     /* jumps：host.jump 是 strv 的 host id，外→内
      * （get_strv 返回的数组要 free，元素是借用的 valuestring） */
     nj = hb_obj_get_strv(h, "jump", &jump_ids);
+    c->nhops = nj + 1;
+    c->hop_ids = calloc(c->nhops + 1, sizeof(char *));
+    c->key_ids = calloc(c->nhops + 1, sizeof(char *));
+    c->hop_ids[nj] = strdup(hb_obj_id(h));
+    {
+        const char *tk = hb_obj_get_str(h, "key_id");
+        c->key_ids[nj] = tk && *tk ? strdup(tk) : NULL;
+    }
     if (nj) {
         c->jumps = calloc(nj, sizeof(hb_ssh_hop));
         c->jhosts = calloc(nj + 1, sizeof(hb_obj *));
@@ -363,6 +397,11 @@ static ConnCtx *build_ctx(HbSshPage *p, hb_obj **target_host_out)
                              &jh) != HB_OK || !jh) {
                 c->missing_jump = strdup(jump_ids[i]);
                 break;
+            }
+            c->hop_ids[i] = strdup(hb_obj_id(jh));
+            {
+                const char *jk = hb_obj_get_str(jh, "key_id");
+                c->key_ids[i] = jk && *jk ? strdup(jk) : NULL;
             }
             host_to_hop(p, c, jh, &c->jumps[i]);
             c->jhosts[i] = jh;   /* 保活到 ctx 释放 */
@@ -703,13 +742,27 @@ static gboolean dev_cancel_prompt(void)
 { return g_getenv("HARBOR_DEV_CANCEL_PROMPT") != NULL; }
 #endif
 
+/* open_dialog 跟踪：weak-pointer 让对话框被销毁（未发 closed 也
+ * 会被 finalize）时指针自动置 NULL，不留悬垂引用 —— start_connect
+ * / free_session 里的 force_close 才永远不会打到死对象。 */
+static void set_open_dialog(HbSshPage *p, AdwDialog *d)
+{
+    if (p->open_dialog)
+        g_object_remove_weak_pointer(G_OBJECT(p->open_dialog),
+                                     (gpointer)&p->open_dialog);
+    p->open_dialog = d;
+    if (d)
+        g_object_add_weak_pointer(G_OBJECT(d),
+                                  (gpointer)&p->open_dialog);
+}
+
 /* TOFU / hostkey-changed 应答。
  * 对话框弹出期间对页面 g_object_ref —— tab 中途关闭时回调仍拿到
  * 有效对象（dispose 已应答并置 sess=NULL）。 */
 static void on_tofu_done(gboolean accept, gpointer ud)
 {
     HbSshPage *p = ud;
-    p->open_dialog = NULL;
+    set_open_dialog(p, NULL);
     p->awaiting_reply = FALSE;
     if (accept && p->pending_line)
         save_known(p, p->pending_host, p->pending_keyfp,
@@ -724,7 +777,7 @@ static void on_tofu_done(gboolean accept, gpointer ud)
 static void on_hk_changed_done(gboolean accept, gpointer ud)
 {
     HbSshPage *p = ud;
-    p->open_dialog = NULL;
+    set_open_dialog(p, NULL);
     p->awaiting_reply = FALSE;
     if (accept && p->pending_line)
         save_known(p, p->pending_host, p->pending_keyfp,
@@ -739,12 +792,20 @@ static void on_hk_changed_done(gboolean accept, gpointer ud)
 static void on_pw_done(const char *secret, gboolean remember, gpointer ud)
 {
     HbSshPage *p = ud;
-    p->open_dialog = NULL;
+    set_open_dialog(p, NULL);
     p->awaiting_reply = FALSE;
     if (secret && remember && p->pend_key_id) {
         /* 暂存到 CONNECTED 后写 vault */
         wipe_free(p->pend_secret);
         p->pend_secret = g_strdup(secret);
+    }
+    /* 不管记不记住，都暂存该 passphrase：连上后给公钥未知的
+     * 加密导入 key 回填元数据（FR-02 首次使用补 public/fingerprint） */
+    if (secret && p->pend_is_pass && p->prompt_key_id) {
+        g_free(p->fill_key_id);
+        p->fill_key_id = g_strdup(p->prompt_key_id);
+        wipe_free(p->fill_pass);
+        p->fill_pass = g_strdup(secret);
     }
     hb_session_prompt_reply(p->sess, secret);
     g_object_unref(p);
@@ -760,6 +821,51 @@ static void save_pending_secret(HbSshPage *p)
     wipe_free(p->pend_secret);
     p->pend_secret = NULL;
     g_clear_pointer(&p->pend_key_id, g_free);
+}
+
+/* 加密导入的 key（PEM/PKCS8）第一次成功连接后：public/fingerprint 还
+ * 是空的 —— 用刚输入（或已记住）的 passphrase 重新 inspect 补齐。 */
+static void fill_key_metadata(HbSshPage *p)
+{
+    hb_vault *v = hb_store_vault(p->store);
+    size_t i;
+    if (!p->conn_key_ids) return;
+    for (i = 0; p->conn_key_ids[i]; i++) {
+        const char *kid = p->conn_key_ids[i];
+        hb_obj *k = NULL;
+        const char *pub, *pass = NULL;
+        char *pass_sec = NULL, *priv = NULL;
+        hb_key_info info;
+        if (!kid || !*kid) continue;
+        if (hb_vault_get(v, kid, &k) != HB_OK || !k) continue;
+        pub = hb_obj_get_str(k, "public");
+        if (pub && *pub) { hb_obj_free(k); continue; }   /* 已有 → 跳过 */
+        if (p->fill_key_id && !strcmp(p->fill_key_id, kid) &&
+            p->fill_pass)
+            pass = p->fill_pass;          /* 借用，无拷贝 */
+        else
+            pass = pass_sec = hb_vault_get_secret(v, kid, "passphrase");
+        if (pass) {
+            priv = hb_vault_get_secret(v, kid, "private");
+            if (priv &&
+                hb_key_inspect((const unsigned char *)priv,
+                               strlen(priv), pass, &info) == HB_OK &&
+                info.public_line) {
+                hb_obj_set_str(k, "public", info.public_line);
+                if (info.fingerprint)
+                    hb_obj_set_str(k, "fingerprint", info.fingerprint);
+                if (info.kind)
+                    hb_obj_set_str(k, "kind", info.kind);
+                if (info.bits)
+                    hb_obj_set_int(k, "bits", info.bits);
+                hb_vault_put(v, k);
+                hb_key_info_clear(&info);
+            }
+        }
+        if (pass_sec) hb_secret_free(pass_sec);
+        if (priv) hb_secret_free(priv);
+        hb_obj_free(k);
+    }
 }
 
 /* CONNECTED：切终端 + 记日志 + 存凭据 + last_connected + startup snippet */
@@ -780,6 +886,16 @@ static void on_connected(HbSshPage *p)
                             "ok", NULL, -1);
 
     save_pending_secret(p);
+    fill_key_metadata(p);
+    wipe_free(p->fill_pass);
+    p->fill_pass = NULL;
+    g_clear_pointer(&p->fill_key_id, g_free);
+    g_clear_pointer(&p->prompt_key_id, g_free);
+    if (p->conn_key_ids) {
+        size_t i;
+        for (i = 0; p->conn_key_ids[i]; i++) free(p->conn_key_ids[i]);
+        g_clear_pointer(&p->conn_key_ids, free);
+    }
 
     /* last_connected */
     if (p->host_id &&
@@ -868,7 +984,8 @@ static void show_error_card(HbSshPage *p, const char *msg, const char *detail,
     gtk_widget_set_halign(card, GTK_ALIGN_CENTER);
     gtk_widget_set_size_request(card, 430, -1);
 
-    markup = g_strdup_printf("<b>%s</b>", msg ? msg : "连接失败");
+    markup = g_markup_printf_escaped("<b>%s</b>",
+                                     msg ? msg : "连接失败");
     title = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(title), markup);
     g_free(markup);
@@ -1007,20 +1124,20 @@ static void on_session_ev(HbTerminal *t, const hb_sess_event *ev, gpointer ud)
                     free(ob);
                 }
             }
-            p->open_dialog =
+            set_open_dialog(p,
                 hb_dialog_hostkey_changed(GTK_WINDOW(page_win(p)), hp,
                     kt ? kt : "", oldfp,
                     ev->text2 ? (strchr(ev->text2,' ') ?
                                  strchr(ev->text2,' ')+1 : ev->text2) : "",
-                    on_hk_changed_done, p);
+                    on_hk_changed_done, p));
             g_free(oldfp);
         } else {
-            p->open_dialog =
+            set_open_dialog(p,
                 hb_dialog_tofu(GTK_WINDOW(page_win(p)), hp,
                     kt ? kt : "",
                     ev->text2 ? (strchr(ev->text2,' ') ?
                                  strchr(ev->text2,' ')+1 : ev->text2) : "",
-                    art ? art : "", on_tofu_done, p);
+                    art ? art : "", on_tofu_done, p));
         }
         g_free(art); g_free(kt);
         break;
@@ -1028,21 +1145,37 @@ static void on_session_ev(HbTerminal *t, const hb_sess_event *ev, gpointer ud)
 
     case HB_SESS_EV_PROMPT: {
         gboolean is_pass = (ev->code == 1);
+        const char *hop_host = p->host_id;
         p->awaiting_reply = TRUE;
         g_free(p->pend_key_id);
         p->pend_key_id = NULL;
+        g_free(p->prompt_key_id);
+        p->prompt_key_id = NULL;
         p->pend_is_pass = is_pass;
-        /* 记住到哪个对象：passphrase → host.key_id；密码 → host 自身 */
-        if (is_pass) {
+        /* 归属到具体 hop：text2 是 hop 下标（jumps 0..n-1，njumps=target）；
+         * ProxyJump 时提示可能来自某跳板，不能总记到目标主机。 */
+        if (ev->text2 && p->hop_ids) {
+            long idx = strtol(ev->text2, NULL, 10);
+            size_t n = 0;
+            while (p->hop_ids[n]) n++;
+            if (idx >= 0 && (size_t)idx < n && p->hop_ids[idx])
+                hop_host = p->hop_ids[idx];
+        }
+        /* 记住到哪个对象：passphrase → 该 hop 的 key_id
+         *（identity_file 则该 hop 主机自身）；密码 → 该 hop 主机 */
+        {
             hb_obj *h = NULL;
-            if (p->host_id && hb_vault_get(
-                    hb_store_vault(p->store), p->host_id, &h) == HB_OK && h) {
+            if (hop_host && hb_vault_get(
+                    hb_store_vault(p->store), hop_host, &h) == HB_OK && h) {
                 const char *kid = hb_obj_get_str(h, "key_id");
-                p->pend_key_id = g_strdup(kid && *kid ? kid : p->host_id);
+                if (is_pass && kid && *kid) {
+                    p->pend_key_id = g_strdup(kid);
+                    p->prompt_key_id = g_strdup(kid);
+                } else {
+                    p->pend_key_id = g_strdup(hop_host);
+                }
                 hb_obj_free(h);
-            } else p->pend_key_id = g_strdup(p->host_id);
-        } else {
-            p->pend_key_id = g_strdup(p->host_id);
+            } else p->pend_key_id = g_strdup(hop_host);
         }
 #ifndef NDEBUG
         if (dev_cancel_prompt()) {
@@ -1052,10 +1185,10 @@ static void on_session_ev(HbTerminal *t, const hb_sess_event *ev, gpointer ud)
         }
 #endif
         g_object_ref(p);   /* 同 HOSTKEY：done cb 里 unref */
-        p->open_dialog =
+        set_open_dialog(p,
             hb_dialog_password(GTK_WINDOW(page_win(p)),
                 ev->text ? ev->text : "Password:", is_pass,
-                TRUE /* show remember */, on_pw_done, p);
+                TRUE /* show remember */, on_pw_done, p));
         break;
     }
 
@@ -1122,7 +1255,7 @@ static void free_session(HbSshPage *p)
      * 之后的点击会应答错会话。 */
     if (p->open_dialog) {
         AdwDialog *d = p->open_dialog;
-        p->open_dialog = NULL;
+        set_open_dialog(p, NULL);
         adw_dialog_force_close(d);
     }
     if (!p->sess) return;
@@ -1138,36 +1271,95 @@ static void free_session(HbSshPage *p)
     p->sess = NULL;
 }
 
-static void start_connect(HbSshPage *p, gboolean is_reconnect)
+/* 使用前确认（FR-02 验收 2 的 Linux 形态）：收集目标 + 各跳板中
+ * auth=key 且 key.confirm=true 的密钥；一个都不读 secret。 */
+static GPtrArray *collect_confirm_keys(HbSshPage *p)
+{
+    hb_vault *v = hb_store_vault(p->store);
+    hb_obj *h = NULL;
+    const char **jump = NULL;
+    size_t nj = 0, i;
+    GPtrArray *out = NULL;
+
+    if (!p->host_id ||
+        hb_vault_get(v, p->host_id, &h) != HB_OK || !h)
+        return NULL;
+
+    /* hops[0..nj-1]=jump hosts, [nj]=target —— 逐跳检查 */
+    nj = hb_obj_get_strv(h, "jump", &jump);
+    for (i = 0; i <= nj; i++) {
+        hb_obj *hh = NULL, *k = NULL;
+        const char *auth, *kid;
+        if (i < nj) {
+            if (hb_vault_get(v, jump[i], &hh) != HB_OK || !hh)
+                continue;      /* missing jump 由 build_ctx 报错 */
+        } else {
+            hh = h;
+        }
+        auth = hb_obj_get_str(hh, "auth");
+        kid = hb_obj_get_str(hh, "key_id");
+        if (auth && !strcmp(auth, "key") && kid && *kid &&
+            hb_vault_get(v, kid, &k) == HB_OK && k &&
+            hb_obj_get_bool(k, "confirm", false)) {
+            const char *kn = hb_obj_get_str(k, "name");
+            const char *hu = hb_obj_get_str(hh, "user");
+            const char *hn = hb_obj_get_str(hh, "name");
+            if (!out)
+                out = g_ptr_array_new_with_free_func(g_free);
+            g_ptr_array_add(out,
+                g_strdup_printf("%s → %s@%s",
+                                kn && *kn ? kn : "key",
+                                hu && *hu ? hu : "?",
+                                hn && *hn ? hn : "?"));
+        }
+        if (k) hb_obj_free(k);
+        if (i < nj && hh) hb_obj_free(hh);
+    }
+    free(jump);
+    hb_obj_free(h);
+    return out;
+}
+
+typedef struct {
+    HbSshPage *p;
+    GPtrArray *lines;   /* 待确认密钥描述行 */
+} KeyConfirmCtx;
+
+static void continue_connect(HbSshPage *p);
+
+static void on_key_confirm(gboolean ok, gpointer ud)
+{
+    KeyConfirmCtx *cc = ud;
+    HbSshPage *p = cc->p;
+
+    set_open_dialog(p, NULL);
+    g_ptr_array_free(cc->lines, TRUE);
+    g_free(cc);
+    if (!gtk_widget_get_root(GTK_WIDGET(p))) {   /* tab 已关 */
+        g_object_unref(p);
+        return;
+    }
+    if (ok) {
+        continue_connect(p);
+    } else {
+        /* 拒绝 → 不建会话（secret 从未被读）。
+         * reuse_vt 不动：它属于下一次成功连接，不由本次拒绝销毁。 */
+        p->connecting = FALSE;
+        gtk_stack_set_visible_child_name(GTK_STACK(p->stack), "connect");
+        show_error_card(p, "已拒绝使用密钥，连接已取消", NULL, 0);
+        log_finish(p, "cancelled", "key confirm denied");
+        p->log_id = 0;
+    }
+    g_object_unref(p);
+}
+
+/* 真正起会话（确认通过或无需确认后进入）：偷 reuse_vt、杀旧会话、
+ * build_ctx、new_ssh。 */
+static void continue_connect(HbSshPage *p)
 {
     ConnCtx *c;
     hb_vt *reuse;
     hb_obj *thost = NULL;
-
-    p->connecting = TRUE;
-    p->was_reconnect = is_reconnect;
-    p->reconnected_feed = is_reconnect;
-    if (!is_reconnect) {
-        p->was_connected = FALSE;
-        p->cur_stage = -1;
-        update_nodes(p);
-        gtk_stack_set_visible_child_name(GTK_STACK(p->stack), "connect");
-        /* 清日志 */
-        {
-            GtkWidget *ch;
-            while ((ch = gtk_widget_get_first_child(p->log_box)))
-                gtk_widget_unparent(ch);
-        }
-        if (p->err_card) {
-            gtk_widget_unparent(p->err_card);
-            p->err_card = NULL;
-        }
-        gtk_widget_set_visible(p->hide_btn, TRUE);
-        if (p->conn_foot)
-            gtk_widget_set_visible(p->conn_foot, TRUE);
-    }
-    tab_dot(p, NULL);
-    log_start(p);
 
     /* 重连：reconnect_now 已把旧会话的 vt 偷出来挂在 p->reuse_vt；
      * 普通 start_over 则没有。 */
@@ -1180,7 +1372,36 @@ static void start_connect(HbSshPage *p, gboolean is_reconnect)
         p->sess = NULL;
     }
 
+    /* 上一次的 hop 归属表作废 */
+    if (p->hop_ids) {
+        size_t i;
+        for (i = 0; p->hop_ids[i]; i++) free(p->hop_ids[i]);
+        g_clear_pointer(&p->hop_ids, free);
+    }
+    if (p->conn_key_ids) {
+        size_t i;
+        for (i = 0; p->conn_key_ids[i]; i++) free(p->conn_key_ids[i]);
+        g_clear_pointer(&p->conn_key_ids, free);
+    }
+
     c = build_ctx(p, &thost);
+    /* hop 归属表 + 本次连接用到的 key：转给页面（ctx 释放前搬出） */
+    p->hop_ids = c ? c->hop_ids : NULL;
+    if (c) c->hop_ids = NULL;
+    {
+        size_t i, nk = 0;
+        if (c && c->key_ids) {
+            for (i = 0; i <= c->nhops; i++)
+                if (c->key_ids[i]) nk++;
+            p->conn_key_ids = calloc(nk + 1, sizeof(char *));
+            nk = 0;
+            for (i = 0; i <= c->nhops; i++)
+                if (c->key_ids[i]) {
+                    p->conn_key_ids[nk++] = c->key_ids[i];
+                    c->key_ids[i] = NULL;
+                }
+        }
+    }
     if (c && c->missing_jump) {
         char *m = g_strdup_printf("跳板主机不存在或已删除（%s）",
                                   c->missing_jump);
@@ -1217,6 +1438,72 @@ static void start_connect(HbSshPage *p, gboolean is_reconnect)
     }
     hb_terminal_set_session(HB_TERMINAL(p->term), p->sess);
     set_status(p, "● 连接中…", "hb-term-warn");
+}
+
+static void start_connect(HbSshPage *p, gboolean is_reconnect)
+{
+    /* 先强关上一次尝试挂起的模态（密钥确认/TOFU/口令）：其 cb 会按
+     * "拒绝/取消"路径收尾旧尝试，保证任何时刻最多一个挂起对话框。 */
+    if (p->open_dialog) {
+        AdwDialog *d = p->open_dialog;
+        set_open_dialog(p, NULL);
+        adw_dialog_force_close(d);
+    }
+    if (p->err_card) {        /* 上次尝试的错误卡（含重连路径） */
+        gtk_widget_unparent(p->err_card);
+        p->err_card = NULL;
+    }
+    p->connecting = TRUE;
+    p->was_reconnect = is_reconnect;
+    p->reconnected_feed = is_reconnect;
+    if (!is_reconnect) {
+        p->was_connected = FALSE;
+        p->cur_stage = -1;
+        update_nodes(p);
+        gtk_stack_set_visible_child_name(GTK_STACK(p->stack), "connect");
+        /* 清日志 */
+        {
+            GtkWidget *ch;
+            while ((ch = gtk_widget_get_first_child(p->log_box)))
+                gtk_widget_unparent(ch);
+        }
+        gtk_widget_set_visible(p->hide_btn, TRUE);
+        if (p->conn_foot)
+            gtk_widget_set_visible(p->conn_foot, TRUE);
+    }
+    tab_dot(p, NULL);
+    log_start(p);
+
+    /* 使用确认：在读任何 secret 之前（build_ctx 会 get_secret） */
+    {
+        GPtrArray *cf = collect_confirm_keys(p);
+        if (cf && cf->len) {
+            KeyConfirmCtx *cc = g_new0(KeyConfirmCtx, 1);
+            GString *mk = g_string_new(NULL);
+            size_t i;
+            g_string_append(mk, "以下密钥开启了<b>使用前确认</b>：\n");
+            for (i = 0; i < cf->len; i++) {
+                char *e = g_markup_escape_text(
+                    (char *)g_ptr_array_index(cf, i), -1);
+                g_string_append_printf(mk, "  • %s\n", e);
+                g_free(e);
+            }
+            g_string_append(mk, "允许使用这些密钥登录吗？");
+            cc->p = p;
+            cc->lines = cf;
+            g_object_ref(p);   /* 对话框期间保活页面 */
+            /* 挂 open_dialog：start_connect/free_session 会强关它
+             *（cb 按拒绝路径收尾旧尝试），绝不叠加第二个确认框。 */
+            set_open_dialog(p,
+                hb_dialog_confirm(GTK_WIDGET(p), "使用密钥",
+                                  mk->str, "允许使用", FALSE,
+                                  on_key_confirm, cc));
+            g_string_free(mk, TRUE);
+            return;
+        }
+        if (cf) g_ptr_array_free(cf, TRUE);
+    }
+    continue_connect(p);
 }
 
 /* ------------------------- 设置/主题 ------------------------- */
@@ -1570,6 +1857,19 @@ static void hb_ssh_page_finalize(GObject *o)
     g_free(p->theme_id);
     wipe_free(p->pend_secret);
     g_free(p->pend_key_id);
+    if (p->hop_ids) {
+        size_t i;
+        for (i = 0; p->hop_ids[i]; i++) free(p->hop_ids[i]);
+        free(p->hop_ids);
+    }
+    if (p->conn_key_ids) {
+        size_t i;
+        for (i = 0; p->conn_key_ids[i]; i++) free(p->conn_key_ids[i]);
+        free(p->conn_key_ids);
+    }
+    g_free(p->prompt_key_id);
+    g_free(p->fill_key_id);
+    wipe_free(p->fill_pass);
     g_free(p->pending_line);
     g_free(p->pending_host);
     g_free(p->pending_keyfp);

@@ -1235,9 +1235,8 @@ static void imp_do(ImpUd *u)
             GString *w = g_string_new(NULL);
             for (size_t i = 0; i < r.nwarn && i < 20; i++)
                 g_string_append_printf(w, "%s\n", r.warnings[i]);
-            /* 警告详情用 confirm 当只读显示（ok=关闭） */
-            hb_dialog_confirm(GTK_WIDGET(u->hv), "导入警告",
-                              w->str, "关闭", FALSE, NULL, NULL);
+            /* 警告含文件路径/主机名 —— 纯文本对话框，不解析 markup */
+            hb_dialog_text(GTK_WIDGET(u->hv), "导入警告", w->str);
             g_string_free(w, TRUE);
         }
     }
@@ -1524,8 +1523,7 @@ static void json_show_warnings(gpointer ud)
     size_t i;
     for (i = 0; i < j->res.nwarn; i++)
         g_string_append_printf(w, "%s\n", j->res.warnings[i]);
-    hb_dialog_confirm(GTK_WIDGET(j->hv), "导入警告", w->str,
-                      "关闭", FALSE, NULL, NULL);
+    hb_dialog_text(GTK_WIDGET(j->hv), "导入警告", w->str);
     g_string_free(w, TRUE);
 }
 
