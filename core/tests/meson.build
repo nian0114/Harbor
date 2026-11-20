@@ -28,3 +28,8 @@ test_ssh = executable('test_ssh', 'test_ssh.c',
     dependencies: harbor_core_dep,
 )
 test('ssh', test_ssh, timeout: 60)
+
+test_hostio = executable('test_hostio', 'test_hostio.c',
+    dependencies: harbor_core_dep,
+)
+test('hostio', test_hostio)

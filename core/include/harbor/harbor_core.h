@@ -6,5 +6,7 @@
 #include "vt.h"
 #include "pty.h"
 #include "session.h"
+#include "ssh.h"
+#include "hostio.h"
 
 #endif
