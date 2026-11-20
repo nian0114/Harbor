@@ -3,6 +3,8 @@
 #include "hb-term-theme.h"
 #include "hb-icons.h"
 #include "hb-notify.h"
+#include "hb-watch-ui.h"
+#include "hb-window.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -18,11 +20,18 @@ struct _HbTermPage {
     GtkWidget   *tt_label;
     GtkWidget   *st_conn;
     GtkWidget   *st_sb;
+    GtkWidget   *st_watch;
+    GtkWidget   *watch_btn;
     gulong       changed_handler;
     char        *shell_base;
     int          sb_lines;
     gboolean     dead;
     char        *theme_id;      /* dev --theme 覆盖或 settings.theme */
+    /* FR-13 完成监控（会话级状态，重连/重启后重挂） */
+    gboolean     watch_on;
+    unsigned     watch_signals;
+    char        *tab_id;
+    HbWindow    *win;
 };
 
 G_DEFINE_TYPE(HbTermPage, hb_term_page, GTK_TYPE_BOX)
@@ -75,9 +84,103 @@ static void on_exited(HbTerminal *t, int code, gpointer ud)
 static void on_notify(HbTerminal *t, const char *title, const char *body,
                       gpointer ud)
 {
-    (void)t; (void)ud;
-    if (title)
-        hb_notify_post("info", title, body ? body : "", NULL);
+    HbTermPage *p = ud;
+    (void)t;
+    /* 监控开着时 OSC 9/777 由 watch 的 TERMNOTIFY hit 路由，
+     * 不在这里重复投递 */
+    if (p->watch_on)
+        return;
+    if (title) {
+        /* notify_body=host：正文只带主机名，不回显 OSC 内容 */
+        hb_obj *o = NULL;
+        gboolean host_only = FALSE;
+        if (hb_vault_settings(hb_store_vault(p->store), &o) == HB_OK && o) {
+            host_only = !g_strcmp0(hb_obj_get_str(o, "notify_body"),
+                                   "host");
+            hb_obj_free(o);
+        }
+        if (host_only)
+            hb_notify_post("info", "终端通知 · Local",
+                           "Local 上的任务有新通知", NULL);
+        else
+            hb_notify_post("info", title, body ? body : "", NULL);
+    }
+}
+
+/* ------------------------------ 监控 ------------------------------ */
+
+static void watch_refresh_ui(HbTermPage *p)
+{
+    char *t;
+    if (p->watch_on) {
+        t = hb_watch_signal_summary(p->watch_signals);
+        gtk_button_set_label(GTK_BUTTON(p->watch_btn), "");
+        {
+            GtkWidget *bx = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+            gtk_box_append(GTK_BOX(bx), hb_icon_new("eye", 13));
+            gtk_box_append(GTK_BOX(bx), gtk_label_new("监控 开"));
+            gtk_button_set_child(GTK_BUTTON(p->watch_btn), bx);
+        }
+        gtk_widget_add_css_class(p->watch_btn, "on");
+    } else {
+        GtkWidget *bx = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+        gtk_box_append(GTK_BOX(bx), hb_icon_new("eye", 13));
+        gtk_box_append(GTK_BOX(bx), gtk_label_new("监控 关"));
+        gtk_button_set_child(GTK_BUTTON(p->watch_btn), bx);
+        gtk_widget_remove_css_class(p->watch_btn, "on");
+        t = NULL;
+    }
+    gtk_label_set_label(GTK_LABEL(p->st_watch),
+                        t ? t : "监控: 关");
+    g_free(t);
+}
+
+static void watch_apply_session(HbTermPage *p)
+{
+    hb_watch_apply(p->sess, p->store, NULL,
+                   p->watch_on, p->watch_signals);
+}
+
+static void watch_set(gpointer ud, gboolean on, unsigned signals)
+{
+    HbTermPage *p = ud;
+    p->watch_on = on;
+    p->watch_signals = signals;
+    watch_refresh_ui(p);
+    watch_apply_session(p);
+}
+
+static hb_session *watch_get_sess(gpointer ud)
+{
+    HbTermPage *p = ud;
+    return p->sess;
+}
+
+static void on_watch_btn(GtkButton *b, gpointer ud)
+{
+    HbTermPage *p = ud;
+    HbWatchUiOps ops = {0};
+    (void)b;
+    ops.page = GTK_WIDGET(p);
+    ops.store = p->store;
+    ops.host_id = NULL;
+    ops.is_ssh = FALSE;
+    ops.on = p->watch_on;
+    ops.signals = p->watch_signals;
+    ops.apply = watch_set;
+    ops.apply_ud = p;
+    ops.session = watch_get_sess;
+    ops.session_ud = p;
+    hb_watch_ui_open(&ops);
+}
+
+static void on_session_ev(HbTerminal *t, const hb_sess_event *ev,
+                          gpointer ud)
+{
+    HbTermPage *p = ud;
+    (void)t;
+    if (ev->type == HB_SESS_EV_WATCH && ev->watch && p->tab_id)
+        hb_watch_route(GTK_WIDGET(p), p->tab_id, "Local", ev->watch);
 }
 
 /* dead 状态下捕获 Enter → 重启本地会话（先于终端自己的 key 处理） */
@@ -106,6 +209,7 @@ static gboolean on_dead_key(GtkEventControllerKey *kc, guint keyval,
     p->sess = ns;
     p->dead = FALSE;
     hb_terminal_set_session(HB_TERMINAL(p->term), p->sess);
+    watch_apply_session(p);       /* 监控状态随重启重挂 */
     gtk_widget_set_visible(p->dead_lbl, FALSE);
     set_status(p, TRUE);
     return TRUE;
@@ -194,12 +298,17 @@ static GtkWidget *build_toolbar(HbTermPage *p)
     gtk_label_set_xalign(GTK_LABEL(p->tt_label), 0);
     gtk_box_append(GTK_BOX(bar), p->tt_label);
 
-    /* spacer（后续单元加 tbtn） */
+    /* spacer */
     {
         GtkWidget *sp = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
         gtk_widget_set_hexpand(sp, TRUE);
         gtk_box_append(GTK_BOX(bar), sp);
     }
+    p->watch_btn = gtk_button_new();
+    gtk_widget_add_css_class(p->watch_btn, "tbtn");
+    g_signal_connect(p->watch_btn, "clicked",
+                     G_CALLBACK(on_watch_btn), p);
+    gtk_box_append(GTK_BOX(bar), p->watch_btn);
     return bar;
 }
 
@@ -222,6 +331,10 @@ static GtkWidget *build_status(HbTermPage *p)
     sp = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_hexpand(sp, TRUE);
     gtk_box_append(GTK_BOX(bar), sp);
+
+    p->st_watch = gtk_label_new("监控: 关");
+    gtk_widget_add_css_class(p->st_watch, "hb-term-muted");
+    gtk_box_append(GTK_BOX(bar), p->st_watch);
 
     p->st_sb = gtk_label_new("");
     gtk_box_append(GTK_BOX(bar), p->st_sb);
@@ -248,6 +361,7 @@ static void hb_term_page_finalize(GObject *o)
     HbTermPage *p = HB_TERM_PAGE(o);
     g_free(p->shell_base);
     g_free(p->theme_id);
+    g_free(p->tab_id);
     G_OBJECT_CLASS(hb_term_page_parent_class)->finalize(o);
 }
 
@@ -313,8 +427,27 @@ GtkWidget *hb_term_page_new_local(HbStore *st)
     p->store = st;
     apply_settings(p);          /* 先取 sb_lines / theme / font */
 
+    /* 监控默认：Local 默认关（settings.watch_default_local），
+     * 信号掩码取引擎默认（EOF|133|RULES|TERMNOTIFY） */
+    {
+        hb_obj *o = NULL;
+        hb_watch_cfg dc;
+        hb_watch_cfg_defaults(&dc);
+        p->watch_signals = dc.signals;
+        if (hb_vault_settings(hb_store_vault(st), &o) == HB_OK && o) {
+            p->watch_on = hb_obj_get_bool(o, "watch_default_local",
+                                          false);
+            if (hb_obj_get_bool(o, "watch_idle", false))
+                p->watch_signals |= HB_WATCH_SIG_IDLE;
+            hb_obj_free(o);
+        }
+    }
+
     p->sess = spawn_local(p, NULL);
     hb_terminal_set_session(HB_TERMINAL(p->term), p->sess);
+    hb_terminal_set_event_cb(HB_TERMINAL(p->term), on_session_ev, p);
+    watch_apply_session(p);
+    watch_refresh_ui(p);
     set_status(p, p->sess != NULL);
     if (!p->sess) {
         p->dead = TRUE;
@@ -328,6 +461,15 @@ GtkWidget *hb_term_page_new_local(HbStore *st)
     p->changed_handler = g_signal_connect(st, "changed",
         G_CALLBACK(on_store_changed), p);
     return GTK_WIDGET(p);
+}
+
+/* add_tab 之后调用：tab id 供命中路由定位角标 */
+void hb_term_page_attach_tab(HbTermPage *p, GtkWidget *win,
+                             const char *tab_id)
+{
+    p->win = HB_WINDOW(win);
+    g_free(p->tab_id);
+    p->tab_id = g_strdup(tab_id);
 }
 
 void hb_term_page_feed_input(HbTermPage *p, const char *text)

@@ -14,8 +14,17 @@ HbWindow *hb_window_new(GtkApplication *app);
 void hb_window_add_tab(HbWindow *win, const char *id, const char *title,
                        const char *icon, GtkWidget *page,
                        gboolean closable, gboolean is_term);
-/* dot: "ok" | "err" | "share" | NULL */
+/* dot: "ok" | "err" | "share" | "pending" | NULL */
 void hb_window_set_tab_dot(HbWindow *win, const char *id, const char *dot);
+/* 监控角标：与普通 dot 相同绘制，但额外标记为 watch 角标 ——
+ * 切到该 tab 时自动清除。返回 token（0=tab 不存在），供
+ * clear_watch_dot 做"只清掉自己这颗"的时序防护。 */
+guint hb_window_set_watch_dot(HbWindow *win, const char *id,
+                              const char *dot);
+void hb_window_clear_watch_dot(HbWindow *win, const char *id, guint token);
+/* 当前活动 tab 的 id / page（借用指针；无活动 tab → NULL） */
+const char *hb_window_active_tab_id(HbWindow *win);
+GtkWidget *hb_window_active_page(HbWindow *win);
 void hb_window_set_tab_title(HbWindow *win, const char *id, const char *title);
 void hb_window_set_tab_icon(HbWindow *win, const char *id, const char *icon);
 

@@ -12,6 +12,10 @@ G_DECLARE_FINAL_TYPE(HbTermPage, hb_term_page, HB, TERM_PAGE, GtkBox)
 
 GtkWidget *hb_term_page_new_local(HbStore *st);
 
+/* add_tab 之后调用：tab id 供监控命中路由定位角标 */
+void hb_term_page_attach_tab(HbTermPage *p, GtkWidget *win,
+                             const char *tab_id);
+
 /* 供 --open-local=CMD：像用户输入一样把文本写进会话 */
 void hb_term_page_feed_input(HbTermPage *p, const char *text);
 

@@ -58,9 +58,8 @@ static GtkWidget *sftp_placeholder(void)
 
 /* ------------------------------ 截图 ------------------------------ */
 
-static gboolean take_shot(gpointer ud)
+static gboolean shot_window(GtkWidget *win, const char *path)
 {
-    GtkWidget *win = ud;
     GdkSurface *surf = gtk_native_get_surface(GTK_NATIVE(win));
     GdkPaintable *p = gtk_widget_paintable_new(win);
     GskRenderer *r = gsk_renderer_new_for_surface(surf);
@@ -75,13 +74,22 @@ static gboolean take_shot(gpointer ud)
     gdk_paintable_snapshot(p, snap, w, h);
     node = gtk_snapshot_free_to_node(snap);
     tex = node ? gsk_renderer_render_texture(r, node, &bounds) : NULL;
-    ok = tex && gdk_texture_save_to_png(tex, hb_opt_screenshot);
+    ok = tex && gdk_texture_save_to_png(tex, path);
     g_clear_object(&tex);
     if (node)
         gsk_render_node_unref(node);
     gsk_renderer_unrealize(r);
     g_clear_object(&r);
     g_clear_object(&p);
+    g_printerr("harbor: screenshot %s -> %s\n", ok ? "saved" : "FAILED", path);
+    return ok;
+}
+
+static gboolean take_shot(gpointer ud)
+{
+    GtkWidget *win = ud;
+    gboolean ok = shot_window(win, hb_opt_screenshot);
+
     if (!ok) {
         static int retries;
         if (++retries < 10) {
@@ -91,22 +99,112 @@ static gboolean take_shot(gpointer ud)
             return G_SOURCE_REMOVE;
         }
     }
-    g_printerr("harbor: screenshot %s -> %s\n",
-               ok ? "saved" : "FAILED", hb_opt_screenshot);
     g_application_quit(g_application_get_default());
     return G_SOURCE_REMOVE;
 }
 
+#ifndef NDEBUG
+/* app.shot <png 路径>：dev 调试动作，运行中实例按控件树截图。 */
+static void on_dev_shot(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    GtkWindow *win;
+    (void)a;
+    if (!param) return;
+    win = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (win)
+        shot_window(GTK_WIDGET(win), g_variant_get_string(param, NULL));
+}
+
+/* app.feed <text>：dev 调试动作，把文本写进活动 tab 的会话。 */
+static void on_dev_feed(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    GtkWindow *win;
+    GtkWidget *page;
+    const char *text;
+    (void)a;
+    if (!param) return;
+    text = g_variant_get_string(param, NULL);
+    win = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (!HB_IS_WINDOW(win)) return;
+    page = hb_window_active_page(HB_WINDOW(win));
+    if (HB_IS_TERM_PAGE(page))
+        hb_term_page_feed_input(HB_TERM_PAGE(page), text);
+    else if (HB_IS_SSH_PAGE(page))
+        hb_ssh_page_feed_input(HB_SSH_PAGE(page), text);
+}
+
+/* app.open-host <host_id>：dev 调试动作，按主机 id 打开对应 tab。 */
+static void on_dev_open_host(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    GtkWindow *win;
+    const char *id;
+    (void)a;
+    if (!param) return;
+    id = g_variant_get_string(param, NULL);
+    win = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (HB_IS_WINDOW(win))
+        hb_host_action_connect(GTK_WIDGET(win), hb_store_default(), id);
+}
+#endif /* !NDEBUG */
+
 /* ------------------------------ 生命周期 ------------------------------ */
+
+/* app.show-tab <tab_id>：监控通知的默认动作 —— 呈现窗口并切到该
+ * tab；tab 已关则什么都不做（遍历所有窗口）。 */
+static void on_show_tab(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    GApplication *app = ud;
+    GList *ws, *l;
+    const char *id;
+    (void)a;
+    if (!param) return;
+    id = g_variant_get_string(param, NULL);
+    ws = gtk_application_get_windows(GTK_APPLICATION(app));
+    for (l = ws; l; l = l->next) {
+        if (HB_IS_WINDOW(l->data) &&
+            hb_window_has_tab(HB_WINDOW(l->data), id)) {
+            hb_window_switch_tab(HB_WINDOW(l->data), id);
+            gtk_window_present(GTK_WINDOW(l->data));
+            return;
+        }
+    }
+}
 
 static void hb_application_startup(GApplication *app)
 {
     GtkCssProvider *css;
+    GSimpleAction *sa;
 
     G_APPLICATION_CLASS(hb_application_parent_class)->startup(app);
 
     hb_store_default();          /* vault 打开 + 首次播种 */
     hb_notify_default();
+
+    sa = g_simple_action_new("show-tab", G_VARIANT_TYPE_STRING);
+    g_signal_connect(sa, "activate", G_CALLBACK(on_show_tab), app);
+    g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+    g_object_unref(sa);
+
+#ifndef NDEBUG
+    /* shot/feed/open-host 会经 org.gtk.Actions 导出到 session bus，
+     * 任何同 bus 进程都能驱动会话 —— 仅 debug build + 显式开关。 */
+    if (!g_strcmp0(g_getenv("HARBOR_DEV_ACTIONS"), "1")) {
+        sa = g_simple_action_new("shot", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_shot), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("feed", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_feed), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("open-host", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_open_host), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+    }
+#endif
 
     css = gtk_css_provider_new();
     gtk_css_provider_load_from_resource(css, "/dev/harbor/Harbor/style.css");

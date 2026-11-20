@@ -5,6 +5,7 @@
 #include "hb-notify.h"
 #include "hb-dialogs.h"
 #include "hb-window.h"
+#include "hb-watch-ui.h"
 
 #include <harbor/ssh.h>
 #include <harbor/keys.h>
@@ -69,12 +70,18 @@ struct _HbSshPage {
     GtkWidget  *tt_label;
     GtkWidget  *tt_icon;
     GtkWidget  *reconn_btn;
+    GtkWidget  *watch_btn;
     GtkWidget  *st_conn;
     GtkWidget  *st_sb;
+    GtkWidget  *st_watch;
     GtkWidget  *dead_lbl;
     GtkWidget  *strip;          /* 断线重连条 */
     GtkWidget  *strip_label;
     GtkWidget  *buf_hint;       /* "输入将在重连后发送" */
+
+    /* FR-13 完成监控（会话级状态，重连后重挂到新 session） */
+    gboolean    watch_on;
+    unsigned    watch_signals;
 
     /* 自动重连 */
     guint       backoff_src;
@@ -725,9 +732,97 @@ static void on_title(HbTerminal *t, const char *title, gpointer ud)
 static void on_notify(HbTerminal *t, const char *title, const char *body,
                       gpointer ud)
 {
-    (void)t; (void)ud;
-    if (title)
-        hb_notify_post("info", title, body ? body : "", NULL);
+    HbSshPage *p = ud;
+    (void)t;
+    /* 监控开着时 OSC 9/777 由 watch 的 TERMNOTIFY hit 路由，
+     * 不在这里重复投递 */
+    if (p->watch_on)
+        return;
+    if (title) {
+        /* notify_body=host：正文只带主机名，不回显 OSC 内容 */
+        hb_obj *o = NULL;
+        gboolean host_only = FALSE;
+        if (hb_vault_settings(hb_store_vault(p->store), &o) == HB_OK && o) {
+            host_only = !g_strcmp0(hb_obj_get_str(o, "notify_body"),
+                                   "host");
+            hb_obj_free(o);
+        }
+        if (host_only) {
+            char *tt = g_strdup_printf("终端通知 · %s", p->hname);
+            char *bb = g_strdup_printf("%s 上的任务有新通知", p->hname);
+            hb_notify_post("info", tt, bb, NULL);
+            g_free(tt); g_free(bb);
+        } else {
+            hb_notify_post("info", title, body ? body : "", NULL);
+        }
+    }
+}
+
+/* ------------------------------ 监控 ------------------------------ */
+
+static void watch_refresh_ui(HbSshPage *p)
+{
+    char *t;
+    GtkWidget *bx;
+
+    if (!p->watch_btn)
+        return;
+    bx = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_append(GTK_BOX(bx), hb_icon_new("eye", 13));
+    gtk_box_append(GTK_BOX(bx),
+        gtk_label_new(p->watch_on ? "监控 开" : "监控 关"));
+    gtk_button_set_child(GTK_BUTTON(p->watch_btn), bx);
+    if (p->watch_on) {
+        gtk_widget_add_css_class(p->watch_btn, "on");
+        t = hb_watch_signal_summary(p->watch_signals);
+    } else {
+        gtk_widget_remove_css_class(p->watch_btn, "on");
+        t = NULL;
+    }
+    if (p->st_watch)
+        gtk_label_set_label(GTK_LABEL(p->st_watch),
+                            t ? t : "监控: 关");
+    g_free(t);
+}
+
+static void watch_apply_session(HbSshPage *p)
+{
+    if (p->sess)
+        hb_watch_apply(p->sess, p->store, p->host_id,
+                       p->watch_on, p->watch_signals);
+}
+
+static void watch_set(gpointer ud, gboolean on, unsigned signals)
+{
+    HbSshPage *p = ud;
+    p->watch_on = on;
+    p->watch_signals = signals;
+    watch_refresh_ui(p);
+    watch_apply_session(p);
+}
+
+static hb_session *watch_get_sess(gpointer ud)
+{
+    HbSshPage *p = ud;
+    return p->sess;
+}
+
+static void on_watch_btn(GtkButton *b, gpointer ud)
+{
+    HbSshPage *p = ud;
+    HbWatchUiOps ops = {0};
+    (void)b;
+    ops.page = GTK_WIDGET(p);
+    ops.store = p->store;
+    ops.host_id = p->host_id;
+    ops.is_ssh = TRUE;
+    ops.on = p->watch_on;
+    ops.signals = p->watch_signals;
+    ops.apply = watch_set;
+    ops.apply_ud = p;
+    ops.session = watch_get_sess;
+    ops.session_ud = p;
+    hb_watch_ui_open(&ops);
 }
 
 /* ------------------------- 事件分发（ev_cb） ------------------------- */
@@ -1241,6 +1336,12 @@ static void on_session_ev(HbTerminal *t, const hb_sess_event *ev, gpointer ud)
         }
         break;
 
+    case HB_SESS_EV_WATCH:
+        if (ev->watch && p->tab_id)
+            hb_watch_route(GTK_WIDGET(p), p->tab_id, p->hname,
+                           ev->watch);
+        break;
+
     default:
         break;
     }
@@ -1437,6 +1538,7 @@ static void continue_connect(HbSshPage *p)
         return;
     }
     hb_terminal_set_session(HB_TERMINAL(p->term), p->sess);
+    watch_apply_session(p);       /* 监控状态随（重）连重挂 */
     set_status(p, "● 连接中…", "hb-term-warn");
 }
 
@@ -1728,6 +1830,11 @@ static GtkWidget *build_term_view(HbSshPage *p)
     mono = hb_mono_icon_new(">_");
     gtk_widget_set_visible(mono, FALSE);
     gtk_box_append(GTK_BOX(bar), mono);
+    p->watch_btn = gtk_button_new();
+    gtk_widget_add_css_class(p->watch_btn, "tbtn");
+    g_signal_connect(p->watch_btn, "clicked",
+                     G_CALLBACK(on_watch_btn), p);
+    gtk_box_append(GTK_BOX(bar), p->watch_btn);
     p->reconn_btn = gtk_button_new();
     gtk_widget_add_css_class(p->reconn_btn, "tbtn");
     {
@@ -1810,6 +1917,9 @@ static GtkWidget *build_term_view(HbSshPage *p)
         GtkWidget *sp = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
         gtk_widget_set_hexpand(sp, TRUE);
         gtk_box_append(GTK_BOX(st), sp);
+        p->st_watch = gtk_label_new("监控: 关");
+        gtk_widget_add_css_class(p->st_watch, "hb-term-muted");
+        gtk_box_append(GTK_BOX(st), p->st_watch);
         p->st_sb = gtk_label_new("");
         gtk_box_append(GTK_BOX(st), p->st_sb);
         gtk_box_append(GTK_BOX(box), st);
@@ -1928,6 +2038,22 @@ GtkWidget *hb_ssh_page_new(HbStore *st, const hb_obj *host)
 
     apply_settings(p);
 
+    /* 监控默认：SSH 默认开（settings.watch_default_ssh），
+     * 信号掩码取引擎默认（EOF|133|RULES|TERMNOTIFY） */
+    {
+        hb_obj *o = NULL;
+        hb_watch_cfg dc;
+        hb_watch_cfg_defaults(&dc);
+        p->watch_signals = dc.signals;
+        if (hb_vault_settings(hb_store_vault(st), &o) == HB_OK && o) {
+            p->watch_on = hb_obj_get_bool(o, "watch_default_ssh", true);
+            if (hb_obj_get_bool(o, "watch_idle", false))
+                p->watch_signals |= HB_WATCH_SIG_IDLE;
+            hb_obj_free(o);
+        }
+    }
+    watch_refresh_ui(p);
+
     hb_terminal_set_event_cb(HB_TERMINAL(p->term), on_session_ev, p);
     g_signal_connect(p->term, "title-changed",
                      G_CALLBACK(on_title), p);
@@ -1950,4 +2076,11 @@ void hb_ssh_page_attach_tab(HbSshPage *p, GtkWidget *win, const char *tab_id)
     g_free(p->tab_id);
     p->tab_id = g_strdup(tab_id);
     hb_window_set_tab_host(p->win, tab_id, p->host_id);
+}
+
+/* 供 dev 调试：像用户输入一样把文本写进会话 */
+void hb_ssh_page_feed_input(HbSshPage *p, const char *text)
+{
+    if (p->sess && text)
+        hb_session_write(p->sess, text, strlen(text));
 }

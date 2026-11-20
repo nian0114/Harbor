@@ -20,6 +20,8 @@ typedef struct HbTabRec {
     GtkWidget *close_btn;
     gboolean   closable;
     gboolean   is_term;
+    gboolean   watch_dot;   /* dot 是监控角标 → 切到此 tab 时自动清 */
+    guint      watch_token; /* clear_watch_dot 的时序令牌 */
 } HbTabRec;
 
 struct _HbWindow {
@@ -58,6 +60,10 @@ static void refresh_active(HbWindow *win)
         if (t == win->active) {
             gtk_widget_add_css_class(t->box, "active");
             gtk_stack_set_visible_child_name(GTK_STACK(win->stack), t->id);
+            if (t->watch_dot) {          /* 切到带监控角标的 tab → 已读 */
+                t->watch_dot = FALSE;
+                hb_window_set_tab_dot(win, t->id, NULL);
+            }
         } else {
             gtk_widget_remove_css_class(t->box, "active");
         }
@@ -150,13 +156,44 @@ void hb_window_close_host_tabs(HbWindow *win, const char *host_id)
 void hb_window_set_tab_dot(HbWindow *win, const char *id, const char *dot)
 {
     HbTabRec *t = find_tab(win, id);
-    static const char *cls[] = { "ok", "err", "share" };
+    static const char *cls[] = { "ok", "err", "share", "pending" };
     int i;
     if (!t) return;
-    for (i = 0; i < 3; i++)
+    for (i = 0; i < 4; i++)
         gtk_widget_remove_css_class(t->dot, cls[i]);
     gtk_widget_set_visible(t->dot, dot != NULL);
     if (dot) gtk_widget_add_css_class(t->dot, dot);
+}
+
+guint hb_window_set_watch_dot(HbWindow *win, const char *id,
+                              const char *dot)
+{
+    static guint seq;
+    HbTabRec *t = find_tab(win, id);
+    if (!t) return 0;
+    hb_window_set_tab_dot(win, id, dot);
+    t->watch_dot = dot != NULL;
+    t->watch_token = ++seq;
+    return t->watch_token;
+}
+
+void hb_window_clear_watch_dot(HbWindow *win, const char *id, guint token)
+{
+    HbTabRec *t = find_tab(win, id);
+    if (t && t->watch_dot && t->watch_token == token) {
+        t->watch_dot = FALSE;
+        hb_window_set_tab_dot(win, id, NULL);
+    }
+}
+
+const char *hb_window_active_tab_id(HbWindow *win)
+{
+    return win->active ? win->active->id : NULL;
+}
+
+GtkWidget *hb_window_active_page(HbWindow *win)
+{
+    return win->active ? win->active->page : NULL;
 }
 
 void hb_window_set_tab_title(HbWindow *win, const char *id, const char *title)
@@ -482,6 +519,7 @@ void hb_window_open_local(HbWindow *win, GtkWidget **page_out)
     page = hb_term_page_new_local(hb_store_default());
     g_snprintf(id, sizeof id, "term-local-%d", ++seq);
     hb_window_add_tab(win, id, "Local", "terminal", page, TRUE, TRUE);
+    hb_term_page_attach_tab(HB_TERM_PAGE(page), GTK_WIDGET(win), id);
     if (page_out)
         *page_out = page;
 }

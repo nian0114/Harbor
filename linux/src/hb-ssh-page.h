@@ -17,6 +17,9 @@ GtkWidget *hb_ssh_page_new(HbStore *st, const hb_obj *host);
 /* add_tab 之后调用：关联 tab id（更新标题/图标/dot、关 tab 用） */
 void hb_ssh_page_attach_tab(HbSshPage *p, GtkWidget *win, const char *tab_id);
 
+/* 供 dev 调试：像用户输入一样把文本写进会话 */
+void hb_ssh_page_feed_input(HbSshPage *p, const char *text);
+
 /* signals: "edit-host"(gchar *host_id) — 目前无人连接（主机 CRUD 单元预留） */
 
 G_END_DECLS

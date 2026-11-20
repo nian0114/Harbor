@@ -68,6 +68,7 @@ window { background-color: @hb_content; }
 .hb-tab-dot { border-radius: 50%; min-width: 7px; min-height: 7px; margin-right: 6px; }
 .hb-tab-dot.ok    { background-color: #2ecc71; }
 .hb-tab-dot.err   { background-color: #ff5f57; }
+.hb-tab-dot.pending { background-color: #f5a623; }
 .hb-tab-dot.share { background-color: #4aa3ff; animation: hb_pulse 1.6s infinite; }
 @keyframes hb_pulse { 50% { opacity: .45; } }
 
