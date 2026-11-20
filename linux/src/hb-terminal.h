@@ -52,6 +52,32 @@ typedef void (*hb_terminal_event_cb)(HbTerminal *t,
 void hb_terminal_set_event_cb(HbTerminal *t, hb_terminal_event_cb cb,
                               gpointer ud);
 
+/* -------- 输入镜像（Workspace Broadcast） --------
+ * 每次终端真实把输入写进自己的 session 之后回调一次 —— 镜像的是输入
+ * 事件而不是已编码字节，各 pane 各自按自己的 vt 模式编码（应用光标键、
+ * bracketed paste）。app 快捷键、复制、find-bar 输入、死 pane 不会触发。 */
+typedef enum {
+    HB_MIRROR_KEY,      /* key + mods */
+    HB_MIRROR_UNICHAR,  /* unichar + mods */
+    HB_MIRROR_PASTE,    /* text（utf8，len 有效） */
+    HB_MIRROR_RAW       /* text（字节，len 有效）；IME commit 等 */
+} HbMirrorKind;
+
+typedef struct {
+    HbMirrorKind kind;
+    hb_key       key;
+    int          mods;
+    uint32_t     unichar;
+    const char  *text;
+    size_t       len;
+} hb_terminal_mirror_event;
+
+typedef void (*hb_terminal_mirror_cb)(HbTerminal *t,
+                                      const hb_terminal_mirror_event *ev,
+                                      gpointer ud);
+void hb_terminal_set_input_mirror(HbTerminal *t, hb_terminal_mirror_cb cb,
+                                  gpointer ud);
+
 /* signals:
  *   "title-changed" (gchar*)
  *   "exited"        (gint code)

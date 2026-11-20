@@ -7,6 +7,7 @@
 #include "hb-dialogs.h"
 #include "hb-window.h"
 #include "hb-watch-ui.h"
+#include "hb-session-page.h"
 
 #include <harbor/ssh.h>
 #include <harbor/keys.h>
@@ -43,6 +44,8 @@ struct _HbSshPage {
     char       *huser;
     int         hport;
     char       *os_key;         /* tab 头像键 */
+    char       *disp_title;     /* pane-head："<hname> · ssh, <huser>" */
+    gboolean    compact;        /* workspace 托管：藏工具栏，状态条外借 */
 
     /* 会话 */
     hb_session *sess;
@@ -68,6 +71,8 @@ struct _HbSshPage {
     GtkWidget  *term_view;
     GtkWidget  *term;
     GtkWidget  *overlay;
+    GtkWidget  *toolbar;
+    GtkWidget  *status_bar;
     GtkWidget  *tt_label;
     GtkWidget  *tt_icon;
     GtkWidget  *reconn_btn;
@@ -124,10 +129,14 @@ struct _HbSshPage {
     int         sb_lines;
 };
 
-G_DEFINE_TYPE(HbSshPage, hb_ssh_page, GTK_TYPE_BOX)
+static void hb_ssh_page_iface_init(HbSessionPageInterface *iface);
+G_DEFINE_TYPE_WITH_CODE(HbSshPage, hb_ssh_page, GTK_TYPE_BOX,
+    G_IMPLEMENT_INTERFACE(HB_TYPE_SESSION_PAGE, hb_ssh_page_iface_init))
 
 enum { SIG_EDIT_HOST, N_SIGS };
 static guint sigs[N_SIGS];
+
+static void on_split_pick(GtkButton *b, gpointer ud);
 
 extern char *hb_opt_theme;      /* main.c dev 选项 */
 
@@ -146,12 +155,16 @@ static HbWindow *page_win(HbSshPage *p)
 static void tab_title(HbSshPage *p, const char *t)
 {
     HbWindow *w = page_win(p);
-    if (w && p->tab_id) hb_window_set_tab_title(w, p->tab_id, t);
+    /* workspace pane：tab 标题是 "Workspace"，不改 */
+    if (w && p->tab_id && !p->compact)
+        hb_window_set_tab_title(w, p->tab_id, t);
 }
 static void tab_icon(HbSshPage *p, const char *ic)
 {
     HbWindow *w = page_win(p);
-    if (w && p->tab_id) hb_window_set_tab_icon(w, p->tab_id, ic);
+    if (w && p->tab_id && !p->compact)
+        hb_window_set_tab_icon(w, p->tab_id, ic);
+    hb_session_page_meta_changed(HB_SESSION_PAGE(p));
 }
 static void tab_dot(HbSshPage *p, const char *dot)
 {
@@ -180,6 +193,7 @@ static void set_status(HbSshPage *p, const char *txt, const char *cls)
     gtk_widget_remove_css_class(p->st_conn, "hb-term-ended");
     gtk_widget_remove_css_class(p->st_conn, "hb-term-warn");
     if (cls) gtk_widget_add_css_class(p->st_conn, cls);
+    hb_session_page_meta_changed(HB_SESSION_PAGE(p));
 }
 
 /* ------------------------- 连接进度节点 ------------------------- */
@@ -728,7 +742,10 @@ static void on_title(HbTerminal *t, const char *title, gpointer ud)
     else
         f = g_strdup_printf("ssh %s@%s", p->huser, p->hname);
     gtk_label_set_label(GTK_LABEL(p->tt_label), f);
+    g_free(p->disp_title);
+    p->disp_title = g_strdup(f);
     g_free(f);
+    hb_session_page_meta_changed(HB_SESSION_PAGE(p));
 }
 
 static void on_notify(HbTerminal *t, const char *title, const char *body,
@@ -1869,6 +1886,36 @@ static GtkWidget *build_term_view(HbSshPage *p)
                      G_CALLBACK(on_reconnect_btn), p);
     gtk_widget_set_visible(p->reconn_btn, FALSE);
     gtk_box_append(GTK_BOX(bar), p->reconn_btn);
+
+    /* 分屏（workspace） */
+    {
+        GtkWidget *mb = gtk_menu_button_new();
+        GtkWidget *pop = gtk_popover_new();
+        GtkWidget *vb = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        GtkWidget *b;
+        gtk_widget_add_css_class(mb, "tbtn");
+        gtk_widget_set_tooltip_text(mb, "分屏");
+        {
+            GtkWidget *r = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+            gtk_box_append(GTK_BOX(r), hb_icon_new("cols", 13));
+            gtk_box_append(GTK_BOX(r), gtk_label_new("分屏"));
+            gtk_menu_button_set_child(GTK_MENU_BUTTON(mb), r);
+        }
+        b = gtk_button_new_with_label("向右分屏  Ctrl+Shift+D");
+        gtk_widget_add_css_class(b, "hb-pop-btn");
+        g_signal_connect(b, "clicked", G_CALLBACK(on_split_pick),
+                         GINT_TO_POINTER(GTK_ORIENTATION_HORIZONTAL));
+        gtk_box_append(GTK_BOX(vb), b);
+        b = gtk_button_new_with_label("向下分屏  Ctrl+Shift+E");
+        gtk_widget_add_css_class(b, "hb-pop-btn");
+        g_signal_connect(b, "clicked", G_CALLBACK(on_split_pick),
+                         GINT_TO_POINTER(GTK_ORIENTATION_VERTICAL));
+        gtk_box_append(GTK_BOX(vb), b);
+        gtk_popover_set_child(GTK_POPOVER(pop), vb);
+        gtk_menu_button_set_popover(GTK_MENU_BUTTON(mb), pop);
+        gtk_box_append(GTK_BOX(bar), mb);
+    }
+    p->toolbar = bar;
     gtk_box_append(GTK_BOX(box), bar);
 
     /* scrollback 查找条（FR-20） */
@@ -1950,6 +1997,8 @@ static GtkWidget *build_term_view(HbSshPage *p)
         gtk_box_append(GTK_BOX(st), p->st_watch);
         p->st_sb = gtk_label_new("");
         gtk_box_append(GTK_BOX(st), p->st_sb);
+        p->status_bar = st;
+        g_object_ref(st);   /* unparent 借给 workspace footer 后仍存活 */
         gtk_box_append(GTK_BOX(box), st);
     }
     return box;
@@ -1992,6 +2041,8 @@ static void hb_ssh_page_finalize(GObject *o)
     g_free(p->haddr);
     g_free(p->huser);
     g_free(p->os_key);
+    g_free(p->disp_title);
+    g_clear_object(&p->status_bar);
     g_free(p->theme_id);
     wipe_free(p->pend_secret);
     g_free(p->pend_key_id);
@@ -2056,6 +2107,9 @@ GtkWidget *hb_ssh_page_new(HbStore *st, const hb_obj *host)
     if (p->hport <= 0) p->hport = 22;
     os = hb_obj_get_str(host, "os");
     p->os_key = g_strdup(os && *os && strcmp(os,"auto") ? os : "generic");
+    p->disp_title = g_strdup_printf("%s · ssh, %s",
+                                    p->hname ? p->hname : "host",
+                                    p->huser ? p->huser : "?");
 
     /* 终端先建（连接视图也用它消费事件） */
     p->term_view = build_term_view(p);
@@ -2103,7 +2157,9 @@ void hb_ssh_page_attach_tab(HbSshPage *p, GtkWidget *win, const char *tab_id)
     p->win = HB_WINDOW(win);
     g_free(p->tab_id);
     p->tab_id = g_strdup(tab_id);
-    hb_window_set_tab_host(p->win, tab_id, p->host_id);
+    /* workspace pane 不占整个 tab 的 host 关联（多 pane 多 host） */
+    if (!p->compact)
+        hb_window_set_tab_host(p->win, tab_id, p->host_id);
 }
 
 /* 供 dev 调试：像用户输入一样把文本写进会话 */
@@ -2123,4 +2179,118 @@ void hb_ssh_page_find_open(HbSshPage *p)
     /* 连接页/错误卡时没有终端 —— 仅 term 视图可用 */
     if (p->find_bar)
         hb_find_bar_open(HB_FIND_BAR(p->find_bar));
+}
+
+/* 工具栏"分屏"菜单：把当前 tab 包装成 workspace 并分屏 */
+static void on_split_pick(GtkButton *b, gpointer ud)
+{
+    GtkOrientation o = GPOINTER_TO_INT(ud);
+    GtkWidget *pop = gtk_widget_get_ancestor(GTK_WIDGET(b),
+                                             GTK_TYPE_POPOVER);
+    GtkRoot *r = gtk_widget_get_root(GTK_WIDGET(b));
+    if (pop) gtk_popover_popdown(GTK_POPOVER(pop));
+    if (HB_IS_WINDOW(r))
+        hb_window_split_active(HB_WINDOW(r), o);
+}
+
+/* -------------------- HbSessionPage 接口 -------------------- */
+
+static HbTerminal *sp_terminal(HbSessionPage *sp)
+{
+    return HB_TERMINAL(HB_SSH_PAGE(sp)->term);
+}
+
+static const char *sp_title(HbSessionPage *sp)
+{
+    HbSshPage *p = HB_SSH_PAGE(sp);
+    return p->disp_title ? p->disp_title : (p->hname ? p->hname : "ssh");
+}
+
+static const char *sp_icon(HbSessionPage *sp)
+{
+    return os_avatar(HB_SSH_PAGE(sp)->os_key);
+}
+
+/* compact：藏页内工具栏（pane-head 接管），状态条从 term_view 摘除
+ * 借给 workspace footer；恢复时重新 append 回 term_view 尾部 */
+static void sp_set_compact(HbSessionPage *sp, gboolean compact)
+{
+    HbSshPage *p = HB_SSH_PAGE(sp);
+    if (p->compact == compact) return;
+    p->compact = compact;
+    gtk_widget_set_visible(p->toolbar, !compact);
+    if (compact) {
+        if (gtk_widget_get_parent(p->status_bar) == p->term_view)
+            gtk_box_remove(GTK_BOX(p->term_view), p->status_bar);
+    } else {
+        if (!gtk_widget_get_parent(p->status_bar))
+            gtk_box_append(GTK_BOX(p->term_view), p->status_bar);
+    }
+}
+
+static GtkWidget *sp_status_widget(HbSessionPage *sp)
+{
+    return HB_SSH_PAGE(sp)->status_bar;
+}
+
+static void sp_open_find(HbSessionPage *sp)
+{
+    hb_ssh_page_find_open(HB_SSH_PAGE(sp));
+}
+
+static void sp_open_watch(HbSessionPage *sp)
+{
+    on_watch_btn(NULL, HB_SSH_PAGE(sp));
+}
+
+static gboolean sp_is_dead(HbSessionPage *sp)
+{
+    return HB_SSH_PAGE(sp)->dead;
+}
+
+static void sp_reconnect(HbSessionPage *sp)
+{
+    HbSshPage *p = HB_SSH_PAGE(sp);
+    if (p->backoff_src) { g_source_remove(p->backoff_src); p->backoff_src = 0; }
+    reconnect_now(p);
+}
+
+static GtkWidget *sp_clone(HbSessionPage *sp)
+{
+    HbSshPage *p = HB_SSH_PAGE(sp);
+    hb_obj *h = NULL;
+    GtkWidget *w = NULL;
+    if (!p->host_id ||
+        hb_vault_get(hb_store_vault(p->store), p->host_id, &h) != HB_OK || !h)
+        return NULL;
+    w = hb_ssh_page_new(p->store, h);
+    hb_obj_free(h);
+    return w;
+}
+
+static const char *sp_host_id(HbSessionPage *sp)
+{
+    return HB_SSH_PAGE(sp)->host_id;
+}
+
+static void sp_attach_tab(HbSessionPage *sp, GtkWidget *win,
+                          const char *tab_id)
+{
+    hb_ssh_page_attach_tab(HB_SSH_PAGE(sp), win, tab_id);
+}
+
+static void hb_ssh_page_iface_init(HbSessionPageInterface *iface)
+{
+    iface->terminal       = sp_terminal;
+    iface->title          = sp_title;
+    iface->icon           = sp_icon;
+    iface->set_compact    = sp_set_compact;
+    iface->status_widget  = sp_status_widget;
+    iface->open_find      = sp_open_find;
+    iface->open_watch     = sp_open_watch;
+    iface->is_dead        = sp_is_dead;
+    iface->reconnect      = sp_reconnect;
+    iface->clone          = sp_clone;
+    iface->host_id        = sp_host_id;
+    iface->attach_tab     = sp_attach_tab;
 }

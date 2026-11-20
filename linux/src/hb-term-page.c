@@ -6,6 +6,7 @@
 #include "hb-notify.h"
 #include "hb-watch-ui.h"
 #include "hb-window.h"
+#include "hb-session-page.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -24,10 +25,14 @@ struct _HbTermPage {
     GtkWidget   *st_watch;
     GtkWidget   *watch_btn;
     GtkWidget   *find_bar;
+    GtkWidget   *toolbar;
+    GtkWidget   *status_bar;
     gulong       changed_handler;
     char        *shell_base;
+    char        *disp_title;    /* pane-head/title()："Local · bash[·远端标题]" */
     int          sb_lines;
     gboolean     dead;
+    gboolean     compact;       /* workspace 托管：藏工具栏，状态条外借 */
     char        *theme_id;      /* dev --theme 覆盖或 settings.theme */
     /* FR-13 完成监控（会话级状态，重连/重启后重挂） */
     gboolean     watch_on;
@@ -36,7 +41,9 @@ struct _HbTermPage {
     HbWindow    *win;
 };
 
-G_DEFINE_TYPE(HbTermPage, hb_term_page, GTK_TYPE_BOX)
+static void hb_term_page_iface_init(HbSessionPageInterface *iface);
+G_DEFINE_TYPE_WITH_CODE(HbTermPage, hb_term_page, GTK_TYPE_BOX,
+    G_IMPLEMENT_INTERFACE(HB_TYPE_SESSION_PAGE, hb_term_page_iface_init))
 
 extern char *hb_opt_theme;      /* main.c dev 选项 */
 
@@ -71,7 +78,10 @@ static void on_title(HbTerminal *t, const char *title, gpointer ud)
     else
         full = g_strdup_printf("Local · %s", p->shell_base);
     gtk_label_set_label(GTK_LABEL(p->tt_label), full);
+    g_free(p->disp_title);
+    p->disp_title = g_strdup(full);
     g_free(full);
+    hb_session_page_meta_changed(HB_SESSION_PAGE(p));
 }
 
 static void on_exited(HbTerminal *t, int code, gpointer ud)
@@ -81,6 +91,7 @@ static void on_exited(HbTerminal *t, int code, gpointer ud)
     p->dead = TRUE;
     set_status(p, FALSE);
     gtk_widget_set_visible(p->dead_lbl, TRUE);
+    hb_session_page_meta_changed(HB_SESSION_PAGE(p));
 }
 
 static void on_notify(HbTerminal *t, const char *title, const char *body,
@@ -165,6 +176,18 @@ static void on_find_btn(GtkButton *b, gpointer ud)
     hb_term_page_find_open(p);
 }
 
+/* 工具栏"分屏"菜单：把当前 tab 包装成 workspace 并分屏 */
+static void on_split_pick(GtkButton *b, gpointer ud)
+{
+    GtkOrientation o = GPOINTER_TO_INT(ud);
+    GtkWidget *pop = gtk_widget_get_ancestor(GTK_WIDGET(b),
+                                             GTK_TYPE_POPOVER);
+    GtkRoot *r = gtk_widget_get_root(GTK_WIDGET(b));
+    if (pop) gtk_popover_popdown(GTK_POPOVER(pop));
+    if (HB_IS_WINDOW(r))
+        hb_window_split_active(HB_WINDOW(r), o);
+}
+
 static void on_watch_btn(GtkButton *b, gpointer ud)
 {
     HbTermPage *p = ud;
@@ -192,24 +215,17 @@ static void on_session_ev(HbTerminal *t, const hb_sess_event *ev,
         hb_watch_route(GTK_WIDGET(p), p->tab_id, "Local", ev->watch);
 }
 
-/* dead 状态下捕获 Enter → 重启本地会话（先于终端自己的 key 处理） */
-static gboolean on_dead_key(GtkEventControllerKey *kc, guint keyval,
-                            guint code, GdkModifierType state, gpointer ud)
+/* 重启本地会话（保留 scrollback：旧会话已死 → 偷 vt 复用） */
+static gboolean restart_local(HbTermPage *p)
 {
-    HbTermPage *p = ud;
     hb_session *ns;
     hb_vt *reuse = NULL;
-    (void)kc; (void)code;
-    if (!p->dead || keyval != GDK_KEY_Return ||
-        (state & (GDK_CONTROL_MASK | GDK_ALT_MASK)))
-        return FALSE;
-    /* 重启保留 scrollback：旧会话已死 → 偷 vt 复用 */
     if (p->sess && !hb_session_alive(p->sess))
         reuse = hb_session_steal_vt(p->sess);
     ns = spawn_local(p, reuse);
     if (!ns) {
         if (reuse) hb_vt_free(reuse);
-        return TRUE;
+        return FALSE;
     }
     if (p->sess) {
         hb_session_close(p->sess);
@@ -221,6 +237,20 @@ static gboolean on_dead_key(GtkEventControllerKey *kc, guint keyval,
     watch_apply_session(p);       /* 监控状态随重启重挂 */
     gtk_widget_set_visible(p->dead_lbl, FALSE);
     set_status(p, TRUE);
+    hb_session_page_meta_changed(HB_SESSION_PAGE(p));
+    return TRUE;
+}
+
+/* dead 状态下捕获 Enter → 重启本地会话（先于终端自己的 key 处理） */
+static gboolean on_dead_key(GtkEventControllerKey *kc, guint keyval,
+                            guint code, GdkModifierType state, gpointer ud)
+{
+    HbTermPage *p = ud;
+    (void)kc; (void)code;
+    if (!p->dead || keyval != GDK_KEY_Return ||
+        (state & (GDK_CONTROL_MASK | GDK_ALT_MASK)))
+        return FALSE;
+    restart_local(p);
     return TRUE;
 }
 
@@ -327,6 +357,36 @@ static GtkWidget *build_toolbar(HbTermPage *p)
     g_signal_connect(p->watch_btn, "clicked",
                      G_CALLBACK(on_watch_btn), p);
     gtk_box_append(GTK_BOX(bar), p->watch_btn);
+
+    /* 分屏（workspace） */
+    {
+        GtkWidget *mb = gtk_menu_button_new();
+        GtkWidget *pop = gtk_popover_new();
+        GtkWidget *vb = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        GtkWidget *b;
+
+        gtk_widget_add_css_class(mb, "tbtn");
+        gtk_widget_set_tooltip_text(mb, "分屏");
+        {
+            GtkWidget *r = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+            gtk_box_append(GTK_BOX(r), hb_icon_new("cols", 13));
+            gtk_box_append(GTK_BOX(r), gtk_label_new("分屏"));
+            gtk_menu_button_set_child(GTK_MENU_BUTTON(mb), r);
+        }
+        b = gtk_button_new_with_label("向右分屏  Ctrl+Shift+D");
+        gtk_widget_add_css_class(b, "hb-pop-btn");
+        g_signal_connect(b, "clicked", G_CALLBACK(on_split_pick),
+                         GINT_TO_POINTER(GTK_ORIENTATION_HORIZONTAL));
+        gtk_box_append(GTK_BOX(vb), b);
+        b = gtk_button_new_with_label("向下分屏  Ctrl+Shift+E");
+        gtk_widget_add_css_class(b, "hb-pop-btn");
+        g_signal_connect(b, "clicked", G_CALLBACK(on_split_pick),
+                         GINT_TO_POINTER(GTK_ORIENTATION_VERTICAL));
+        gtk_box_append(GTK_BOX(vb), b);
+        gtk_popover_set_child(GTK_POPOVER(pop), vb);
+        gtk_menu_button_set_popover(GTK_MENU_BUTTON(mb), pop);
+        gtk_box_append(GTK_BOX(bar), mb);
+    }
     return bar;
 }
 
@@ -377,7 +437,9 @@ static void hb_term_page_dispose(GObject *o)
 static void hb_term_page_finalize(GObject *o)
 {
     HbTermPage *p = HB_TERM_PAGE(o);
+    g_clear_object(&p->status_bar);
     g_free(p->shell_base);
+    g_free(p->disp_title);
     g_free(p->theme_id);
     g_free(p->tab_id);
     G_OBJECT_CLASS(hb_term_page_parent_class)->finalize(o);
@@ -401,9 +463,11 @@ static void hb_term_page_init(HbTermPage *p)
 
     p->shell_base = g_path_get_basename(
         g_getenv("SHELL") ? g_getenv("SHELL") : "/bin/sh");
+    p->disp_title = g_strdup_printf("Local · %s", p->shell_base);
     p->sb_lines = 10000;
 
-    gtk_box_append(GTK_BOX(p), build_toolbar(p));
+    p->toolbar = build_toolbar(p);
+    gtk_box_append(GTK_BOX(p), p->toolbar);
 
     p->find_bar = hb_find_bar_new();
     gtk_box_append(GTK_BOX(p), p->find_bar);
@@ -432,7 +496,9 @@ static void hb_term_page_init(HbTermPage *p)
     gtk_overlay_add_overlay(GTK_OVERLAY(p->overlay), p->dead_lbl);
 
     gtk_box_append(GTK_BOX(p), p->overlay);
-    gtk_box_append(GTK_BOX(p), build_status(p));
+    p->status_bar = build_status(p);
+    g_object_ref(p->status_bar);   /* unparent 借给 workspace footer 后仍存活 */
+    gtk_box_append(GTK_BOX(p), p->status_bar);
 
     hb_find_bar_bind(HB_FIND_BAR(p->find_bar), HB_TERMINAL(p->term));
 
@@ -509,4 +575,98 @@ void hb_term_page_feed_input(HbTermPage *p, const char *text)
 hb_session *hb_term_page_session(HbTermPage *p)
 {
     return p->sess;
+}
+
+/* -------------------- HbSessionPage 接口 -------------------- */
+
+static HbTerminal *sp_terminal(HbSessionPage *sp)
+{
+    return HB_TERMINAL(HB_TERM_PAGE(sp)->term);
+}
+
+static const char *sp_title(HbSessionPage *sp)
+{
+    HbTermPage *p = HB_TERM_PAGE(sp);
+    return p->disp_title ? p->disp_title : "Local";
+}
+
+static const char *sp_icon(HbSessionPage *sp)
+{
+    (void)sp;
+    return "terminal";
+}
+
+/* compact：藏页内工具栏（pane-head 接管），状态条从页里摘除借给
+ * workspace footer；恢复时重新 append 回页尾 */
+static void sp_set_compact(HbSessionPage *sp, gboolean compact)
+{
+    HbTermPage *p = HB_TERM_PAGE(sp);
+    if (p->compact == compact) return;
+    p->compact = compact;
+    gtk_widget_set_visible(p->toolbar, !compact);
+    if (compact) {
+        if (gtk_widget_get_parent(p->status_bar) == GTK_WIDGET(p))
+            gtk_box_remove(GTK_BOX(p), p->status_bar);
+    } else {
+        if (!gtk_widget_get_parent(p->status_bar))
+            gtk_box_append(GTK_BOX(p), p->status_bar);
+    }
+}
+
+static GtkWidget *sp_status_widget(HbSessionPage *sp)
+{
+    return HB_TERM_PAGE(sp)->status_bar;
+}
+
+static void sp_open_find(HbSessionPage *sp)
+{
+    hb_term_page_find_open(HB_TERM_PAGE(sp));
+}
+
+static void sp_open_watch(HbSessionPage *sp)
+{
+    on_watch_btn(NULL, HB_TERM_PAGE(sp));
+}
+
+static gboolean sp_is_dead(HbSessionPage *sp)
+{
+    return HB_TERM_PAGE(sp)->dead;
+}
+
+static void sp_reconnect(HbSessionPage *sp)
+{
+    restart_local(HB_TERM_PAGE(sp));
+}
+
+static GtkWidget *sp_clone(HbSessionPage *sp)
+{
+    return hb_term_page_new_local(HB_TERM_PAGE(sp)->store);
+}
+
+static const char *sp_host_id(HbSessionPage *sp)
+{
+    (void)sp;
+    return NULL;
+}
+
+static void sp_attach_tab(HbSessionPage *sp, GtkWidget *win,
+                          const char *tab_id)
+{
+    hb_term_page_attach_tab(HB_TERM_PAGE(sp), win, tab_id);
+}
+
+static void hb_term_page_iface_init(HbSessionPageInterface *iface)
+{
+    iface->terminal       = sp_terminal;
+    iface->title          = sp_title;
+    iface->icon           = sp_icon;
+    iface->set_compact    = sp_set_compact;
+    iface->status_widget  = sp_status_widget;
+    iface->open_find      = sp_open_find;
+    iface->open_watch     = sp_open_watch;
+    iface->is_dead        = sp_is_dead;
+    iface->reconnect      = sp_reconnect;
+    iface->clone          = sp_clone;
+    iface->host_id        = sp_host_id;
+    iface->attach_tab     = sp_attach_tab;
 }

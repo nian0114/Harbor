@@ -126,7 +126,8 @@ static void on_dev_feed(GSimpleAction *a, GVariant *param, gpointer ud)
     text = g_variant_get_string(param, NULL);
     win = gtk_application_get_active_window(GTK_APPLICATION(ud));
     if (!HB_IS_WINDOW(win)) return;
-    page = hb_window_active_page(HB_WINDOW(win));
+    /* workspace tab → 焦点 pane */
+    page = hb_window_active_session_page(HB_WINDOW(win));
     if (HB_IS_TERM_PAGE(page))
         hb_term_page_feed_input(HB_TERM_PAGE(page), text);
     else if (HB_IS_SSH_PAGE(page))

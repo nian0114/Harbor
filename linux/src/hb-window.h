@@ -66,6 +66,28 @@ void hb_window_overlay_add(HbWindow *win, GtkWidget *w);
  * 返回 HbTermPage widget（供 dev --open-local=CMD 注入输入）。 */
 void       hb_window_open_local(HbWindow *win, GtkWidget **page_out);
 
+/* ------------------------- Workspace 分屏 ------------------------- */
+
+/* 当前 tab 是终端页 → 包成 workspace 并分屏（H=右，V=下）；
+ * 已是 workspace → 焦点 pane clone 后分屏。 */
+void       hb_window_split_active(HbWindow *win, GtkOrientation o);
+/* Ctrl+Shift+W：workspace 且 >1 pane → 关焦点 pane（剩 1 个时自动
+ * 塌回普通 tab）；否则关整个 tab。 */
+void       hb_window_close_pane_or_tab(HbWindow *win);
+/* ws 内部关 pane 后回调：剩 1 → 塌回普通 tab；0 → 关 tab */
+void       hb_window_workspace_panes_changed(HbWindow *win,
+                                             GtkWidget *ws);
+/* 活动 tab 的 session 页：workspace → 焦点 pane；否则原样。供
+ * palette/snippet/feed/查找 解析"当前终端"。 */
+GtkWidget *hb_window_active_session_page(HbWindow *win);
+/* Alt+方向：workspace 内几何移动焦点；非 ws no-op */
+void       hb_window_move_pane_focus(HbWindow *win, int dir);
+/* Ctrl+Shift+M：ws 的焦点模式切换；非 ws no-op */
+void       hb_window_toggle_focus_mode(HbWindow *win);
+/* 从目标选择对话框创建：pages 是一列 HbSessionPage 页（borrowed，
+ * ws 接管），并排一行。 */
+void       hb_window_open_workspace(HbWindow *win, GList *pages);
+
 /* signals: "tab-closed"(gchar *id) */
 
 G_END_DECLS

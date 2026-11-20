@@ -67,7 +67,24 @@ struct _HbTerminal {
 
     hb_terminal_event_cb ev_cb;  /* 转发终端不消费的 session 事件 */
     gpointer     ev_ud;
+
+    hb_terminal_mirror_cb mirror_cb;  /* Workspace Broadcast 输入镜像 */
+    gpointer     mirror_ud;
 };
+
+/* 输入写进本 session 之后回调镜像（workspace broadcast 转发给其他 pane） */
+static void mirror_emit(HbTerminal *t, const hb_terminal_mirror_event *ev)
+{
+    if (t->mirror_cb)
+        t->mirror_cb(t, ev, t->mirror_ud);
+}
+
+void hb_terminal_set_input_mirror(HbTerminal *t, hb_terminal_mirror_cb cb,
+                                  gpointer ud)
+{
+    t->mirror_cb = cb;
+    t->mirror_ud = ud;
+}
 
 G_DEFINE_TYPE(HbTerminal, hb_terminal, GTK_TYPE_WIDGET)
 
@@ -601,8 +618,12 @@ static void on_paste_text(GObject *src, GAsyncResult *res, gpointer ud)
 {
     HbTerminal *t = ud;
     char *txt = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(src), res, NULL);
-    if (txt && t->sess && hb_session_alive(t->sess))
+    if (txt && t->sess && hb_session_alive(t->sess)) {
+        hb_terminal_mirror_event me = { HB_MIRROR_PASTE, 0, 0, 0,
+                                        txt, strlen(txt) };
         hb_session_paste(t->sess, txt);
+        mirror_emit(t, &me);
+    }
     g_free(txt);
 }
 
@@ -753,18 +774,26 @@ static gboolean on_key_pressed(GtkEventControllerKey *kc, guint keyval,
     k = map_keyval(keyval);
     if (k != HB_KEY_NONE) {
         int mods = ev_mods(state);
+        hb_terminal_mirror_event me;
         if (keyval == GDK_KEY_ISO_Left_Tab)
             mods |= HB_MOD_SHIFT;
         send_input_scroll_bottom(t);
         hb_session_key(t->sess, k, mods);
+        me.kind = HB_MIRROR_KEY; me.key = k; me.mods = mods;
+        me.unichar = 0; me.text = NULL; me.len = 0;
+        mirror_emit(t, &me);
         return TRUE;
     }
     /* Ctrl/Alt + 可打印字符（Ctrl+C、Alt+f…） */
     if (ctrl || (state & GDK_ALT_MASK)) {
         guint32 uc = gdk_keyval_to_unicode(keyval);
         if (uc) {
+            int mods = ev_mods(state);
+            hb_terminal_mirror_event me = { HB_MIRROR_UNICHAR, 0,
+                                            mods, uc, NULL, 0 };
             send_input_scroll_bottom(t);
-            hb_session_unichar(t->sess, uc, ev_mods(state));
+            hb_session_unichar(t->sess, uc, mods);
+            mirror_emit(t, &me);
             return TRUE;
         }
         return FALSE;
@@ -773,8 +802,12 @@ static gboolean on_key_pressed(GtkEventControllerKey *kc, guint keyval,
     {
         guint32 uc = gdk_keyval_to_unicode(keyval);
         if (uc && uc >= 0x20 && uc != 0x7f) {
+            int mods = ev_mods(state);
+            hb_terminal_mirror_event me = { HB_MIRROR_UNICHAR, 0,
+                                            mods, uc, NULL, 0 };
             send_input_scroll_bottom(t);
-            hb_session_unichar(t->sess, uc, ev_mods(state));
+            hb_session_unichar(t->sess, uc, mods);
+            mirror_emit(t, &me);
             return TRUE;
         }
     }
@@ -786,8 +819,11 @@ static void on_im_commit(GtkIMContext *im, const gchar *str, gpointer ud)
     HbTerminal *t = ud;
     (void)im;
     if (t->sess && hb_session_alive(t->sess)) {
+        hb_terminal_mirror_event me = { HB_MIRROR_RAW, 0, 0, 0,
+                                        str, strlen(str) };
         send_input_scroll_bottom(t);
         hb_session_write(t->sess, str, strlen(str));
+        mirror_emit(t, &me);
     } else {
         g_signal_emit(t, sigs[SIG_DEAD_INPUT], 0, str);
     }
@@ -1159,9 +1195,13 @@ static gboolean on_scroll(GtkEventControllerScroll *sc, double dx, double dy,
         return TRUE;            /* 应用自己处理滚轮（mouse 模式下不滚） */
     if (hb_vt_altscreen(v)) {
         /* alt screen 无滚轮回滚：转成 3 次方向键 */
+        hb_terminal_mirror_event me = { HB_MIRROR_KEY,
+            dy < 0 ? HB_KEY_UP : HB_KEY_DOWN, 0, 0, NULL, 0 };
         int i;
-        for (i = 0; i < WHEEL_LINES; i++)
-            hb_session_key(t->sess, dy < 0 ? HB_KEY_UP : HB_KEY_DOWN, 0);
+        for (i = 0; i < WHEEL_LINES; i++) {
+            hb_session_key(t->sess, me.key, 0);
+            mirror_emit(t, &me);
+        }
         return TRUE;
     }
     scroll_lines(t, -dy * WHEEL_LINES);

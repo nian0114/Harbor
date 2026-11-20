@@ -162,7 +162,15 @@ void hb_term_theme_install_css(void)
             ".hb-term-view.theme-%s .find-bar button.icon-btn {"
             "  color: %s; }\n"
             ".hb-term-view.theme-%s .find-bar button.icon-btn:hover {"
-            "  background-color: %s; }\n",
+            "  background-color: %s; }\n"
+            /* workspace pane-head / assist 走同一组主题色 */
+            ".hb-term-view.theme-%s .pane-head {"
+            "  background-color: %s; border-bottom: 1px solid %s;"
+            "  color: %s; }\n"
+            ".hb-term-view.theme-%s .assist {"
+            "  background-color: %s; border-left: 1px solid %s;"
+            "  color: %s; }\n"
+            ".hb-term-view.theme-%s .pane-head-btn { color: %s; }\n",
             t->id, bg,
             t->id, bar, line,
             t->id, bar, line, muted,
@@ -177,7 +185,10 @@ void hb_term_theme_install_css(void)
             t->id,
             t->id, dim,
             t->id, title,
-            t->id, line);
+            t->id, line,
+            t->id, bar, line, title,
+            t->id, bar, line, dim,
+            t->id, title);
         /* light 主题的 "ended" 黄：保持 e8c66a 在所有主题（原型固定色） */
     }
     /* 会话结束的黄统一用原型色 e8c66a（light 主题下仍可读） */

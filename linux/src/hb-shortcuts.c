@@ -3,6 +3,8 @@
 #include "hb-ssh-page.h"
 #include "hb-terminal.h"
 #include "hb-palette.h"
+#include "hb-session-page.h"
+#include "hb-workspace.h"
 
 #include <string.h>
 
@@ -25,6 +27,13 @@ static const HbShortcut SC[] = {
     { "tab-prev",   GDK_KEY_Page_Up,   SC_CTRL,     "Ctrl+PgUp",      "上一个标签",            0 },
     { "tab-next",   GDK_KEY_Tab,  SC_CTRL,          "Ctrl+Tab",       "下一个标签",            0 },
     { "tab-prev",   GDK_KEY_ISO_Left_Tab, SC_CTRL|SC_SHIFT, "Ctrl+Shift+Tab", "上一个标签",    0 },
+    { "split-right",GDK_KEY_d,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+D",   "向右分屏",              0 },
+    { "split-down", GDK_KEY_e,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+E",   "向下分屏",              0 },
+    { "focus-mode", GDK_KEY_m,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+M",   "Focus 模式",            0 },
+    { "pane-left",  GDK_KEY_Left, SC_ALT,           "Alt+←",          "焦点移到左侧 pane",     0 },
+    { "pane-right", GDK_KEY_Right,SC_ALT,           "Alt+→",          "焦点移到右侧 pane",     0 },
+    { "pane-up",    GDK_KEY_Up,   SC_ALT,           "Alt+↑",          "焦点移到上方 pane",     0 },
+    { "pane-down",  GDK_KEY_Down, SC_ALT,           "Alt+↓",          "焦点移到下方 pane",     0 },
     { "tab-n",      GDK_KEY_1,    SC_ALT,           "Alt+1…9",        "跳到标签 N（1=Vault）", 0 },
     { "tab-n",      GDK_KEY_1,    SC_CTRL,          "Ctrl+1…9",       "跳到标签 N（1=Vault）", 0 },
 };
@@ -47,32 +56,60 @@ static gboolean focus_in_terminal(HbWindow *win)
 static gboolean dispatch(HbWindow *win, const char *id)
 {
     GtkWidget *page;
-    const char *tab;
 
     if (!strcmp(id, "palette")) {
         hb_palette_open(win);
         return TRUE;
     }
     if (!strcmp(id, "find")) {
+        /* workspace → ws 的 find bar（绑焦点 pane）；普通页 → 页内 */
         page = hb_window_active_page(win);
-        if (page && HB_IS_TERM_PAGE(page)) {
-            hb_term_page_find_open(HB_TERM_PAGE(page));
+        if (page && HB_IS_WORKSPACE(page)) {
+            hb_workspace_open_find(HB_WORKSPACE(page));
             return TRUE;
         }
-        if (page && HB_IS_SSH_PAGE(page)) {
-            hb_ssh_page_find_open(HB_SSH_PAGE(page));
+        page = hb_window_active_session_page(win);
+        if (page && HB_IS_SESSION_PAGE(page)) {
+            hb_session_page_open_find(HB_SESSION_PAGE(page));
             return TRUE;
         }
         return FALSE;   /* 非终端页：让事件继续传播 */
+    }
+    if (!strcmp(id, "split-right")) {
+        hb_window_split_active(win, GTK_ORIENTATION_HORIZONTAL);
+        return TRUE;
+    }
+    if (!strcmp(id, "split-down")) {
+        hb_window_split_active(win, GTK_ORIENTATION_VERTICAL);
+        return TRUE;
+    }
+    if (!strcmp(id, "focus-mode")) {
+        hb_window_toggle_focus_mode(win);
+        return TRUE;
+    }
+    if (!strcmp(id, "pane-left")) {
+        hb_window_move_pane_focus(win, 0);
+        return TRUE;
+    }
+    if (!strcmp(id, "pane-right")) {
+        hb_window_move_pane_focus(win, 1);
+        return TRUE;
+    }
+    if (!strcmp(id, "pane-up")) {
+        hb_window_move_pane_focus(win, 2);
+        return TRUE;
+    }
+    if (!strcmp(id, "pane-down")) {
+        hb_window_move_pane_focus(win, 3);
+        return TRUE;
     }
     if (!strcmp(id, "new-local")) {
         hb_window_open_local(win, NULL);
         return TRUE;
     }
     if (!strcmp(id, "close-tab")) {
-        tab = hb_window_active_tab_id(win);
-        if (tab)
-            hb_window_close_tab(win, tab);
+        /* workspace → 关焦点 pane（剩 1 时塌回普通 tab）；否则关 tab */
+        hb_window_close_pane_or_tab(win);
         return TRUE;
     }
     if (!strcmp(id, "tab-next")) {

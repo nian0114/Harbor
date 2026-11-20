@@ -567,3 +567,52 @@ list.pal-list row:selected { background: none; }
 .pal-empty { padding: 18px; color: @hb_text_3; font-size: 12.5px; }
 button.kbd-btn { padding: 0; background: none; border: none; box-shadow: none; }
 button.kbd-btn:hover > label { border-color: @hb_text_3; }
+
+/* ---------- Workspace 分屏（FR-03） ----------
+ * 颜色继承自 .hb-term-view.theme-*（workspace widget 自身带 theme class，
+ * pane-head/assist/footer 的底色规则由 hb-term-theme.c 生成）。 */
+.pane {
+    border: 1.5px solid transparent;
+    border-radius: 9px;
+    margin: 5px;
+}
+.pane.focused { border-color: @accent_bg_color; }
+.pane.broadcast {
+    border-color: #2ea043;
+    box-shadow: inset 0 0 0 1px alpha(#2ea043, .35);
+}
+.pane-head { min-height: 27px; padding: 3px 10px; }
+.pane-head-ic { opacity: .8; }
+.pane-head-tt { font-size: 12px; }
+button.pane-head-btn {
+    min-width: 22px; min-height: 22px; padding: 0;
+    background: none; border: none; box-shadow: none;
+    border-radius: 5px; color: inherit; opacity: .75;
+}
+button.pane-head-btn:hover { background-color: alpha(white, .12); opacity: 1; }
+
+.ws-paned > separator { min-width: 5px; min-height: 5px; }
+
+.assist { padding: 10px; }
+button.assist-item {
+    background: none; border: none; box-shadow: none;
+    padding: 8px 10px; border-radius: 8px;
+}
+button.assist-item:hover { background-color: @hb_btn_hover; }
+.assist-item-tt  { font-size: 12.5px; font-weight: 600; }
+.assist-item-sub { font-size: 11.5px; opacity: .6; }
+.assist-switch stackswitcher button { font-size: 12px; padding: 4px 8px; }
+
+/* 工具栏开关态（Broadcast 开 / 助手栏 / Focus） */
+button.tbtn.on {
+    background-color: #12351f; color: #6fe09c;
+    border: 1px solid #1f5c33;
+}
+
+/* 分屏菜单 / 目标选择 */
+button.hb-pop-btn {
+    background: none; border: none; box-shadow: none;
+    padding: 7px 12px; border-radius: 7px; font-size: 13px;
+}
+button.hb-pop-btn:hover { background-color: @hb_btn_hover; }
+checkbutton.pick-row { padding: 7px 8px; }

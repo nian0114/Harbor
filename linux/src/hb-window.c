@@ -4,6 +4,9 @@
 #include "hb-notify.h"
 #include "hb-vault-page.h"
 #include "hb-term-page.h"
+#include "hb-ssh-page.h"
+#include "hb-session-page.h"
+#include "hb-workspace.h"
 #include "hb-store.h"
 
 #include <stdio.h>
@@ -23,6 +26,8 @@ typedef struct HbTabRec {
     gboolean   is_term;
     gboolean   watch_dot;   /* dot 是监控角标 → 切到此 tab 时自动清 */
     guint      watch_token; /* clear_watch_dot 的时序令牌 */
+    char      *ws_title;    /* 包成 workspace 前的标题/图标（塌回时还原） */
+    char      *ws_icon;
 } HbTabRec;
 
 struct _HbWindow {
@@ -115,6 +120,8 @@ static void free_tab_rec(HbTabRec *t)
     g_free(t->id);
     g_free(t->icon);
     g_free(t->host_id);
+    g_free(t->ws_title);
+    g_free(t->ws_icon);
     g_free(t);
 }
 
@@ -166,13 +173,19 @@ void hb_window_close_host_tabs(HbWindow *win, const char *host_id)
 {
     GList *ids = NULL, *l;
     if (!host_id) return;
-    for (l = win->tabs; l; l = l->next) {
-        HbTabRec *t = l->data;
+    /* ws close_host 可能塌/关 tab（panes_changed）→ 先快照 id 再逐个处理 */
+    for (l = win->tabs; l; l = l->next)
+        ids = g_list_append(ids, g_strdup(((HbTabRec *)l->data)->id));
+    for (l = ids; l; l = l->next) {
+        HbTabRec *t = find_tab(win, l->data);
+        if (!t) continue;
+        if (t->page && HB_IS_WORKSPACE(t->page)) {
+            hb_workspace_close_host(HB_WORKSPACE(t->page), host_id);
+            continue;
+        }
         if (t->host_id && !strcmp(t->host_id, host_id))
-            ids = g_list_prepend(ids, g_strdup(t->id));
+            hb_window_close_tab(win, t->id);
     }
-    for (l = ids; l; l = l->next)
-        hb_window_close_tab(win, l->data);
     g_list_free_full(ids, g_free);
 }
 
@@ -547,6 +560,142 @@ void hb_window_open_local(HbWindow *win, GtkWidget **page_out)
         *page_out = page;
 }
 
+/* ------------------------- Workspace 分屏 ------------------------- */
+
+static HbTabRec *tab_of_page(HbWindow *win, GtkWidget *page)
+{
+    for (GList *l = win->tabs; l; l = l->next) {
+        HbTabRec *t = l->data;
+        if (t->page == page) return t;
+    }
+    return NULL;
+}
+
+void hb_window_split_active(HbWindow *win, GtkOrientation o)
+{
+    HbTabRec *t = win->active;
+    GtkWidget *ws, *page;
+    if (!t || !t->page) return;
+    if (HB_IS_WORKSPACE(t->page)) {
+        if (!hb_workspace_split_focused(HB_WORKSPACE(t->page), o))
+            hb_window_toast(win, "最多 6 个分屏");
+        return;
+    }
+    if (!HB_IS_SESSION_PAGE(t->page)) return;   /* Vault 等非终端页 */
+
+    page = t->page;
+    /* 记原 tab 外观，塌回时还原 */
+    g_free(t->ws_title);
+    g_free(t->ws_icon);
+    t->ws_title = g_strdup(gtk_label_get_text(GTK_LABEL(t->title)));
+    t->ws_icon = g_strdup(t->icon);
+
+    ws = hb_workspace_new(hb_store_default());
+    g_object_ref(page);
+    gtk_stack_remove(GTK_STACK(win->stack), page);  /* ref 保活跨搬移 */
+    gtk_stack_add_named(GTK_STACK(win->stack), ws, t->id);
+    t->page = ws;
+    t->is_term = TRUE;
+    hb_workspace_attach_tab(HB_WORKSPACE(ws), GTK_WIDGET(win), t->id);
+    hb_workspace_seed(HB_WORKSPACE(ws), page);
+    g_object_unref(page);
+    hb_workspace_split_focused(HB_WORKSPACE(ws), o); /* 不会失败：<6 */
+    hb_window_set_tab_title(win, t->id, "Workspace");
+    hb_window_set_tab_icon(win, t->id, "cols");
+    refresh_active(win);
+}
+
+static void collapse_workspace(HbWindow *win, HbTabRec *t)
+{
+    GtkWidget *page =
+        hb_workspace_take_last_page(HB_WORKSPACE(t->page));
+    if (!page) return;
+    gtk_stack_remove(GTK_STACK(win->stack), t->page);   /* 销毁 ws 壳 */
+    gtk_stack_add_named(GTK_STACK(win->stack), page, t->id);
+    g_object_unref(page);
+    t->page = page;
+    if (t->ws_title) {
+        gtk_label_set_label(GTK_LABEL(t->title), t->ws_title);
+        g_clear_pointer(&t->ws_title, g_free);
+    }
+    if (t->ws_icon) {
+        g_free(t->icon);
+        t->icon = NULL;                 /* 绕开 set_tab_icon 的早退 */
+        hb_window_set_tab_icon(win, t->id, t->ws_icon);
+        g_clear_pointer(&t->ws_icon, g_free);
+    }
+    /* pane 在 ws 内不写 tab host → 塌回时补回关联（删除主机用） */
+    hb_window_set_tab_host(win, t->id,
+        hb_session_page_host_id(HB_SESSION_PAGE(page)));
+    refresh_active(win);
+}
+
+void hb_window_workspace_panes_changed(HbWindow *win, GtkWidget *ws)
+{
+    HbTabRec *t = tab_of_page(win, ws);
+    guint n;
+    if (!t) return;
+    n = hb_workspace_pane_count(HB_WORKSPACE(ws));
+    if (n == 0)
+        hb_window_close_tab(win, t->id);
+    else if (n == 1)
+        collapse_workspace(win, t);
+}
+
+void hb_window_close_pane_or_tab(HbWindow *win)
+{
+    HbTabRec *t = win->active;
+    if (!t) return;
+    if (t->page && HB_IS_WORKSPACE(t->page) &&
+        hb_workspace_pane_count(HB_WORKSPACE(t->page)) > 1) {
+        hb_workspace_close_focused(HB_WORKSPACE(t->page));
+        return;
+    }
+    hb_window_close_tab(win, t->id);
+}
+
+GtkWidget *hb_window_active_session_page(HbWindow *win)
+{
+    return hb_workspace_resolve_page(hb_window_active_page(win));
+}
+
+void hb_window_move_pane_focus(HbWindow *win, int dir)
+{
+    HbTabRec *t = win->active;
+    if (t && t->page && HB_IS_WORKSPACE(t->page))
+        hb_workspace_move_focus(HB_WORKSPACE(t->page), dir);
+}
+
+void hb_window_toggle_focus_mode(HbWindow *win)
+{
+    HbTabRec *t = win->active;
+    if (t && t->page && HB_IS_WORKSPACE(t->page))
+        hb_workspace_toggle_focus_mode(HB_WORKSPACE(t->page));
+}
+
+void hb_window_open_workspace(HbWindow *win, GList *pages)
+{
+    static int seq;
+    char id[32];
+    GtkWidget *ws;
+    GList *l;
+    int i = 0, n;
+    if (!pages) return;
+    n = (int)g_list_length(pages);
+    ws = hb_workspace_new(hb_store_default());
+    g_snprintf(id, sizeof id, "ws-%d", ++seq);
+    for (l = pages; l; l = l->next, i++) {
+        if (i == 0)
+            hb_workspace_seed(HB_WORKSPACE(ws), l->data);
+        else
+            /* 并排一行：paned 链向右，第 i 个 leaf 占 1/(n-i+1) */
+            hb_workspace_add_pane(HB_WORKSPACE(ws), l->data,
+                GTK_ORIENTATION_HORIZONTAL, 1.0 / (n - i + 1));
+    }
+    hb_window_add_tab(win, id, "Workspace", "cols", ws, TRUE, TRUE);
+    hb_workspace_attach_tab(HB_WORKSPACE(ws), GTK_WIDGET(win), id);
+}
+
 static void on_plus_local(GtkButton *b, gpointer ud)
 {
     HbWindow *win = ud;
@@ -555,32 +704,55 @@ static void on_plus_local(GtkButton *b, gpointer ud)
     hb_window_open_local(win, NULL);
 }
 
+static void on_plus_workspace(GtkButton *b, gpointer ud)
+{
+    HbWindow *win = ud;
+    GtkWidget *pop = gtk_widget_get_ancestor(GTK_WIDGET(b), GTK_TYPE_POPOVER);
+    if (pop) gtk_popover_popdown(GTK_POPOVER(pop));
+    hb_workspace_pick_targets(GTK_WIDGET(win), hb_store_default());
+}
+
 static GtkWidget *build_plus(HbWindow *win)
 {
     GtkWidget *mb = gtk_menu_button_new();
     GtkWidget *pop = gtk_popover_new();
-    GtkWidget *item = gtk_button_new_with_label("Local 终端");
-    GtkWidget *kbd = gtk_label_new("Ctrl+Shift+T");
-    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 24);
-    GtkWidget *name = gtk_label_new("Local 终端");
+    GtkWidget *vb = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
 
-    (void)item;
     gtk_widget_add_css_class(mb, "hb-icobtn");
     gtk_menu_button_set_child(GTK_MENU_BUTTON(mb), hb_icon_new("plus", 16));
     gtk_widget_set_tooltip_text(mb, "新建标签页");
 
-    gtk_label_set_xalign(GTK_LABEL(name), 0);
-    gtk_widget_set_hexpand(name, TRUE);
-    gtk_widget_add_css_class(kbd, "hb-kbd");
-    gtk_box_append(GTK_BOX(row), name);
-    gtk_box_append(GTK_BOX(row), kbd);
     {
-        GtkWidget *btn = gtk_button_new();
+        GtkWidget *kbd = gtk_label_new("Ctrl+Shift+T");
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 24);
+        GtkWidget *name = gtk_label_new("Local 终端");
+        GtkWidget *btn;
+        gtk_label_set_xalign(GTK_LABEL(name), 0);
+        gtk_widget_set_hexpand(name, TRUE);
+        gtk_widget_add_css_class(kbd, "hb-kbd");
+        gtk_box_append(GTK_BOX(row), name);
+        gtk_box_append(GTK_BOX(row), kbd);
+        btn = gtk_button_new();
         gtk_widget_add_css_class(btn, "hb-menu-item");
         gtk_button_set_child(GTK_BUTTON(btn), row);
         g_signal_connect(btn, "clicked", G_CALLBACK(on_plus_local), win);
-        gtk_popover_set_child(GTK_POPOVER(pop), btn);
+        gtk_box_append(GTK_BOX(vb), btn);
     }
+    {
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 24);
+        GtkWidget *name = gtk_label_new("Workspace 分屏…");
+        GtkWidget *btn;
+        gtk_label_set_xalign(GTK_LABEL(name), 0);
+        gtk_widget_set_hexpand(name, TRUE);
+        gtk_box_append(GTK_BOX(row), name);
+        btn = gtk_button_new();
+        gtk_widget_add_css_class(btn, "hb-menu-item");
+        gtk_button_set_child(GTK_BUTTON(btn), row);
+        g_signal_connect(btn, "clicked",
+                         G_CALLBACK(on_plus_workspace), win);
+        gtk_box_append(GTK_BOX(vb), btn);
+    }
+    gtk_popover_set_child(GTK_POPOVER(pop), vb);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(mb), pop);
     return mb;
 }

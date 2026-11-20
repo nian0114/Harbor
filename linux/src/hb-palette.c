@@ -11,6 +11,7 @@
 #include "hb-vault-page.h"
 #include "hb-term-page.h"
 #include "hb-ssh-page.h"
+#include "hb-workspace.h"
 
 #include <harbor/session.h>
 #include <string.h>
@@ -202,6 +203,9 @@ static void collect_items(PalCtx *c, GPtrArray *out)
     g_ptr_array_add(out, item_new(PAL_CMD, "palette", NULL,
         "外观与终端", "命令", "外观与终端 appearance settings theme",
         "appearance", ord++));
+    g_ptr_array_add(out, item_new(PAL_CMD, "cols", NULL,
+        "Workspace 分屏", "命令", "Workspace 分屏 workspace split panes",
+        "workspace", ord++));
 }
 
 /* ------------------------- 过滤 + 排序 ------------------------- */
@@ -347,7 +351,8 @@ static void on_row_enter(GtkEventControllerMotion *m, double x, double y,
 
 static hb_session *active_term_session(PalCtx *c)
 {
-    GtkWidget *page = hb_window_active_page(c->win);
+    /* workspace tab → 焦点 pane 的 session */
+    GtkWidget *page = hb_window_active_session_page(c->win);
     if (page && HB_IS_TERM_PAGE(page))
         return hb_term_page_session(HB_TERM_PAGE(page));
     if (page && HB_IS_SSH_PAGE(page))
@@ -441,6 +446,10 @@ static void run_item(PalCtx *c, PalItem *it)
             hb_window_switch_tab(win, "vault");
             if (vp)
                 hb_vault_page_set_section(HB_VAULT_PAGE(vp), "appearance");
+        } else if (!strcmp(id, "workspace")) {
+            pal_close(c);
+            hb_workspace_pick_targets(GTK_WIDGET(win),
+                                      hb_store_default());
         }
     }
     g_free(id);
