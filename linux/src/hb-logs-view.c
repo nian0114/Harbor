@@ -78,8 +78,17 @@ static const char *reason_disp(const hb_log *l, char *buf, size_t bl)
     for (i = 0; i < sizeof(map) / sizeof(map[0]); i++)
         if (!strcmp(r, map[i].k))
             return map[i].zh;
-    /* 未识别 → 原样（tooltip 也是原文） */
-    snprintf(buf, bl, "%s", r);
+    /* 未识别 → 原样（tooltip 也是原文）。短串直接返回省一次拷贝；
+     * 长串按 UTF-8 字符边界截断 —— snprintf 按字节截会把多字节
+     * 字符切断成半个，产生无效 UTF-8（Pango 告警）。 */
+    if (strlen(r) < bl)
+        return r;
+    {
+        const gchar *end = g_utf8_find_prev_char(r, r + bl - 1);
+        size_t n = end ? (size_t)(end - r) : 0;
+        memcpy(buf, r, n);
+        buf[n] = 0;
+    }
     return buf;
 }
 
