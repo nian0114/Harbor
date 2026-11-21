@@ -961,6 +961,74 @@ void hb_sync_clear_vk(hb_sync *s)
     }
 }
 
+hb_err hb_sync_recovery_rotate_body_vk(const uint8_t vk[32],
+                                       const char *password,
+                                       const uint8_t salt[16], uint64_t ops,
+                                       uint64_t mem, char **body_out,
+                                       char **words_out)
+{
+    uint8_t mk[32], auth[32], wrap[32], E[32], rc_wrap[32], rc_auth[32];
+    char *a_b64 = NULL, *ra_b64 = NULL, *wr_b64 = NULL;
+    char words[256];
+    cJSON *j = NULL;
+    hb_err e = HB_ERR_NOMEM;
+
+    *body_out = NULL;
+    *words_out = NULL;
+    if (!vk || !password)
+        return HB_ERR_INVALID;
+    randombytes_buf(E, sizeof E);
+    e = hb_sync_pwhash(password, salt, ops, mem, mk);
+    if (e != HB_OK)
+        goto out;
+    hb_sync_derive_mk(mk, auth, wrap);
+    hb_sync_derive_rc(E, rc_wrap, rc_auth);
+    if (hb_bip39_encode(E, words, sizeof words) != 0) {
+        e = HB_ERR_NOMEM;
+        goto out;
+    }
+    a_b64 = b64_enc(auth, sizeof auth);
+    ra_b64 = b64_enc(rc_auth, sizeof rc_auth);
+    e = seal_to_b64(rc_wrap, vk, 32, AD_VK_RC, &wr_b64);
+    if (e != HB_OK)
+        goto out;
+    if (!a_b64 || !ra_b64) {
+        e = HB_ERR_NOMEM;
+        goto out;
+    }
+    j = json_obj();
+    if (!j)
+        goto out;
+    cJSON_AddStringToObject(j, "auth_key", a_b64);
+    cJSON_AddStringToObject(j, "rc_auth", ra_b64);
+    cJSON_AddStringToObject(j, "wrapped_vk_rc", wr_b64);
+    *body_out = json_print_str(j);
+    *words_out = strdup(words);
+    e = (*body_out && *words_out) ? HB_OK : HB_ERR_NOMEM;
+out:
+    cJSON_Delete(j);
+    free(a_b64); free(ra_b64); free(wr_b64);
+    sodium_memzero(mk, sizeof mk);
+    sodium_memzero(auth, sizeof auth);
+    sodium_memzero(wrap, sizeof wrap);
+    sodium_memzero(E, sizeof E);
+    sodium_memzero(rc_wrap, sizeof rc_wrap);
+    sodium_memzero(rc_auth, sizeof rc_auth);
+    sodium_memzero(words, sizeof words);
+    return e;
+}
+
+hb_err hb_sync_recovery_rotate_body(hb_sync *s, const char *password,
+                                    const uint8_t salt[16], uint64_t ops,
+                                    uint64_t mem, char **body_out,
+                                    char **words_out)
+{
+    if (!s || !s->vk)
+        return HB_ERR_INVALID;
+    return hb_sync_recovery_rotate_body_vk(s->vk, password, salt, ops, mem,
+                                           body_out, words_out);
+}
+
 bool hb_sync_scope_get(hb_sync *s, const char *scope)
 {
     char key[64], *val = NULL;

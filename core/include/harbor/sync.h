@@ -113,6 +113,22 @@ void     hb_sync_free(hb_sync *s);      /* 擦除 VK */
 hb_err   hb_sync_set_vk(hb_sync *s, const uint8_t vk[32]);
 void     hb_sync_clear_vk(hb_sync *s);
 
+/* POST /recovery：轮换恢复码（新 E）。password + 当前 kdf → auth_key
+ * 证明身份；VK 取自已 set_vk 的 s → wrapped_vk_rc。
+ * → body {auth_key, rc_auth, wrapped_vk_rc} + 24 个新词（*words_out，
+ * 空格分隔，free）。 */
+hb_err   hb_sync_recovery_rotate_body(hb_sync *s, const char *password,
+                                      const uint8_t salt[16],
+                                      uint64_t ops, uint64_t mem,
+                                      char **body_out, char **words_out);
+
+/* 同上但 VK 直接传入 —— 供平台层在 worker 线程调用（不持有 hb_sync）。 */
+hb_err   hb_sync_recovery_rotate_body_vk(const uint8_t vk[32],
+                                      const char *password,
+                                      const uint8_t salt[16],
+                                      uint64_t ops, uint64_t mem,
+                                      char **body_out, char **words_out);
+
 /* 范围（§4.5）：scope ∈ {"hosts","keys","snippets","forwards","known","settings"}。
  * hosts = host+group 类型。默认全开。 */
 bool   hb_sync_scope_get(hb_sync *s, const char *scope);

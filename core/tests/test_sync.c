@@ -1433,6 +1433,92 @@ static void t_account_flow(void)
     sodium_memzero(vk2, 32);
 }
 
+static void t_recovery_rotate(void)
+{
+    hb_vault *v = NULL;
+    hb_sync *s;
+    char *body = NULL, *words = NULL, *nbody = NULL, *nwords = NULL;
+    uint8_t vk[32], salt[16];
+
+    CHECK_EQ_INT(hb_vault_open(vault_path(), DEK_A, &v), HB_OK);
+    s = hb_sync_new(v);
+    CHECK_EQ_INT(hb_sync_register_body("rot@x.y", "pw-rotate", "d", "l",
+                                       2, 64 * 1024 * 1024,
+                                       &body, &words, vk), HB_OK);
+    /* 未 set_vk → INVALID */
+    memset(salt, 0x42, 16);
+    CHECK_EQ_INT(hb_sync_recovery_rotate_body(s, "pw-rotate", salt, 2,
+                                              64 * 1024 * 1024,
+                                              &nbody, &nwords),
+                 HB_ERR_INVALID);
+    CHECK_EQ_INT(hb_sync_set_vk(s, vk), HB_OK);
+    CHECK_EQ_INT(hb_sync_recovery_rotate_body(s, "pw-rotate", salt, 2,
+                                              64 * 1024 * 1024,
+                                              &nbody, &nwords),
+                 HB_OK);
+    CHECK(strstr(nbody, "\"auth_key\":") != NULL);
+    CHECK(strstr(nbody, "\"rc_auth\":") != NULL);
+    CHECK(strstr(nbody, "\"wrapped_vk_rc\":") != NULL);
+    CHECK(strstr(nbody, "\"email\"") == NULL);
+    /* 新词的 rc_auth 与 body 一致；旧词不同 → 旧码立即失效 */
+    {
+        cJSON *j = cJSON_Parse(nbody);
+        cJSON *ra = cJSON_GetObjectItem(j, "rc_auth");
+        cJSON *wv = cJSON_GetObjectItem(j, "wrapped_vk_rc");
+        uint8_t E[32], rcw[32], rca[32], rca_old[32], vkr[32];
+        char *resp, *rtok = NULL;
+        CHECK(ra && cJSON_IsString(ra));
+        CHECK(wv && cJSON_IsString(wv));
+        CHECK_EQ_INT(hb_bip39_decode(nwords, E), 0);
+        hb_sync_derive_rc(E, rcw, rca);
+        CHECK_EQ_INT(hb_bip39_decode(words, E), 0);
+        hb_sync_derive_rc(E, rcw, rca_old);
+        {
+            /* body 的 rc_auth base64url → bytes */
+            const char *b = ra->valuestring;
+            size_t n = strlen(b);
+            uint8_t dec[64];
+            static const char T[] =
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            size_t oi = 0; uint32_t acc = 0; int bits = 0, i;
+            for (i = 0; b[i]; i++) {
+                const char *p = strchr(T, b[i]);
+                CHECK(p != NULL);
+                acc = (acc << 6) | (uint32_t)(p - T);
+                bits += 6;
+                if (bits >= 8) { bits -= 8; dec[oi++] = (uint8_t)(acc >> bits); }
+            }
+            CHECK_EQ_INT(oi, 32);
+            CHECK(memcmp(dec, rca, 32) == 0);      /* 新词 == body */
+            CHECK(memcmp(dec, rca_old, 32) != 0);  /* 旧词 != body */
+            (void)n;
+        }
+        /* 新词 + body 的 wrapped_vk_rc → 同一 VK */
+        resp = malloc(strlen(wv->valuestring) + 64);
+        sprintf(resp, "{\"recovery_token\":\"t\",\"wrapped_vk_rc\":\"%s\"}",
+                wv->valuestring);
+        CHECK_EQ_INT(hb_sync_recover_start_parse(resp, nwords, vkr, &rtok),
+                     HB_OK);
+        CHECK(memcmp(vkr, vk, 32) == 0);
+        free(resp); free(rtok);
+        /* 旧词打不开了 */
+        vkr[0] = 0;
+        rtok = NULL;
+        resp = malloc(strlen(wv->valuestring) + 64);
+        sprintf(resp, "{\"recovery_token\":\"t\",\"wrapped_vk_rc\":\"%s\"}",
+                wv->valuestring);
+        CHECK(hb_sync_recover_start_parse(resp, words, vkr, &rtok) != HB_OK);
+        free(resp); free(rtok);
+        sodium_memzero(E, 32); sodium_memzero(rcw, 32);
+        sodium_memzero(rca, 32); sodium_memzero(rca_old, 32);
+        cJSON_Delete(j);
+    }
+    hb_sync_free(s);
+    hb_vault_close(v);
+    free(body); free(words); free(nbody); free(nwords);
+    sodium_memzero(vk, 32);
+}
+
 int main(void)
 {
     hb_core_init();
@@ -1442,6 +1528,7 @@ int main(void)
     t_merge_cases();
     t_e2e();
     t_account_flow();
+    t_recovery_rotate();
     printf("sync: %d checks, %d failures\n", hb_t_checks, hb_t_failures);
     return hb_t_failures ? 1 : 0;
 }
