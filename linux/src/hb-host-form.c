@@ -34,6 +34,7 @@ typedef struct {
     char     *host_id;       /* NULL = 新建 */
     hb_obj   *obj;           /* 编辑时加载的对象（关闭时 free） */
     gboolean  is_local;      /* 编辑 local 主机 */
+    gboolean  dead;          /* closed 后置位：所有 handler 早退 */
     AdwDialog *dlg;
     GtkWidget *body;
     char      proto[8];      /* 当前类型 */
@@ -166,6 +167,7 @@ static void group_prompt_done(const char *text, gpointer ud)
 {
     HostForm *f = ud;
     hb_obj *g;
+    if (f->dead) return;
     if (!text || !*text) { group_rebuild(f, NULL); return; }
     g = hb_obj_new("group");
     hb_obj_set_str(g, "name", text);
@@ -180,7 +182,7 @@ static void on_group_sel(GtkDropDown *dd, GParamSpec *ps, HostForm *f)
     guint i;
     const char *val;
     (void)ps;
-    if (f->group_building) return;
+    if (f->dead || f->group_building) return;
     i = gtk_drop_down_get_selected(dd);
     if (i >= f->group_names->len) return;
     val = g_ptr_array_index(f->group_names, i);
@@ -250,6 +252,7 @@ static void jump_del(GtkButton *b, gpointer ud)
     HostForm *f = g_object_get_data(G_OBJECT(b), "form");
     guint idx = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(b), "idx"));
     (void)ud;
+    if (f->dead) return;
     g_ptr_array_remove_index(f->jump_sel, idx);   /* free_func 负责 g_free */
     jump_rows_rebuild(f);
     jump_rebuild_add(f);
@@ -257,12 +260,14 @@ static void jump_del(GtkButton *b, gpointer ud)
 static void jump_up(GtkButton *b, gpointer ud)
 {
     HostForm *f = g_object_get_data(G_OBJECT(b), "form");
+    if (f->dead) return;
     jump_move(f, GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(b), "idx")), -1);
     (void)ud;
 }
 static void jump_down(GtkButton *b, gpointer ud)
 {
     HostForm *f = g_object_get_data(G_OBJECT(b), "form");
+    if (f->dead) return;
     jump_move(f, GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(b), "idx")), +1);
     (void)ud;
 }
@@ -321,7 +326,7 @@ static gboolean jump_add_idle(gpointer ud)
     HostForm *f = ud;
     guint i = f->jump_pending;
     f->jump_idle = 0;
-    if (i == 0 || i >= f->jump_cand->len) return G_SOURCE_REMOVE;
+    if (f->dead || i == 0 || i >= f->jump_cand->len) return G_SOURCE_REMOVE;
     g_ptr_array_add(f->jump_sel,
                     g_strdup(g_ptr_array_index(f->jump_cand, i)));
     jump_rows_rebuild(f);
@@ -333,7 +338,7 @@ static void on_jump_add_sel(GtkDropDown *dd, GParamSpec *ps, HostForm *f)
 {
     guint i;
     (void)ps;
-    if (f->jump_building) return;
+    if (f->dead || f->jump_building) return;
     i = gtk_drop_down_get_selected(dd);
     if (i == 0 || i >= f->jump_cand->len) return;
     f->jump_pending = i;
@@ -430,14 +435,20 @@ static void key_rebuild(HostForm *f, const char *select_id)
 }
 
 /* "生成新密钥…" 完成回调：选中新 key；取消 → 回到之前的选择 */
+/* 异步回调可能晚于表单关闭：发起时持有 dlg 引用（f 随 dlg 释放），
+ * 回调里先判 dead 再放引用。 */
 static void genkey_done(const char *new_id, gpointer ud)
 {
     HostForm *f = ud;
-    if (new_id)
-        key_rebuild(f, new_id);
-    else
-        gtk_drop_down_set_selected(GTK_DROP_DOWN(f->key_dd),
-                                   f->key_prev);
+    AdwDialog *dlg = f->dlg;
+    if (!f->dead) {
+        if (new_id)
+            key_rebuild(f, new_id);
+        else
+            gtk_drop_down_set_selected(GTK_DROP_DOWN(f->key_dd),
+                                       f->key_prev);
+    }
+    g_object_unref(dlg);
 }
 
 static void on_keydd_sel(GtkDropDown *dd, GParamSpec *ps, gpointer ud)
@@ -445,13 +456,15 @@ static void on_keydd_sel(GtkDropDown *dd, GParamSpec *ps, gpointer ud)
     HostForm *f = ud;
     guint i = gtk_drop_down_get_selected(dd);
     (void)ps;
-    if (f->key_building || i >= f->key_ids->len)
+    if (f->dead || f->key_building || i >= f->key_ids->len)
         return;
-    if (g_ptr_array_index(f->key_ids, i) == NULL)
+    if (g_ptr_array_index(f->key_ids, i) == NULL) {
+        g_object_ref(f->dlg);
         hb_keychain_generate_dialog(f->parent_w, f->st,
                                     genkey_done, f);
-    else
+    } else {
         f->key_prev = i;
+    }
 }
 
 static void snip_rebuild(HostForm *f, const char *select_id)
@@ -483,20 +496,26 @@ static void snip_rebuild(HostForm *f, const char *select_id)
 static void on_browse_done(GObject *src, GAsyncResult *res, gpointer ud)
 {
     HostForm *f = ud;
-    GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(src), res, NULL);
-    char *path;
-    if (!file) return;
-    path = g_file_get_path(file);
-    if (path) gtk_editable_set_text(GTK_EDITABLE(f->ident_e), path);
-    g_free(path);
-    g_object_unref(file);
+    AdwDialog *dlg = f->dlg;
+    GFile *file = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(src), res,
+                                              NULL);
+    if (file && !f->dead) {
+        char *path = g_file_get_path(file);
+        if (path) gtk_editable_set_text(GTK_EDITABLE(f->ident_e), path);
+        g_free(path);
+    }
+    if (file) g_object_unref(file);
+    g_object_unref(dlg);
 }
 
 static void on_browse(GtkButton *b, HostForm *f)
 {
-    GtkFileDialog *d = gtk_file_dialog_new();
+    GtkFileDialog *d;
     (void)b;
+    if (f->dead) return;
+    d = gtk_file_dialog_new();
     gtk_file_dialog_set_title(d, "选择私钥文件");
+    g_object_ref(f->dlg);
     gtk_file_dialog_open(d, NULL, NULL, on_browse_done, f);
     g_object_unref(d);
 }
@@ -528,6 +547,7 @@ static void on_color_click(GtkButton *b, gpointer ud)
 {
     HostForm *f = g_object_get_data(G_OBJECT(b), "form");
     const char *nm = g_object_get_data(G_OBJECT(b), "color");
+    if (f->dead) return;
     color_select(f, nm && *nm ? nm : NULL, GTK_WIDGET(b));
     (void)ud;
 }
@@ -592,9 +612,11 @@ static void apply_proto_vis(HostForm *f)
 
 static void on_type_sel(GtkDropDown *dd, GParamSpec *ps, HostForm *f)
 {
-    guint i = gtk_drop_down_get_selected(dd);
+    guint i;
     int prev_port;
     (void)ps;
+    if (f->dead) return;
+    i = gtk_drop_down_get_selected(dd);
     if (i >= 3) return;                  /* local 项只在编辑时出现 */
     prev_port = proto_default_port(kProtos[f->prev_proto]);
     strcpy(f->proto, kProtos[i]);
@@ -613,8 +635,10 @@ static void on_type_sel(GtkDropDown *dd, GParamSpec *ps, HostForm *f)
 
 static void on_auth_sel(GtkDropDown *dd, GParamSpec *ps, HostForm *f)
 {
-    guint i = gtk_drop_down_get_selected(dd);
+    guint i;
     (void)ps;
+    if (f->dead) return;
+    i = gtk_drop_down_get_selected(dd);
     gtk_widget_set_visible(f->pw_box, i == 1);
     gtk_widget_set_visible(f->key_box, i == 2);
 }
@@ -781,14 +805,16 @@ static void do_save(HostForm *f)
     adw_dialog_close(f->dlg);
 }
 
-static void on_save(GtkButton *b, HostForm *f) { (void)b; do_save(f); }
+static void on_save(GtkButton *b, HostForm *f)
+{ (void)b; if (f->dead) return; do_save(f); }
 static void on_cancel(GtkButton *b, HostForm *f)
-{ (void)b; adw_dialog_close(f->dlg); }
+{ (void)b; if (f->dead) return; adw_dialog_close(f->dlg); }
 
 static gboolean on_key(GtkEventControllerKey *kc, guint keyval,
                        guint code, GdkModifierType state, HostForm *f)
 {
     (void)kc; (void)code;
+    if (f->dead) return FALSE;
     if ((state & GDK_CONTROL_MASK) &&
         (keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter)) {
         do_save(f);
@@ -800,15 +826,15 @@ static gboolean on_key(GtkEventControllerKey *kc, guint keyval,
 static void on_pw_clear(GtkButton *b, HostForm *f)
 {
     (void)b;
+    if (f->dead) return;
     f->pw_cleared = TRUE;
     gtk_widget_set_visible(f->pw_clear, FALSE);
     gtk_editable_set_text(GTK_EDITABLE(f->pw_e), "");
     gtk_widget_set_tooltip_text(f->pw_e, "保存后将清除已保存密码");
 }
 
-static void on_closed(AdwDialog *dlg, HostForm *f)
+static void form_free(HostForm *f)
 {
-    (void)dlg;
     if (f->jump_idle) g_source_remove(f->jump_idle);
     if (f->obj) hb_obj_free(f->obj);
     g_free(f->host_id);
@@ -820,6 +846,16 @@ static void on_closed(AdwDialog *dlg, HostForm *f)
     g_ptr_array_free(f->group_names, TRUE);
     g_ptr_array_free(f->snip_ids, TRUE);
     g_free(f);
+}
+
+static void on_closed(AdwDialog *dlg, HostForm *f)
+{
+    (void)dlg;
+    f->dead = TRUE;
+    if (f->jump_idle) {
+        g_source_remove(f->jump_idle);
+        f->jump_idle = 0;
+    }
 }
 
 /* ------------------------------ 构建 ------------------------------ */
@@ -1129,6 +1165,8 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     on_auth_sel(GTK_DROP_DOWN(f->auth_dd), NULL, f);
     apply_proto_vis(f);
 
+    g_object_set_data_full(G_OBJECT(dlg), "hb-form", f,
+                           (GDestroyNotify)form_free);
     g_signal_connect(dlg, "closed", G_CALLBACK(on_closed), f);
     adw_dialog_present(ADW_DIALOG(dlg),
                        GTK_IS_WIDGET(root) ? GTK_WIDGET(root) : NULL);
