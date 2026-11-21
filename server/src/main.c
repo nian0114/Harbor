@@ -53,7 +53,7 @@ static gboolean on_sigint(gpointer u)
 
 int main(int argc, char **argv)
 {
-    g_autoptr(GOptionContext) oc;
+    g_autoptr(GOptionContext) oc = NULL;
     g_autoptr(GError) err = NULL;
     g_autofree char *opt_listen = g_strdup("127.0.0.1:8787");
     g_autofree char *opt_data = NULL;

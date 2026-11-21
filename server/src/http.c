@@ -715,7 +715,7 @@ static void h_recover(hb_srv *srv, SoupServerMessage *msg, const char *path,
 
     if (!strcmp(path, "/v1/recover/start")) {
         uint8_t rc_auth[32];
-        g_autofree char *email;
+        g_autofree char *email = NULL;
         RcStartCtx *c;
         HashJob *j;
         if (!o || !body_str_b64(o, "rc_auth", rc_auth, 32))
@@ -874,6 +874,89 @@ bad:
     if (o) json_object_unref(o);
 }
 
+/* ---- POST /recovery：恢复码轮换 ---- */
+
+typedef struct {
+    char *acct_id;
+    char *wvk_rc;
+} RrotCtx;
+
+static void rrot_ctx_free(RrotCtx *c)
+{
+    g_free(c->acct_id); g_free(c->wvk_rc); g_free(c);
+}
+
+static void recovery_done(HashJob *j)
+{
+    RrotCtx *c = j->data;
+    hb_srv *srv = j->srv;
+    if (!j->ok) {
+        /* auth_key 错 → 计入账号失败限流 */
+        HbAcct *a = NULL;
+        if (hbd_acct_by_id(srv->db, c->acct_id, &a) == 0) {
+            auth_failed(srv, a);
+            hbd_acct_free(a);
+        }
+        hbu_error(j->msg, SOUP_STATUS_UNAUTHORIZED, "invalid_credentials",
+                  "invalid credentials", NULL);
+        goto out;
+    }
+    hbd_acct_set_rc(srv->db, c->acct_id, j->h2, c->wvk_rc);
+    hbu_respond_json(j->msg, SOUP_STATUS_OK, "{}");
+    hb_log(srv, 2, "recovery rotated account=%s", c->acct_id);
+out:
+    hash_job_free(j);
+}
+
+static void h_recovery(hb_srv *srv, SoupServerMessage *msg, const char *path,
+                       GHashTable *query)
+{
+    g_autofree char *acct = NULL, *dev = NULL;
+    JsonObject *o;
+    RrotCtx *c;
+    HashJob *j;
+    HbAcct *a = NULL;
+    uint8_t auth_key[32], rc_auth[32];
+    (void)path; (void)query;
+    if (strcmp(soup_server_message_get_method(msg), SOUP_METHOD_POST)) {
+        soup_server_message_set_status(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                                       NULL);
+        return;
+    }
+    if (!hb_auth_check(srv, msg, &acct, &dev)) return;
+    o = hbu_body_json(msg);
+    c = g_new0(RrotCtx, 1);
+    c->acct_id = g_steal_pointer(&acct);
+    if (!o || !body_str_b64(o, "auth_key", auth_key, 32) ||
+        !body_str_b64(o, "rc_auth", rc_auth, 32) ||
+        !(c->wvk_rc = g_strdup(hbu_jstr(o, "wrapped_vk_rc"))) ||
+        hbd_acct_by_id(srv->db, c->acct_id, &a) != 0)
+        goto bad;
+    if (acct_locked(srv, msg, a)) goto bad_locked;
+    j = job_new(srv, msg, H_VERIFY_THEN_HASH);
+    memcpy(j->s1, auth_key, 32); j->n1 = 32;
+    memcpy(j->s2, rc_auth, 32);  j->n2 = 32;
+    j->stored = g_strdup(a->auth_hash);
+    j->cont = recovery_done;
+    j->data = c;
+    j->data_free = (GDestroyNotify)rrot_ctx_free;
+    hbd_acct_free(a);
+    sodium_memzero(auth_key, 32);
+    sodium_memzero(rc_auth, 32);
+    json_object_unref(o);
+    hash_go(j);
+    return;
+bad:
+    hbu_error(msg, SOUP_STATUS_BAD_REQUEST, "bad_request",
+              "malformed recovery request", NULL);
+bad_locked:
+    sodium_memzero(auth_key, 32);
+    sodium_memzero(rc_auth, 32);
+    hbd_acct_free(a);
+    rrot_ctx_free(c);
+    if (o) json_object_unref(o);
+}
+
 /* ---- POST /logout ---- */
 
 static void h_logout(hb_srv *srv, SoupServerMessage *msg, const char *path,
@@ -998,7 +1081,7 @@ static void h_totp(hb_srv *srv, SoupServerMessage *msg, const char *path,
 
     if (!strcmp(path, "/v1/totp/setup")) {
         uint8_t sec[20];
-        g_autofree char *b32, *esc_email, *s;
+        g_autofree char *b32 = NULL, *esc_email = NULL, *s = NULL;
         randombytes_buf(sec, sizeof sec);
         if (hbd_acct_by_id(srv->db, acct, &a) != 0) goto bad;
         /* 存为待启用；已启用状态不变 */
@@ -1060,8 +1143,8 @@ static void h_objects_get(hb_srv *srv, SoupServerMessage *msg,
     GArray *rows;
     bool more;
     int64_t next;
-    g_autoptr(JsonBuilder) b;
-    g_autofree char *s;
+    g_autoptr(JsonBuilder) b = NULL;
+    g_autofree char *s = NULL;
     guint i, n;
 
     if (since_s) {
@@ -1412,6 +1495,7 @@ void http_attach(hb_srv *srv)
         { "/v1/login", h_login },
         { "/v1/recover", h_recover },
         { "/v1/password", h_password },
+        { "/v1/recovery", h_recovery },
         { "/v1/logout", h_logout },
         { "/v1/devices", h_devices },
         { "/v1/totp", h_totp },

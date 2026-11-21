@@ -210,6 +210,20 @@ int hbd_acct_set_auth(sqlite3 *db, const char *id, const char *auth_hash,
     return rc == SQLITE_DONE ? 0 : -1;
 }
 
+int hbd_acct_set_rc(sqlite3 *db, const char *id, const char *rc_hash,
+                    const char *wrapped_vk_rc)
+{
+    sqlite3_stmt *st = prep(
+        db, "UPDATE accounts SET rc_hash=?,wrapped_vk_rc=? WHERE id=?");
+    int rc;
+    sqlite3_bind_text(st, 1, rc_hash, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, wrapped_vk_rc, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, id, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? 0 : -1;
+}
+
 int hbd_acct_set_totp(sqlite3 *db, const char *id, const uint8_t secret[20],
                     bool pending, bool enabled, int64_t last_step)
 {

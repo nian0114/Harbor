@@ -94,6 +94,8 @@ int  hbd_acct_by_email(sqlite3 *db, const char *email, HbAcct **out);
 int  hbd_acct_by_id(sqlite3 *db, const char *id, HbAcct **out);
 int  hbd_acct_insert(sqlite3 *db, const HbAcct *a);
 int  hbd_acct_set_lock(sqlite3 *db, const char *id, int fail, int64_t until);
+int  hbd_acct_set_rc(sqlite3 *db, const char *id, const char *rc_hash,
+                     const char *wrapped_vk_rc);
 int  hbd_acct_set_auth(sqlite3 *db, const char *id, const char *auth_hash,
                        const char *salt, int64_t ops, int64_t mem,
                        const char *wrapped_vk_pw);

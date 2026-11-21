@@ -1025,7 +1025,7 @@ static void t_zero_knowledge(void)
     sqlite3 *db = NULL;
     char *dbp;
     GByteArray *dump = g_byte_array_new();
-    asprintf(&dbp, "%s/harbor-server.db", g_dir);
+    CHECK(asprintf(&dbp, "%s/harbor-server.db", g_dir) >= 0);
     CHECK_EQ_INT(sqlite3_open(dbp, &db), SQLITE_OK);
     free(dbp);
     {
@@ -1171,6 +1171,86 @@ static void t_validation(void)
     acct_free(&a);
 }
 
+/* ---- POST /v1/recovery：恢复码轮换 ---- */
+
+static Resp rotate_req(Acct *a, const uint8_t *ak32, const uint8_t *rc32)
+{
+    char *ak = b64e(ak32, 32), *ra = b64e(rc32, 32);
+    char *wv = b64e((uint8_t *)"wrapped-rc-new", 14);
+    char *body = g_strdup_printf(
+        "{\"auth_key\":\"%s\",\"rc_auth\":\"%s\",\"wrapped_vk_rc\":\"%s\"}",
+        ak, ra, wv);
+    Resp r = post("/v1/recovery", body, a->token);
+    free(ak); free(ra); free(wv); g_free(body);
+    return r;
+}
+
+static void t_recovery_rotate(void)
+{
+    Acct a = {0}, l = {0};
+    uint8_t bad[32], nrc[32];
+    Resp r;
+    int i;
+
+    CHECK(do_register(&a, "rot@x.y", 0xa1));
+    /* 错 auth_key → 401（并计入账号失败限流） */
+    memset(bad, 0x99, 32);
+    r = rotate_req(&a, bad, a.rc_auth);
+    CHECK_EQ_INT(r.status, 401);
+    CHECK_EQ_STR(jstr(r.obj, "error"), "invalid_credentials");
+    resp_free(&r);
+    /* 轮换成功 */
+    memset(nrc, 0x55, 32);
+    r = rotate_req(&a, a.auth_key, nrc);
+    CHECK_EQ_INT(r.status, 200);
+    resp_free(&r);
+    /* 旧 rc_auth → recover/start 401 */
+    {
+        char *ora = b64e(a.rc_auth, 32);
+        char *rb = g_strdup_printf("{\"email\":\"%s\",\"rc_auth\":\"%s\"}",
+                                   a.email, ora);
+        Resp r2 = post("/v1/recover/start", rb, NULL);
+        CHECK_EQ_INT(r2.status, 401);
+        CHECK_EQ_STR(jstr(r2.obj, "error"), "invalid_credentials");
+        resp_free(&r2);
+        free(ora); g_free(rb);
+    }
+    /* 新 rc_auth → 200，wrapped_vk_rc 为轮换写入值 */
+    {
+        char *nra = b64e(nrc, 32);
+        char *rb = g_strdup_printf("{\"email\":\"%s\",\"rc_auth\":\"%s\"}",
+                                   a.email, nra);
+        Resp r3 = post("/v1/recover/start", rb, NULL);
+        char *wv = b64e((uint8_t *)"wrapped-rc-new", 14);
+        CHECK_EQ_INT(r3.status, 200);
+        CHECK(jstr(r3.obj, "recovery_token") != NULL);
+        CHECK_EQ_STR(jstr(r3.obj, "wrapped_vk_rc"), wv);
+        resp_free(&r3);
+        free(nra); g_free(rb); free(wv);
+    }
+    memcpy(a.rc_auth, nrc, 32);
+
+    /* 错 auth_key 计入锁定：5 次 → rate_limited */
+    CHECK(do_register(&l, "rot-lock@x.y", 0xb1));
+    for (i = 0; i < 5; i++) {
+        r = rotate_req(&l, bad, l.rc_auth);
+        CHECK_EQ_INT(r.status, 401);
+        resp_free(&r);
+    }
+    r = rotate_req(&l, l.auth_key, l.rc_auth);
+    CHECK_EQ_INT(r.status, 429);
+    CHECK_EQ_STR(jstr(r.obj, "error"), "rate_limited");
+    CHECK(jstr(r.obj, "retry_after") || r.obj);
+    {
+        JsonNode *n = r.obj ? json_object_get_member(r.obj, "retry_after")
+                            : NULL;
+        CHECK(n && json_node_get_int(n) >= 0);
+    }
+    resp_free(&r);
+    acct_free(&a);
+    acct_free(&l);
+}
+
 /* ---- 有界 Argon2 池：并发认证不阻塞主循环；超队列上限 → 429 ---- */
 
 typedef struct {
@@ -1260,6 +1340,7 @@ int main(void)
     t_totp();
     t_devices_ws();
     t_recovery();
+    t_recovery_rotate();
     t_zero_knowledge();
     t_validation();
     t_hash_pool();
