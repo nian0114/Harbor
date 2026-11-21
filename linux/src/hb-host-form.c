@@ -43,6 +43,9 @@ typedef struct {
     GtkWidget *type_dd;
     GtkWidget *name_e, *addr_e, *port_sb, *user_e;
     GtkWidget *sec_addr, *sec_auth, *sec_jump, *sec_tunnel, *sec_keep, *sec_os;
+    GtkWidget *sec_dauth, *dom_row;
+    GtkWidget *dpw_e, *dpw_clear, *dom_e;
+    gboolean   had_dsecret, dpw_cleared;
 
     GtkWidget *auth_dd, *pw_box, *key_box;
     GtkWidget *pw_e, *pw_clear;
@@ -605,6 +608,9 @@ static void apply_proto_vis(HostForm *f)
     gtk_widget_set_visible(f->sec_addr, remote);
     gtk_widget_set_visible(f->sec_auth, ssh);
     gtk_widget_set_visible(f->sec_jump, ssh);
+    gtk_widget_set_visible(f->sec_dauth, remote && !ssh);
+    gtk_widget_set_visible(f->dom_row,
+                           !strcmp(f->proto, "rdp"));
     gtk_widget_set_visible(f->sec_tunnel,
                            remote && !ssh);
     gtk_widget_set_visible(f->sec_keep, ssh);
@@ -859,6 +865,14 @@ static void do_save(HostForm *f)
         hb_obj_set_str(o, "key_id", NULL);
         hb_obj_set_strv(o, "jump", NULL, 0);
         hb_obj_set_str(o, "keepalive", NULL);
+        /* 桌面认证：domain 仅 rdp */
+        if (!strcmp(f->proto, "rdp")) {
+            const char *dm =
+                gtk_editable_get_text(GTK_EDITABLE(f->dom_e));
+            hb_obj_set_str(o, "domain", dm && *dm ? dm : NULL);
+        } else {
+            hb_obj_set_str(o, "domain", NULL);
+        }
     }
 
     /* 分组 */
@@ -881,7 +895,8 @@ static void do_save(HostForm *f)
 
     hb_vault_put(f->v, o);
 
-    /* 密码 secret（仅 ssh/password 语义；编辑时空=保留） */
+    /* 密码 secret（ssh/password 与 rdp/vnc 桌面认证语义相同；
+     * 编辑时空=保留、清除按钮=置 NULL） */
     if (!strcmp(f->proto, "ssh")) {
         guint ai = dd_idx(GTK_DROP_DOWN(f->auth_dd));
         if (ai == 1) {
@@ -894,10 +909,27 @@ static void do_save(HostForm *f)
         } else if (f->pw_cleared) {
             hb_vault_set_secret(f->v, hb_obj_id(o), "password", NULL);
         }
+    } else if (!strcmp(f->proto, "rdp") || !strcmp(f->proto, "vnc")) {
+        const char *pw =
+            gtk_editable_get_text(GTK_EDITABLE(f->dpw_e));
+        if (f->dpw_cleared)
+            hb_vault_set_secret(f->v, hb_obj_id(o), "password", NULL);
+        if (pw && *pw)
+            hb_vault_set_secret(f->v, hb_obj_id(o), "password", pw);
     }
 
     hb_toast(GTK_WIDGET(f->dlg), "主机已保存");
     adw_dialog_close(f->dlg);
+}
+
+static void on_dpw_clear(GtkButton *b, HostForm *f)
+{
+    (void)b;
+    if (f->dead) return;
+    f->dpw_cleared = TRUE;
+    gtk_widget_set_visible(f->dpw_clear, FALSE);
+    gtk_editable_set_text(GTK_EDITABLE(f->dpw_e), "");
+    gtk_widget_set_tooltip_text(f->dpw_e, "保存后将清除已保存密码");
 }
 
 static void on_save(GtkButton *b, HostForm *f)
@@ -1111,6 +1143,32 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     }
     gtk_box_append(GTK_BOX(b), f->key_box);
 
+    /* 桌面认证（rdp/vnc）：密码可存 vault secret；域仅 RDP 显示。
+     * 用户名复用「基本信息」里的 user 字段。 */
+    b = sec_box(f, "桌面认证", &f->sec_dauth);
+    {
+        GtkWidget *pr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        f->dpw_e = gtk_password_entry_new();
+        gtk_password_entry_set_show_peek_icon(
+            GTK_PASSWORD_ENTRY(f->dpw_e), TRUE);
+        gtk_widget_set_hexpand(f->dpw_e, TRUE);
+        gtk_box_append(GTK_BOX(pr), f->dpw_e);
+        f->dpw_clear = gtk_button_new_with_label("清除已保存密码");
+        gtk_widget_add_css_class(f->dpw_clear, "hb-link");
+        gtk_widget_set_visible(f->dpw_clear, FALSE);
+        g_signal_connect(f->dpw_clear, "clicked",
+                         G_CALLBACK(on_dpw_clear), f);
+        gtk_box_append(GTK_BOX(pr), f->dpw_clear);
+        gtk_box_append(GTK_BOX(b), lbl("密码（可空，连接时询问）"));
+        gtk_box_append(GTK_BOX(b), pr);
+    }
+    f->dom_row = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    gtk_box_append(GTK_BOX(f->dom_row), lbl("域（RDP）"));
+    f->dom_e = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(f->dom_e), "留空 = 本机域");
+    gtk_box_append(GTK_BOX(f->dom_row), f->dom_e);
+    gtk_box_append(GTK_BOX(b), f->dom_row);
+
     /* SSH 跳板链 */
     b = sec_box(f, "跳板机（外 → 内）", &f->sec_jump);
     f->jump_rows = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
@@ -1228,8 +1286,12 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
             char *sec = hb_vault_get_secret(f->v, host_id, "password");
             f->had_secret = sec != NULL;
             gtk_widget_set_visible(f->pw_clear, f->had_secret);
+            f->had_dsecret = f->had_secret;
+            gtk_widget_set_visible(f->dpw_clear, f->had_dsecret);
             if (sec) hb_secret_free(sec);
         }
+        s = hb_obj_get_str(f->obj, "domain");
+        gtk_editable_set_text(GTK_EDITABLE(f->dom_e), s ? s : "");
         s = hb_obj_get_str(f->obj, "key_id");
         key_rebuild(f, s);
         s = hb_obj_get_str(f->obj, "identity_file");
