@@ -14,3 +14,7 @@ subdir('core')
 if get_option('linux')
     subdir('linux')
 endif
+
+if get_option('server')
+    subdir('server')
+endif
