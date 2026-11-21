@@ -64,6 +64,7 @@ typedef struct {
     guint      jump_pending; /* index chosen for the deferred add */
 
     GtkWidget *tunnel_sw, *via_dd;
+    GtkWidget *fwd_btn;
     GPtrArray *via_ids;
 
     GtkWidget *group_dd;
@@ -633,6 +634,100 @@ static void on_type_sel(GtkDropDown *dd, GParamSpec *ps, HostForm *f)
     apply_proto_vis(f);
 }
 
+/* FR-06 bullet 3 —— 隧道区「生成配套转发规则」 */
+static void fwd_btn_refresh(HostForm *f)
+{
+    gtk_widget_set_sensitive(f->fwd_btn,
+        gtk_switch_get_active(GTK_SWITCH(f->tunnel_sw)) &&
+        dd_idx(GTK_DROP_DOWN(f->via_dd)) > 0);
+}
+
+static void on_tunnel_fwd_sel(GObject *w, GParamSpec *ps, gpointer ud)
+{
+    HostForm *f = ud;
+    (void)w; (void)ps;
+    if (f->dead) return;
+    fwd_btn_refresh(f);
+}
+
+/* 优先 10000+dest_port；占用则向上找下一个既没被已有规则用、
+ * probe 也通过的空闲端口 */
+static int fwd_pick_port(HostForm *f, int dport)
+{
+    int p = dport + 10000;
+    int tries;
+    hb_obj **objs;
+    size_t n = 0, i;
+
+    if (p > 65535) p = 10000;
+    objs = hb_store_list(f->st, "forward", &n);
+    for (tries = 0; tries < 56000 && p <= 65535; tries++, p++) {
+        gboolean clash = FALSE;
+        for (i = 0; objs && i < n && !clash; i++) {
+            const char *k = hb_obj_get_str(objs[i], "kind");
+            int bp = (int)hb_obj_get_int(objs[i], "bind_port", 0);
+            if (k && !strcmp(k, "remote")) continue;
+            if (bp == p) clash = TRUE;
+        }
+        if (!clash &&
+            hb_pf_probe_bind("127.0.0.1", p, NULL) == HB_OK)
+            break;
+    }
+    if (objs) hb_obj_list_free(objs, n);
+    return p <= 65535 ? p : 0;
+}
+
+static void on_gen_fwd(GtkButton *b, gpointer ud)
+{
+    HostForm *f = ud;
+    guint vi;
+    (void)b;
+    if (f->dead) return;
+    vi = dd_idx(GTK_DROP_DOWN(f->via_dd));
+    const char *vid;
+    int dport, bport;
+    hb_obj *o, *vh = NULL;
+    const char *vname;
+    char *msg;
+
+    if (vi >= f->via_ids->len ||
+        !(vid = g_ptr_array_index(f->via_ids, vi))) {
+        hb_toast(GTK_WIDGET(f->dlg), "请先选择经由 SSH 主机");
+        return;
+    }
+    dport = gtk_spin_button_get_value_as_int(
+        GTK_SPIN_BUTTON(f->port_sb));
+    bport = fwd_pick_port(f, dport);
+    if (!bport) {
+        hb_toast(GTK_WIDGET(f->dlg), "找不到空闲监听端口");
+        return;
+    }
+    o = hb_obj_new("forward");
+    hb_obj_set_str(o, "kind", "local");
+    hb_obj_set_str(o, "bind_addr", "127.0.0.1");
+    hb_obj_set_int(o, "bind_port", bport);
+    hb_obj_set_str(o, "dest_addr", "127.0.0.1");
+    hb_obj_set_int(o, "dest_port", dport);
+    hb_obj_set_str(o, "via", vid);
+    hb_obj_set_bool(o, "autostart", FALSE);
+    hb_obj_set_bool(o, "enabled", FALSE);
+    hb_obj_set_int(o, "order", g_get_real_time() / 1000000);
+    hb_vault_put(hb_store_vault(f->st), o);
+
+    vname = vid;
+    if (hb_vault_get(hb_store_vault(f->st), vid, &vh) == HB_OK && vh) {
+        const char *nm = hb_obj_get_str(vh, "name");
+        if (nm && *nm) vname = nm;
+    }
+    msg = g_strdup_printf(
+        "已创建转发规则 127.0.0.1:%d → 127.0.0.1:%d（经 %s）",
+        bport, dport, vname);
+    hb_toast(GTK_WIDGET(f->dlg), msg);
+    g_free(msg);
+    if (vh) hb_obj_free(vh);
+    hb_obj_free(o);
+}
+
 static void on_auth_sel(GtkDropDown *dd, GParamSpec *ps, HostForm *f)
 {
     guint i;
@@ -1034,11 +1129,23 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_box_append(GTK_BOX(row), t);
         f->tunnel_sw = gtk_switch_new();
+        g_signal_connect(f->tunnel_sw, "notify::active",
+                         G_CALLBACK(on_tunnel_fwd_sel), f);
         gtk_box_append(GTK_BOX(row), f->tunnel_sw);
     }
     gtk_box_append(GTK_BOX(b), row);
     f->via_dd = GTK_WIDGET(gtk_drop_down_new(NULL, NULL));
+    g_signal_connect(f->via_dd, "notify::selected",
+                     G_CALLBACK(on_tunnel_fwd_sel), f);
     gtk_box_append(GTK_BOX(b), f->via_dd);
+    f->fwd_btn = gtk_button_new_with_label("生成配套转发规则");
+    gtk_widget_add_css_class(f->fwd_btn, "hb-btn");
+    gtk_widget_set_halign(f->fwd_btn, GTK_ALIGN_START);
+    gtk_widget_set_tooltip_text(f->fwd_btn,
+        "创建本机端口 → 此主机端口的 Local 转发，经所选 SSH 主机");
+    g_signal_connect(f->fwd_btn, "clicked", G_CALLBACK(on_gen_fwd), f);
+    gtk_widget_set_sensitive(f->fwd_btn, FALSE);
+    gtk_box_append(GTK_BOX(b), f->fwd_btn);
 
     /* 分组 */
     b = sec_box(f, "分组", NULL);
