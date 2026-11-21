@@ -1515,8 +1515,11 @@ int hb__pf_run(void *ctx, hb_session *s)
             pf[0].events = POLLIN;
             pf[0].revents = 0;
             pf[1].fd = e->hp->sock;
-            /* POLLIN 恒订：keepalive 回复等杂散入站包会刷新 ka_last_in。 */
-            pf[1].events = POLLIN | POLLERR | POLLHUP;
+            /* POLLIN 恒订：keepalive 回复等杂散入站包会刷新 ka_last_in。
+             * POLLRDHUP 必订：对端 FIN 或 jump 泵 shutdown(SHUT_WR) 的
+             * 半关只报 POLLIN/RDHUP 而不报 POLLHUP；漏订则 EOF 的 POLLIN
+             * 一直刷新 ka_last_in，keepalive 判死永不触发（僵尸会话）。 */
+            pf[1].events = POLLIN | POLLRDHUP | POLLERR | POLLHUP;
             dirs = libssh2_session_block_directions(e->hp->sess);
             if (dirs & LIBSSH2_SESSION_BLOCK_OUTBOUND)
                 pf[1].events |= POLLOUT;
@@ -1585,7 +1588,8 @@ int hb__pf_run(void *ctx, hb_session *s)
             }
             if (pf[1].revents & POLLIN)
                 h->ka_last_in = hb_now_ms();
-            if (pf[1].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+            if (pf[1].revents &
+                (POLLRDHUP | POLLERR | POLLHUP | POLLNVAL)) {
                 e->conn_dead = true;
                 h->disconnected = true;
             }

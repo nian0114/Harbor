@@ -1005,7 +1005,7 @@ out:
 }
 
 /* 9. 断线：杀掉 sshd 及其子进程 → HB_SSH_ERR_DISCONNECTED + 端口释放 */
-static void kill_tree(pid_t root)
+static void kill_tree_sig(pid_t root, int sig)
 {
     pid_t lvl[256], nxt[256], dead[512];
     int nl = 0, n_dead = 0, i, j;
@@ -1063,9 +1063,87 @@ static void kill_tree(pid_t root)
         nl = nn;
     }
     for (j = 0; j < n_dead; j++)
-        kill(dead[j], SIGKILL);
-    kill(root, SIGKILL);
+        kill(dead[j], sig);
+    kill(root, sig);
     waitpid(root, NULL, 0);
+}
+
+static void kill_tree(pid_t root)
+{
+    kill_tree_sig(root, SIGKILL);
+}
+
+/* 9b. 断线（优雅 FIN）：对端正常关闭只报 POLLIN|POLLRDHUP 而无
+ * POLLERR/POLLHUP。keepalive 关闭时没有任何出站包 → 收不到
+ * RST/POLLERR，唯一侦测途径就是 POLLRDHUP；漏订时 EOF 的
+ * POLLIN 让 poll 持续空转、DISCONNECTED 永不发出（僵尸会话）
+ * → 本用例在修复前必定超时失败。独立 fixture：fx 留给
+ * t_disconnect 的 SIGKILL。 */
+static void t_disconnect_fin(void)
+{
+    hb_sshd fx2;
+    srv es;
+    hb_pf_rule r;
+    hb_ssh_opts o;
+    drv d;
+    hb_session *s = NULL;
+    char *err = NULL;
+    const char *kl[1];
+    int bp = 0;
+    int64_t dl;
+
+    memset(&fx2, 0, sizeof fx2);
+    if (hb_sshd_start(&fx2) != 0) {
+        fprintf(stderr, "fx2 start failed\n");
+        CHECK(0);
+        return;
+    }
+    CHECK(srv_start(&es, 0) == 0);
+    drv_init(&d);
+    memset(&r, 0, sizeof r);
+    r.kind = HB_PF_LOCAL;
+    r.bind_addr = "127.0.0.1";
+    r.bind_port = 0;
+    r.dest_addr = "127.0.0.1";
+    r.dest_port = es.port;
+    o = base_opts();
+    o.target.port = fx2.port;
+    o.target.user = fx2.user;
+    o.target.privkey = fx2.key;
+    o.keepalive_s = 0;   /* 关键：无 keepalive 写 → 无 RST 兜底 */
+    kl[0] = fx2.khline;
+    o.known_lines = kl;
+    o.nknown = 1;
+    s = hb_session_new_forward(&o, &r, &bp, &err);
+    free(err);
+    CHECK(s != NULL && bp > 0);
+    if (!s)
+        goto out;
+    wait_for(s, &d, p_listening, 15000);
+    CHECK(d.listening);
+
+    /* 会话上没有任何客户端连接 —— 纯 idle；SIGTERM 使 sshd 正常
+     * 退出，内核按序 close socket → 对端收到 FIN。 */
+    kill_tree_sig(fx2.pid, SIGTERM);
+    fx2.pid = -1;                    /* hb_sshd_stop 不再 kill */
+
+    dl = now_ms() + 10000;
+    while (now_ms() < dl && d.err_code != HB_SSH_ERR_DISCONNECTED) {
+        struct pollfd p = { .fd = hb_session_event_fd(s),
+                            .events = POLLIN, .revents = 0 };
+        if (poll(&p, 1, 50) > 0)
+            pump(s, &d);
+    }
+    CHECK_EQ_INT(d.err_code, HB_SSH_ERR_DISCONNECTED);
+
+    wait_for(s, &d, p_exited, 3000);
+    hb_session_free(s);
+    s = NULL;
+out:
+    if (s)
+        hb_session_free(s);
+    srv_stop(&es);
+    hb_sshd_stop(&fx2);
 }
 
 static void t_disconnect(void)
@@ -1290,6 +1368,8 @@ int main(void)
     printf("  t_close_midstream done\n");
     t_remote_resolve();
     printf("  t_remote_resolve done\n");
+    t_disconnect_fin();      /* 优雅 FIN 断线（独立 fixture） */
+    printf("  t_disconnect_fin done\n");
     t_disconnect();          /* 杀掉 fixture sshd —— 必须最后跑 */
     printf("  t_disconnect done\n");
 
