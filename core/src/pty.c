@@ -171,7 +171,7 @@ static void child_exec(const struct spawn_ctx *c)
     sigprocmask(SIG_SETMASK, &c->empty_mask, NULL);
 
     if (c->cwd && c->cwd[0])
-        chdir(c->cwd);
+        (void)!chdir(c->cwd);
     execve(c->path, c->argv, c->envp);
     _exit(127);
 }

@@ -303,7 +303,7 @@ static void fixture_teardown(void)
         waitpid(fix_sshd, NULL, 0);
     }
     snprintf(cmd, sizeof cmd, "rm -rf %s", fix_dir);
-    system(cmd);
+    (void)!system(cmd);
     hb_key_info_clear(&fix_k_ed);
     hb_key_info_clear(&fix_k_p256);
     hb_key_info_clear(&fix_k_rsa);

@@ -270,7 +270,7 @@ static int count_parts(const char *dir)
 
 static void joinp(char *out, size_t cap, const char *d, const char *n)
 {
-    snprintf(out, cap, "%s/%s", d, n);
+    CHECK(snprintf(out, cap, "%s/%s", d, n) < (int)cap);
 }
 
 /* 杀掉 sshd master 下整棵会话子树（sshd 连接 = [priv] 监控进程 + 其下的
@@ -327,7 +327,7 @@ static void test_main_ops(void)
     joinp(p2, sizeof p2, p, "subd");
     mkdir(p2, 0700);
     joinp(p2, sizeof p2, p, "ln1");
-    symlink("fileA", p2);
+    CHECK(symlink("fileA", p2) == 0);
 
     q = hb_sftp_list(s, p);
     r = wait_done(s, &d, q, 10000);
@@ -924,10 +924,10 @@ static void test_links(void)
     wfile(p2, 16, 0600, 9);
     {
         char lk[PATH_MAX];
-        joinp(lk, sizeof lk, p, "esc-parent");  symlink("../sentineld", lk);
-        joinp(lk, sizeof lk, p, "esc-etc");     symlink("/etc", lk);
-        joinp(lk, sizeof lk, p, "esc-file");    symlink("/etc/hostname", lk);
-        joinp(lk, sizeof lk, p, "inner-link");  symlink("real.txt", lk);
+        joinp(lk, sizeof lk, p, "esc-parent");  CHECK(symlink("../sentineld", lk) == 0);
+        joinp(lk, sizeof lk, p, "esc-etc");     CHECK(symlink("/etc", lk) == 0);
+        joinp(lk, sizeof lk, p, "esc-file");    CHECK(symlink("/etc/hostname", lk) == 0);
+        joinp(lk, sizeof lk, p, "inner-link");  CHECK(symlink("real.txt", lk) == 0);
     }
 
     sdrv_init(&d);
@@ -989,7 +989,7 @@ static void test_links(void)
     {
         char lk[PATH_MAX];
         joinp(lk, sizeof lk, p, "esc");
-        symlink("/etc", lk);
+        CHECK(symlink("/etc", lk) == 0);
     }
     joinp(p2, sizeof p2, RD, "ltree-up");
     q = hb_sftp_upload(s, p, p2, HB_SFTP_OVERWRITE);
