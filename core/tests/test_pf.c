@@ -23,6 +23,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -1073,6 +1074,108 @@ static void kill_tree(pid_t root)
     kill_tree_sig(root, SIGKILL);
 }
 
+/* 进程 CPU（ms）：idle 期间主线程只睡 poll、对端服务器阻塞在
+ * accept/read，进程耗量≈转发引擎线程 —— 够用的回归信号：
+ * POLLIN 漏订修复被回退时本项 ~4s/4s ≈ 100% 必爆。 */
+static long cpu_ms(void)
+{
+    struct rusage ru;
+    getrusage(RUSAGE_SELF, &ru);
+    return ru.ru_utime.tv_sec * 1000 + ru.ru_utime.tv_usec / 1000 +
+           ru.ru_stime.tv_sec * 1000 + ru.ru_stime.tv_usec / 1000;
+}
+
+/* 闲置 local 转发 ~4s 无任何客户端：进程 CPU 必须 < 10% 墙钟。
+ * ff=fixture（MaxSessions 0 时 drain channel 开不出，走降级路径）。
+ * ping!=NULL 时先做一笔 echo 往返证明转发可用。 */
+static void idle_cpu_case(hb_sshd *ff, int ping)
+{
+    srv es;
+    hb_pf_rule r;
+    hb_ssh_opts o;
+    drv d;
+    hb_session *s = NULL;
+    char *err = NULL;
+    const char *kl[1];
+    int bp = 0, fd;
+    long dc;
+    int64_t t0;
+
+    CHECK(srv_start(&es, 0) == 0);
+    drv_init(&d);
+    memset(&r, 0, sizeof r);
+    r.kind = HB_PF_LOCAL;
+    r.bind_addr = "127.0.0.1";
+    r.bind_port = 0;
+    r.dest_addr = "127.0.0.1";
+    r.dest_port = es.port;
+    o = base_opts();
+    o.target.port = ff->port;
+    o.target.user = ff->user;
+    o.target.privkey = ff->key;
+    o.keepalive_s = 1;
+    kl[0] = ff->khline;
+    o.known_lines = kl;
+    o.nknown = 1;
+    s = hb_session_new_forward(&o, &r, &bp, &err);
+    free(err);
+    CHECK(s != NULL && bp > 0);
+    if (!s)
+        goto out;
+    wait_for(s, &d, p_listening, 15000);
+    CHECK(d.listening);
+
+    if (ping) {   /* drain 开不出来也得能转发 */
+        char b = 0;
+        fd = tcp_conn(bp);
+        CHECK(fd >= 0);
+        CHECK(write_all(fd, "Z", 1) == 0);
+        CHECK(read_all(fd, &b, 1) == 1 && b == 'Z');
+        close(fd);
+    }
+
+    /* 4s 纯闲置：poll 事件 fd 泵掉 STATS 等事件（本身零开销）。 */
+    t0 = now_ms();
+    {
+        long c0 = cpu_ms();
+        while (now_ms() - t0 < 4000) {
+            struct pollfd p = { .fd = hb_session_event_fd(s),
+                                .events = POLLIN, .revents = 0 };
+            if (poll(&p, 1, 100) > 0)
+                pump(s, &d);
+        }
+        dc = cpu_ms() - c0;
+    }
+    printf("  idle-cpu: %ld ms cpu / 4000 ms wall\n", dc);
+    CHECK(dc < 400 && !d.err_code);
+out:
+    if (s)
+        hb_session_free(s);
+    srv_stop(&es);
+}
+
+/* (a) 正常 sshd：drain channel 在 → POLLIN 门控，idle 不空转。 */
+static void t_idle_cpu(void)
+{
+    idle_cpu_case(&fx, 0);
+}
+
+/* (b) MaxSessions 0（纯转发账号常见）：drain 开不出 → 降级模式，
+ *     转发仍可用且 CPU 依旧低。 */
+static void t_idle_cpu_nosess(void)
+{
+    hb_sshd fx2;
+    memset(&fx2, 0, sizeof fx2);
+    snprintf(fx2.extra_cfg, sizeof fx2.extra_cfg, "MaxSessions 0\n");
+    if (hb_sshd_start(&fx2) != 0) {
+        fprintf(stderr, "fx2 start failed\n");
+        CHECK(0);
+        return;
+    }
+    idle_cpu_case(&fx2, 1);
+    hb_sshd_stop(&fx2);
+}
+
 /* 9b. 断线（优雅 FIN）：对端正常关闭只报 POLLIN|POLLRDHUP 而无
  * POLLERR/POLLHUP。keepalive 关闭时没有任何出站包 → 收不到
  * RST/POLLERR，唯一侦测途径就是 POLLRDHUP；漏订时 EOF 的
@@ -1368,6 +1471,10 @@ int main(void)
     printf("  t_close_midstream done\n");
     t_remote_resolve();
     printf("  t_remote_resolve done\n");
+    t_idle_cpu();            /* idle POLLIN 门控（drain 正常） */
+    printf("  t_idle_cpu done\n");
+    t_idle_cpu_nosess();     /* MaxSessions 0 降级模式（独立 fixture） */
+    printf("  t_idle_cpu_nosess done\n");
     t_disconnect_fin();      /* 优雅 FIN 断线（独立 fixture） */
     printf("  t_disconnect_fin done\n");
     t_disconnect();          /* 杀掉 fixture sshd —— 必须最后跑 */

@@ -113,6 +113,8 @@ typedef struct pfeng {
     int         lfds[8];       /* local/dynamic 监听器 */
     int         nlfds;
     LIBSSH2_LISTENER *lst;     /* remote 服务端监听句柄 */
+    LIBSSH2_CHANNEL *drain;    /* local/dyn：闲置 session channel，
+                                * 专做 transport 排空（见 eng_sweep） */
 
     struct addrinfo *dest_ai;  /* remote：dest 本地解析结果 */
     int64_t     dest_retry;    /* 再解析节流时刻 */
@@ -1364,6 +1366,15 @@ static int eng_sweep(pfeng *e)
     tx_drain(e, &prog);            /* 先排挂在飞包，其他生产者才有门可进 */
     accept_step(e, &prog);
     open_step(e, &prog);
+    /* 无 conn 的闲暇期：keepalive 回复等杂散入站包没人喂 libssh2，
+     * 内核缓冲不空 → POLLIN 恒就绪 → 泵空转烧 CPU。drain channel 的
+     * 0 字节 read 内部做 transport_read 把 socket 排干（packet 全进
+     * libssh2 分流，不丢）。remote 的 channel_forward_accept 同理。 */
+    if (e->drain && tx_try(e, NULL, e->drain, TX_READ)) {
+        char j;
+        (void)libssh2_channel_read(e->drain, &j, 0);
+        tx_note(e, NULL, e->drain, TX_READ);
+    }
     for (c = e->conns; c; c = next) {
         next = c->next;
         if (!c->dead)
@@ -1425,6 +1436,10 @@ static void conns_teardown(pfeng *e, bool graceful)
     }
     e->opening = NULL;
     e->qh = e->qt = NULL;
+    if (e->drain) {
+        libssh2_channel_free(e->drain);
+        e->drain = NULL;
+    }
     while (e->conns)
         conn_remove(e, e->conns);    /* channel 进 dying + close(fd) */
     while (e->dying) {               /* 收尾直释，绕过门控 */
@@ -1452,6 +1467,26 @@ int hb__pf_run(void *ctx, hb_session *s)
     e->hp = hb__ssh_target(h);
     e->last_stats = hb_now_ms();
     emit_st(e, HB_PF_EV_LISTENING, NULL);
+
+    /* local/dynamic：开一个闲置 session channel 当 transport 排空口。
+     * 没有它，闲暇期 keepalive 回复等杂散入站没人喂 libssh2，POLLIN
+     * 恒就绪导致主循环空转（remote 用 channel_forward_accept 排）。 */
+    if (e->kind != HB_PF_REMOTE) {
+        int64_t ddl = hb_now_ms() + 3000;
+        for (;;) {
+            e->drain = libssh2_channel_open_session(e->hp->sess);
+            if (e->drain ||
+                libssh2_session_last_errno(e->hp->sess) !=
+                    LIBSSH2_ERROR_EAGAIN)
+                break;
+            if (hb__ssh_wait_dir(e->h, e->hp, ddl))
+                break;
+        }
+        /* 开不出来（如 MaxSessions 0 的纯转发账号）→ 降级模式：
+         * POLLIN 依旧只在有消费者/等 keepalive 应答时订，不空转；
+         * 代价是滞留在内核缓冲的杂散入站没人喂 libssh2，keepalive
+         * 活性判定偏乐观（ka_last_in 可能略旧）。 */
+    }
 
     for (;;) {
         if (hb__session_cancelled(s))
@@ -1515,11 +1550,15 @@ int hb__pf_run(void *ctx, hb_session *s)
             pf[0].events = POLLIN;
             pf[0].revents = 0;
             pf[1].fd = e->hp->sock;
-            /* POLLIN 恒订：keepalive 回复等杂散入站包会刷新 ka_last_in。
-             * POLLRDHUP 必订：对端 FIN 或 jump 泵 shutdown(SHUT_WR) 的
+            /* POLLRDHUP 必订：对端 FIN 或 jump 泵 shutdown(SHUT_WR) 的
              * 半关只报 POLLIN/RDHUP 而不报 POLLHUP；漏订则 EOF 的 POLLIN
-             * 一直刷新 ka_last_in，keepalive 判死永不触发（僵尸会话）。 */
-            pf[1].events = POLLIN | POLLRDHUP | POLLERR | POLLHUP;
+             * 一直刷新 ka_last_in，keepalive 判死永不触发（僵尸会话）。
+             * POLLIN 只在有人消费入站或等着 keepalive 回复时订：内核里
+             * 没排干的杂散包会让 POLLIN 恒就绪 → 主循环空转。 */
+            pf[1].events = POLLRDHUP | POLLERR | POLLHUP;
+            if (e->conns || e->drain ||
+                (h->ka_next && h->ka_last_out > h->ka_last_in))
+                pf[1].events |= POLLIN;
             dirs = libssh2_session_block_directions(e->hp->sess);
             if (dirs & LIBSSH2_SESSION_BLOCK_OUTBOUND)
                 pf[1].events |= POLLOUT;
