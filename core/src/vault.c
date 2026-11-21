@@ -61,6 +61,18 @@ static const char *const MIGRATIONS[] = {
     "  host_id TEXT,"
     "  cmd TEXT"
     ");",
+    /* v2：同步状态。sync_seq = 本地状态所基于的服务端 seq（0 = 服务端没有）。
+     * sync_conflicts：一次合并冲突一行（loser 的 data 为 JSON、secret 用 DEK
+     * 加密，编码同 objects.secret）。 */
+    "ALTER TABLE objects ADD COLUMN sync_seq INTEGER NOT NULL DEFAULT 0;"
+    "CREATE TABLE sync_conflicts("
+    "  id TEXT PRIMARY KEY,"
+    "  type TEXT NOT NULL,"
+    "  fields TEXT NOT NULL,"
+    "  data TEXT NOT NULL,"
+    "  secret BLOB,"
+    "  created INTEGER NOT NULL"
+    ");",
 };
 
 /* ------------------------------- helpers ------------------------------- */
@@ -628,6 +640,9 @@ static hb_err put_locked(hb_vault *v, hb_obj *o, bool *changed)
         cJSON_ArrayForEach(it, patch)
             fv_mark(new_fv, it->string, v->device_id, ctr);
     }
+    /* 复活 tombstoned 行（un-delete via put）：$tomb 必须打戳（§4.3）。 */
+    if (stored && stored->tombstone)
+        fv_mark(new_fv, "$tomb", v->device_id, ctr);
 
     /* vv[device_id] = counter */
     cJSON_DeleteItemFromObjectCaseSensitive(new_vv, v->device_id);
@@ -756,8 +771,8 @@ static hb_err set_tombstone(hb_vault *v, const char *id, int tomb)
     hb_obj *stored = NULL;
     hb_err e;
     uint64_t ctr;
-    cJSON *vv;
-    char *vv_str;
+    cJSON *vv, *fv;
+    char *vv_str, *data_str;
     sqlite3_stmt *st;
 
     e = load_obj(v, id, &stored);
@@ -770,26 +785,42 @@ static hb_err set_tombstone(hb_vault *v, const char *id, int tomb)
     vv = cJSON_Duplicate(stored->vv, 1);
     cJSON_DeleteItemFromObjectCaseSensitive(vv, v->device_id);
     cJSON_AddItemToObject(vv, v->device_id, cJSON_CreateNumber((double)ctr));
+
+    /* 删除/撤销删除给 _fv["$tomb"] 打戳（§4.3）。 */
+    fv = cJSON_GetObjectItemCaseSensitive(stored->data, "_fv");
+    if (!fv) {
+        fv = cJSON_CreateObject();
+        cJSON_AddItemToObject(stored->data, "_fv", fv);
+    }
+    fv_mark(fv, "$tomb", v->device_id, ctr);
+
     vv_str = cJSON_PrintUnformatted(vv);
+    data_str = cJSON_PrintUnformatted(stored->data);
     cJSON_Delete(vv);
     hb_obj_free(stored);
-    if (!vv_str)
+    if (!vv_str || !data_str) {
+        free(vv_str);
+        free(data_str);
         return HB_ERR_NOMEM;
+    }
 
     if (sqlite3_prepare_v2(v->db,
-            "UPDATE objects SET tombstone=?2, vv=?3, updated_at=?4, dirty=1"
+            "UPDATE objects SET tombstone=?2, vv=?3, data=?4, updated_at=?5, dirty=1"
             " WHERE id=?1",
             -1, &st, NULL) != SQLITE_OK) {
         free(vv_str);
+        free(data_str);
         return HB_ERR_DB;
     }
     sqlite3_bind_text(st, 1, id, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 2, tomb);
     sqlite3_bind_text(st, 3, vv_str, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 4, hb_now_ms());
+    sqlite3_bind_text(st, 4, data_str, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 5, hb_now_ms());
     e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
     sqlite3_finalize(st);
     free(vv_str);
+    free(data_str);
     return e;
 }
 
@@ -1899,4 +1930,403 @@ hb_err hb_vault_history_clear(hb_vault *v)
     }
     notify(v, "history", NULL);
     return HB_OK;
+}
+
+/* ------------------------------- sync internals ------------------------------- */
+
+hb_err hb__vault_meta_get(hb_vault *v, const char *key, char **out)
+{
+    return meta_get(v, key, out);
+}
+
+hb_err hb__vault_meta_set(hb_vault *v, const char *key, const char *value)
+{
+    return meta_set(v, key, value);
+}
+
+hb_err hb__vault_meta_del(hb_vault *v, const char *key)
+{
+    sqlite3_stmt *st;
+    hb_err e;
+    if (sqlite3_prepare_v2(v->db, "DELETE FROM meta WHERE key=?1",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HB_ERR_DB;
+    sqlite3_bind_text(st, 1, key, -1, SQLITE_TRANSIENT);
+    e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
+    sqlite3_finalize(st);
+    return e;
+}
+
+void hb__vault_rows_free(hb__vault_row *r, size_t n)
+{
+    size_t i;
+    if (!r)
+        return;
+    for (i = 0; i < n; i++) {
+        free(r[i].id);
+        free(r[i].type);
+        free(r[i].data);
+        free(r[i].vv);
+    }
+    free(r);
+}
+
+hb_err hb__vault_rows(hb_vault *v, hb__vault_row **out, size_t *n)
+{
+    sqlite3_stmt *st;
+    hb__vault_row *arr = NULL;
+    size_t cnt = 0, cap = 0;
+
+    *out = NULL;
+    *n = 0;
+    if (sqlite3_prepare_v2(v->db,
+            "SELECT id,type,data,vv,tombstone,dirty,sync_seq,updated_at"
+            " FROM objects ORDER BY id",
+            -1, &st, NULL) != SQLITE_OK)
+        return HB_ERR_DB;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        hb__vault_row *r;
+        if (cnt == cap) {
+            size_t ncap = cap ? cap * 2 : 16;
+            hb__vault_row *na = realloc(arr, ncap * sizeof *na);
+            if (!na) {
+                sqlite3_finalize(st);
+                hb__vault_rows_free(arr, cnt);
+                return HB_ERR_NOMEM;
+            }
+            arr = na;
+            cap = ncap;
+        }
+        r = &arr[cnt];
+        memset(r, 0, sizeof *r);
+        r->id = xstrdup((const char *)sqlite3_column_text(st, 0));
+        r->type = xstrdup((const char *)sqlite3_column_text(st, 1));
+        r->data = xstrdup((const char *)sqlite3_column_text(st, 2));
+        r->vv = xstrdup((const char *)sqlite3_column_text(st, 3));
+        r->tombstone = sqlite3_column_int(st, 4);
+        r->dirty = sqlite3_column_int(st, 5);
+        r->sync_seq = sqlite3_column_int64(st, 6);
+        r->updated_at = sqlite3_column_int64(st, 7);
+        if (!r->id || !r->type || !r->data || !r->vv) {
+            sqlite3_finalize(st);
+            hb__vault_rows_free(arr, cnt + 1);
+            return HB_ERR_NOMEM;
+        }
+        cnt++;
+    }
+    sqlite3_finalize(st);
+    *out = arr;
+    *n = cnt;
+    return HB_OK;
+}
+
+/* 解密对象的整个 secret map（二进制 map 明文，sodium_malloc'd）。
+ * 无 secret 返回 NOT_FOUND。 */
+hb_err hb__vault_secret_map(hb_vault *v, const char *id,
+                            uint8_t **pt, size_t *pt_len)
+{
+    char *type = NULL;
+    uint8_t *blob = NULL;
+    size_t blob_len = 0;
+    cJSON *data = NULL, *vv = NULL;
+    hb_err e;
+
+    *pt = NULL;
+    *pt_len = 0;
+    e = load_secret(v, id, &type, &blob, &blob_len, &data, &vv);
+    cJSON_Delete(data);
+    cJSON_Delete(vv);
+    if (e != HB_OK) {
+        free(type);
+        free(blob);
+        return e;
+    }
+    if (!blob) {
+        free(type);
+        return HB_ERR_NOT_FOUND;
+    }
+    e = hb__vault_secret_decrypt(v, id, type, blob, blob_len, pt, pt_len);
+    free(type);
+    free(blob);
+    return e;
+}
+
+/* 写整条对象状态：不产生计数器/tomb 戳，dirty/sync_seq 显式给定。
+ * data_json 须含 _fv。sec_pt==NULL 清除 secret；否则为新 map 明文（DEK 加密存入）。
+ * 提交后触发变更回调。 */
+hb_err hb__vault_apply(hb_vault *v, const char *id, const char *type,
+                       const char *data_json, const char *vv_json,
+                       int tomb, int64_t updated_at,
+                       const uint8_t *sec_pt, size_t sec_len,
+                       int dirty, int64_t sync_seq)
+{
+    uint8_t *blob = NULL;
+    size_t blob_len = 0;
+    sqlite3_stmt *st;
+    hb_err e;
+
+    if (!v || !id || !type || !data_json || !vv_json)
+        return HB_ERR_INVALID;
+    if (sec_pt) {
+        e = secret_encrypt(v, id, type, sec_pt, sec_len, &blob, &blob_len);
+        if (e != HB_OK)
+            return e;
+    }
+    if ((e = txn_begin(v)) != HB_OK) {
+        free(blob);
+        return e;
+    }
+    if (sqlite3_prepare_v2(v->db,
+            "INSERT INTO objects(id,type,data,secret,vv,updated_at,tombstone,"
+            " dirty,sync_seq) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)"
+            " ON CONFLICT(id) DO UPDATE SET type=excluded.type,"
+            " data=excluded.data, secret=excluded.secret, vv=excluded.vv,"
+            " updated_at=excluded.updated_at, tombstone=excluded.tombstone,"
+            " dirty=excluded.dirty, sync_seq=excluded.sync_seq",
+            -1, &st, NULL) != SQLITE_OK) {
+        e = HB_ERR_DB;
+    } else {
+        sqlite3_bind_text(st, 1, id, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, type, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 3, data_json, -1, SQLITE_TRANSIENT);
+        if (blob)
+            sqlite3_bind_blob(st, 4, blob, (int)blob_len, SQLITE_TRANSIENT);
+        else
+            sqlite3_bind_null(st, 4);
+        sqlite3_bind_text(st, 5, vv_json, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(st, 6, updated_at);
+        sqlite3_bind_int(st, 7, tomb);
+        sqlite3_bind_int(st, 8, dirty);
+        sqlite3_bind_int64(st, 9, sync_seq);
+        e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
+        sqlite3_finalize(st);
+    }
+    free(blob);
+    if (e != HB_OK) {
+        txn_rollback(v);
+        return e;
+    }
+    if ((e = txn_commit(v)) != HB_OK)
+        return e;
+    notify(v, type, id);
+    return HB_OK;
+}
+
+/* 仅当行内 vv 仍等于 seal 时捕获的 vv（期间无本地改动）才标干净。 */
+hb_err hb__vault_mark_synced(hb_vault *v, const char *id, const char *vv_json,
+                             int64_t sync_seq, bool *applied)
+{
+    sqlite3_stmt *st;
+    hb_err e;
+
+    *applied = false;
+    if (sqlite3_prepare_v2(v->db,
+            "UPDATE objects SET dirty=0, sync_seq=?2 WHERE id=?1 AND vv=?3",
+            -1, &st, NULL) != SQLITE_OK)
+        return HB_ERR_DB;
+    sqlite3_bind_text(st, 1, id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, sync_seq);
+    sqlite3_bind_text(st, 3, vv_json, -1, SQLITE_TRANSIENT);
+    e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
+    if (e == HB_OK && sqlite3_changes(v->db) > 0)
+        *applied = true;
+    /* vv 变了（本地又改过）：仍要把 sync_seq 推进，否则 base_seq 永远过期。 */
+    if (e == HB_OK && !*applied) {
+        sqlite3_stmt *st2;
+        if (sqlite3_prepare_v2(v->db,
+                "UPDATE objects SET sync_seq=?2 WHERE id=?1",
+                -1, &st2, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(st2, 1, id, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(st2, 2, sync_seq);
+            if (sqlite3_step(st2) != SQLITE_DONE)
+                e = HB_ERR_DB;
+            sqlite3_finalize(st2);
+        } else {
+            e = HB_ERR_DB;
+        }
+    }
+    sqlite3_finalize(st);
+    return e;
+}
+
+hb_err hb__vault_purge_type(hb_vault *v, const char *type)
+{
+    sqlite3_stmt *st;
+    hb_err e;
+    if (sqlite3_prepare_v2(v->db, "DELETE FROM objects WHERE type=?1",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HB_ERR_DB;
+    sqlite3_bind_text(st, 1, type, -1, SQLITE_TRANSIENT);
+    e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
+    sqlite3_finalize(st);
+    if (e == HB_OK)
+        notify(v, type, NULL);
+    return e;
+}
+
+hb_err hb__vault_mark_all_dirty(hb_vault *v)
+{
+    return sql_exec(v, "UPDATE objects SET dirty=1, sync_seq=0");
+}
+
+/* ------------------------------ sync_conflicts ------------------------------ */
+
+hb_err hb__vault_conflict_put(hb_vault *v, const char *id, const char *type,
+                              const char *fields_json, const char *loser_data,
+                              const uint8_t *loser_sec, size_t loser_sec_len)
+{
+    uint8_t *blob = NULL;
+    size_t blob_len = 0;
+    sqlite3_stmt *st;
+    hb_err e;
+
+    if (loser_sec) {
+        e = secret_encrypt(v, id, type, loser_sec, loser_sec_len, &blob, &blob_len);
+        if (e != HB_OK)
+            return e;
+    }
+    if (sqlite3_prepare_v2(v->db,
+            "INSERT INTO sync_conflicts(id,type,fields,data,secret,created)"
+            " VALUES(?1,?2,?3,?4,?5,?6)"
+            " ON CONFLICT(id) DO UPDATE SET type=excluded.type,"
+            " fields=excluded.fields, data=excluded.data,"
+            " secret=excluded.secret, created=excluded.created",
+            -1, &st, NULL) != SQLITE_OK) {
+        free(blob);
+        return HB_ERR_DB;
+    }
+    sqlite3_bind_text(st, 1, id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, type, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, fields_json, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, loser_data, -1, SQLITE_TRANSIENT);
+    if (blob)
+        sqlite3_bind_blob(st, 5, blob, (int)blob_len, SQLITE_TRANSIENT);
+    else
+        sqlite3_bind_null(st, 5);
+    sqlite3_bind_int64(st, 6, hb_now_ms());
+    e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
+    sqlite3_finalize(st);
+    free(blob);
+    return e;
+}
+
+hb_err hb__vault_conflict_get(hb_vault *v, const char *id,
+                              char **type, char **fields, char **loser_data,
+                              uint8_t **sec, size_t *sec_len, int64_t *created)
+{
+    sqlite3_stmt *st;
+    hb_err e = HB_ERR_NOT_FOUND;
+
+    *type = *fields = *loser_data = NULL;
+    *sec = NULL;
+    *sec_len = 0;
+    *created = 0;
+    if (sqlite3_prepare_v2(v->db,
+            "SELECT type,fields,data,secret,created FROM sync_conflicts"
+            " WHERE id=?1",
+            -1, &st, NULL) != SQLITE_OK)
+        return HB_ERR_DB;
+    sqlite3_bind_text(st, 1, id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        *type = xstrdup((const char *)sqlite3_column_text(st, 0));
+        *fields = xstrdup((const char *)sqlite3_column_text(st, 1));
+        *loser_data = xstrdup((const char *)sqlite3_column_text(st, 2));
+        if (sqlite3_column_type(st, 3) == SQLITE_BLOB) {
+            *sec_len = (size_t)sqlite3_column_bytes(st, 3);
+            *sec = malloc(*sec_len);
+            if (*sec)
+                memcpy(*sec, sqlite3_column_blob(st, 3), *sec_len);
+            else
+                *sec_len = 0;
+        }
+        *created = sqlite3_column_int64(st, 4);
+        e = (*type && *fields && *loser_data) ? HB_OK : HB_ERR_NOMEM;
+        if (e != HB_OK) {
+            free(*type);
+            free(*fields);
+            free(*loser_data);
+            free(*sec);
+            *type = *fields = *loser_data = NULL;
+            *sec = NULL;
+        }
+    }
+    sqlite3_finalize(st);
+    return e;
+}
+
+hb_err hb__vault_conflict_del(hb_vault *v, const char *id)
+{
+    sqlite3_stmt *st;
+    hb_err e;
+    if (sqlite3_prepare_v2(v->db, "DELETE FROM sync_conflicts WHERE id=?1",
+                           -1, &st, NULL) != SQLITE_OK)
+        return HB_ERR_DB;
+    sqlite3_bind_text(st, 1, id, -1, SQLITE_TRANSIENT);
+    e = sqlite3_step(st) == SQLITE_DONE ? HB_OK : HB_ERR_DB;
+    sqlite3_finalize(st);
+    return e;
+}
+
+void hb__vault_conflicts_free(hb__conflict_row *c, size_t n)
+{
+    size_t i;
+    if (!c)
+        return;
+    for (i = 0; i < n; i++) {
+        free(c[i].id);
+        free(c[i].type);
+        free(c[i].fields);
+        free(c[i].loser_data);
+    }
+    free(c);
+}
+
+hb_err hb__vault_conflicts(hb_vault *v, hb__conflict_row **out, size_t *n)
+{
+    sqlite3_stmt *st;
+    hb__conflict_row *arr = NULL;
+    size_t cnt = 0, cap = 0;
+
+    *out = NULL;
+    *n = 0;
+    if (sqlite3_prepare_v2(v->db,
+            "SELECT id,type,fields,data,created FROM sync_conflicts ORDER BY created",
+            -1, &st, NULL) != SQLITE_OK)
+        return HB_ERR_DB;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        hb__conflict_row *r;
+        if (cnt == cap) {
+            size_t ncap = cap ? cap * 2 : 8;
+            hb__conflict_row *na = realloc(arr, ncap * sizeof *na);
+            if (!na) {
+                sqlite3_finalize(st);
+                hb__vault_conflicts_free(arr, cnt);
+                return HB_ERR_NOMEM;
+            }
+            arr = na;
+            cap = ncap;
+        }
+        r = &arr[cnt];
+        memset(r, 0, sizeof *r);
+        r->id = xstrdup((const char *)sqlite3_column_text(st, 0));
+        r->type = xstrdup((const char *)sqlite3_column_text(st, 1));
+        r->fields = xstrdup((const char *)sqlite3_column_text(st, 2));
+        r->loser_data = xstrdup((const char *)sqlite3_column_text(st, 3));
+        r->created = sqlite3_column_int64(st, 4);
+        if (!r->id || !r->type || !r->fields || !r->loser_data) {
+            sqlite3_finalize(st);
+            hb__vault_conflicts_free(arr, cnt + 1);
+            return HB_ERR_NOMEM;
+        }
+        cnt++;
+    }
+    sqlite3_finalize(st);
+    *out = arr;
+    *n = cnt;
+    return HB_OK;
+}
+
+hb_err hb__vault_conflicts_clear(hb_vault *v)
+{
+    return sql_exec(v, "DELETE FROM sync_conflicts");
 }

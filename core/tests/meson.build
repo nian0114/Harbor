@@ -72,3 +72,9 @@ test_rd = executable('test_rd', 'test_rd.c', 'sshd_fixture.c',
     dependencies: [harbor_core_dep, dependency('libvncserver')],
 )
 test('rd', test_rd, timeout: 240)
+
+test_sync = executable('test_sync', 'test_sync.c',
+    include_directories: [include_directories('../src'), include_directories('../third_party/cjson')],
+    dependencies: harbor_core_dep,
+)
+test('sync', test_sync, timeout: 300)

@@ -127,6 +127,7 @@ pt   = UTF-8 JSON:
 - 存在冲突字段时，在本地 `sync_conflicts` 表记录 `{id, type, fields, loser}`，`loser`
   为输方完整版本（data 用 JSON；secret 用本机 DEK 加密，同 secret 列）。冲突只出现在执行
   合并的那台设备上。
+- 删除（`$tomb`）与另一字段的并发编辑互不冲突：合并结果保持删除，编辑值保留在已删除对象中（撤销删除后可见）。
 - 用户选择"保留另一版本"时以普通 `put` 写入该值（产生新戳，支配双方）；选择"保留当前"
   只删除冲突记录。
 - 合并结果与 R 等价（data、secret、tomb、vv 全同）→ 本地标记为干净；否则标记 dirty 待推。
