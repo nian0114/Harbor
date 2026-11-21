@@ -34,6 +34,7 @@ SEEDS=(
     tigervnc-common              # Xtigervnc 的字体/资源
     freerdp3-shadow-x11          # freerdp-shadow-cli3
     winpr3-utils                 # winpr-hash3 / winpr-makecert3
+    xterm                        # 桌面上的终端（输入验证用）
 )
 
 # 需要个能在桌面上看/敲的简单 X 客户端；系统没有就下载 x11-apps。
@@ -100,11 +101,12 @@ start() {
             || { echo "Xvnc failed, log:" >&2; cat "$DIR/xvnc.log" >&2; exit 1; }
         echo "Xvnc started (pid $(cat "$DIR/xvnc.pid"), 127.0.0.1:$VNC_PORT, $DISP)"
 
-        # 找个能看/敲的 X 客户端（x11-apps 的 xclock + xeyes，系统或 tools 目录）
-        for c in xclock xeyes; do
+        # 找个能看/敲的 X 客户端：xterm（typing 验证，tools 下载）+
+        # x11-apps 的 xclock + xeyes（系统或 tools 目录）
+        for c in xterm xclock xeyes; do
             local_bin="$BINDIR/$c"
             if [ -x "$local_bin" ]; then
-                DISPLAY="$DISP" "$local_bin" -geometry 200x200+100+100 >/dev/null 2>&1 &
+                DISPLAY="$DISP" LD_LIBRARY_PATH="$(libpath)"                     "$local_bin" >/dev/null 2>&1 &
             elif command -v "$c" >/dev/null 2>&1; then
                 DISPLAY="$DISP" "$c" -geometry 200x200+100+100 >/dev/null 2>&1 &
             fi
