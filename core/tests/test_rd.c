@@ -395,6 +395,40 @@ static void t_vnc_connect_frame(void)
     fx_stop(&fx);
 }
 
+/* 事件 fd 排干语义：事件取空后 fd 不得保持可读（通知管道须被抽干，
+ * 否则 UI 的 fd 源永远触发、空转）。 */
+static void t_evfd_drain(void)
+{
+    printf("  t_evfd_drain\n");
+    vnc_fx fx;
+    CHECK(fx_start(&fx, 320, 240) == 0);
+    if (!fx.scr)
+        return;
+    hb_rd *rd = rd_vnc_connect(VNC_PASS, fx.port, HB_RD_Q_HIGH);
+    rdw w;
+    rdw_init(&w);
+    CHECK(rd != NULL);
+    CHECK(rd_wait(rd, &w, p_conn, 8000));
+    /* 队列取空后 fd 必须归于不可读；允许晚到事件，收敛轮询 2s。 */
+    {
+        int64_t dl = now_ms() + 2000;
+        int quiet = 0;
+        while (now_ms() < dl) {
+            struct pollfd pfd = { .fd = hb_rd_event_fd(rd),
+                                  .events = POLLIN, .revents = 0 };
+            rd_pump(rd, &w);
+            if (poll(&pfd, 1, 0) == 0) {
+                quiet = 1;
+                break;
+            }
+            usleep(5000);
+        }
+        CHECK(quiet);
+    }
+    hb_rd_free(rd);
+    fx_stop(&fx);
+}
+
 /* 3：输入回环 */
 static void t_vnc_input(void)
 {
@@ -1035,6 +1069,7 @@ int main(void)
     fx_stop(&probe);
 
     t_vnc_connect_frame();
+    t_evfd_drain();
     t_vnc_input();
     t_vnc_input_latency();
     t_vnc_input_queue();

@@ -198,6 +198,13 @@ bool hb_rd_next_event(hb_rd *rd, hb_rd_event *ev)
     pthread_mutex_lock(&rd->ev_mu);
     rd_ev_node *n = rd->ev_head;
     if (!n) {
+        /* 队列空：持锁抽干通知管道。ev_notify 每事件写一字节且不读，
+         * 不抽干的话 fd 永久可读，UI 的 fd 源会一直空转。持锁是因为
+         * 生产者是入队(锁内)→写字节(锁外)：排干期间它拿不到锁，它写进
+         * 管道的任何字节必然对应我们解锁后入队的事件 —— 不会丢唤醒。 */
+        uint8_t buf[256];
+        while (read(rd->ev_r, buf, sizeof buf) > 0)
+            ;
         pthread_mutex_unlock(&rd->ev_mu);
         return false;
     }
