@@ -2,6 +2,8 @@ gtk4_dep = dependency('gtk4', version: '>=4.10')
 adw_dep = dependency('libadwaita-1')
 secret_dep = dependency('libsecret-1')
 m_dep = cc.find_library('m', required: true)
+soup_dep = dependency('libsoup-3.0')
+jsonglib_dep = dependency('json-glib-1.0')
 
 gnome = import('gnome')
 hb_res = gnome.compile_resources('hb-resources',
@@ -15,6 +17,8 @@ harbor_exe = executable('harbor',
     'src/hb-window.c',
     'src/hb-icons.c',
     'src/hb-store.c',
+    'src/hb-sync.c',
+    'src/hb-account-view.c',
     'src/hb-vault-page.c',
     'src/hb-hosts-view.c',
     'src/hb-keychain-view.c',
@@ -48,7 +52,8 @@ harbor_exe = executable('harbor',
     'src/hb-forward-view.c',
     hb_res,
     include_directories: 'src',
-    dependencies: [gtk4_dep, adw_dep, secret_dep, m_dep, harbor_core_dep],
+    dependencies: [gtk4_dep, adw_dep, secret_dep, soup_dep,
+                   jsonglib_dep, m_dep, harbor_core_dep],
     install: true,
 )
 

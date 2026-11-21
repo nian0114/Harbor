@@ -11,6 +11,8 @@
 #include "hb-icons.h"
 #include "hb-dialogs.h"
 #include "hb-host-actions.h"
+#include "hb-sync.h"
+#include "hb-account-view.h"
 
 #include <harbor/ssh.h>
 #include <string.h>
@@ -121,6 +123,252 @@ static void on_dev_open_host(GSimpleAction *a, GVariant *param, gpointer ud)
     if (HB_IS_WINDOW(win))
         hb_host_action_connect(GTK_WIDGET(win), hb_store_default(), id);
 }
+
+/* app.close-host <host_id>：dev 调试动作，关掉该主机的所有 tab。 */
+static void on_dev_close_host(GSimpleAction *a, GVariant *param,
+                              gpointer ud)
+{
+    GtkWindow *win;
+    (void)a;
+    if (!param) return;
+    win = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (HB_IS_WINDOW(win))
+        hb_window_close_host_tabs(HB_WINDOW(win),
+                                  g_variant_get_string(param, NULL));
+}
+
+/* ================== dev sync 驱动动作（测试用，仅 debug+DEV_ACTIONS） ================== */
+
+static void dev_auth_cb(HbSyncService *s, const HbSyncOpResult *r,
+                        gpointer ud)
+{
+    (void)s; (void)ud;
+    g_printerr("SYNC-AUTH-RESULT ok=%d need_merge=%d code=%s msg=%s\n",
+               r->ok, r->need_merge, r->code ? r->code : "-",
+               r->message ? r->message : "-");
+    if (r->words)
+        g_printerr("SYNC-AUTH-WORDS %s\n", r->words);
+    if (r->totp_secret)
+        g_printerr("SYNC-AUTH-TOTP secret=%s uri=%s\n", r->totp_secret,
+                   r->totp_uri ? r->totp_uri : "-");
+    if (r->devices) {
+        guint _i;
+        for (_i = 0; _i < r->devices->len; _i++) {
+            HbSyncDevice *_d = g_ptr_array_index(r->devices, _i);
+            g_printerr("DEVICE id=%s name=%s platform=%s current=%d\n",
+                       _d->id, _d->name ? _d->name : "-",
+                       _d->platform ? _d->platform : "-", _d->current);
+        }
+    }
+    if (r->need_merge)
+        hb_sync_service_confirm_merge(s, TRUE);
+    fflush(stderr);
+}
+
+/* app.sync-auth "op|server|email|password|totp|words|newpw"：
+ * op = login|register|recover|rotate|password(old=pw,new=newpw) */
+static void on_dev_sync_auth(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    gchar **f;
+    const char *op;
+    HbSyncService *s;
+    (void)a; (void)ud;
+    if (!param) return;
+    f = g_strsplit(g_variant_get_string(param, NULL), "|", 8);
+    if (!f || !f[0]) { g_strfreev(f); return; }
+    op = f[0];
+    s = hb_sync_service_default();
+    {
+        guint _n = g_strv_length(f);
+#define DEV_F(i) ((i) < _n ? f[i] : NULL)
+    if (!strcmp(op, "login") && DEV_F(3))
+        hb_sync_service_login(s, f[1], f[2], f[3], DEV_F(4),
+                              dev_auth_cb, NULL);
+    else if (!strcmp(op, "register") && DEV_F(3))
+        hb_sync_service_register(s, f[1], f[2], f[3], dev_auth_cb, NULL);
+    else if (!strcmp(op, "recover") && DEV_F(5) && DEV_F(6))
+        hb_sync_service_recover(s, f[1], f[2], f[5], f[6],
+                                dev_auth_cb, NULL);
+    else if (!strcmp(op, "rotate") && DEV_F(3))
+        hb_sync_service_rotate_recovery(s, f[3], dev_auth_cb, NULL);
+    else if (!strcmp(op, "password") && DEV_F(3) && DEV_F(6))
+        hb_sync_service_change_password(s, f[3], f[6], dev_auth_cb, NULL);
+    else if (!strcmp(op, "logout"))
+        hb_sync_service_logout(s, g_strcmp0(DEV_F(7), "wipe") == 0);
+    else if (!strcmp(op, "totp-setup"))
+        hb_sync_service_totp_setup(s, dev_auth_cb, NULL);
+    else if (!strcmp(op, "totp-enable") && DEV_F(7))
+        hb_sync_service_totp_enable(s, DEV_F(7), dev_auth_cb, NULL);
+    else if (!strcmp(op, "totp-disable") && DEV_F(7))
+        hb_sync_service_totp_disable(s, DEV_F(7), dev_auth_cb, NULL);
+    else if (!strcmp(op, "revoke") && DEV_F(7))
+        hb_sync_service_revoke(s, DEV_F(7),
+                               g_strcmp0(DEV_F(4), "wipe") == 0,
+                               dev_auth_cb, NULL);
+    else if (!strcmp(op, "devices"))
+        hb_sync_service_devices(s, dev_auth_cb, NULL);
+    else if (!strcmp(op, "kick"))
+        hb_sync_service_sync_now(s);
+    else
+        g_printerr("SYNC-AUTH-RESULT bad-op\n");
+#undef DEV_F
+    }
+    g_strfreev(f);
+}
+
+/* app.sync-state：打印状态行（dev） */
+static void on_dev_sync_state(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    HbSyncService *s = hb_sync_service_default();
+    (void)a; (void)p; (void)ud;
+    g_printerr("SYNC-STATE state=%d conflicts=%zu last=%ld email=%s\n",
+               hb_sync_service_state(s), hb_sync_service_conflicts(s),
+               (long)hb_sync_service_last_sync(s),
+               hb_sync_service_email(s) ? hb_sync_service_email(s) : "-");
+    fflush(stderr);
+}
+
+/* app.mkobj "type|k=v|k=v…" → 建 vault 对象并打印 id（dev） */
+static void on_dev_mkobj(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    gchar **f;
+    hb_obj *o;
+    int i;
+    (void)a; (void)ud;
+    if (!param) return;
+    f = g_strsplit(g_variant_get_string(param, NULL), "|", -1);
+    if (!f || !f[0]) { g_strfreev(f); return; }
+    o = hb_obj_new(f[0]);
+    for (i = 1; f[i]; i++) {
+        gchar *eq = strchr(f[i], '=');
+        if (!eq) continue;
+        *eq = 0;
+        if (g_str_has_suffix(eq + 1, "#i"))
+            hb_obj_set_int(o, f[i], g_ascii_strtoll(eq + 1, NULL, 10));
+        else
+            hb_obj_set_str(o, f[i], eq + 1);
+    }
+    hb_vault_put(hb_store_vault(hb_store_default()), o);
+    g_printerr("MKOBJ-RESULT id=%s type=%s\n", hb_obj_id(o), f[0]);
+    fflush(stderr);
+    hb_obj_free(o);
+    g_strfreev(f);
+}
+
+/* app.setsecret "id|field|text" → 写 vault secret 字段（dev 导入密钥用） */
+static void on_dev_setsecret(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    gchar **f;
+    (void)a; (void)ud;
+    if (!param) return;
+    f = g_strsplit(g_variant_get_string(param, NULL), "|", 3);
+    if (!f || !f[0] || !f[1] || !f[2]) { g_strfreev(f); return; }
+    {
+        gchar *text = f[2];
+        g_autofree gchar *filetext = NULL;
+        if (text[0] == '@' && g_file_get_contents(text + 1, &filetext,
+                                                NULL, NULL))
+            text = filetext;
+        if (hb_vault_set_secret(hb_store_vault(hb_store_default()), f[0],
+                                f[1], text) == HB_OK) {
+            g_printerr("SETSECRET-RESULT id=%s field=%s ok=1\n", f[0],
+                       f[1]);
+            fflush(stderr);
+        }
+        if (filetext) memset(filetext, 0, strlen(filetext));
+    }
+    memset(f[2], 0, strlen(f[2]));
+    g_strfreev(f);
+}
+
+/* app.resolve "id|other" / "id|keep" → 调 UI 冲突按钮同一处理（dev） */
+static void on_dev_resolve(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    gchar **f;
+    hb_sync *sync;
+    (void)a; (void)ud;
+    if (!param) return;
+    f = g_strsplit(g_variant_get_string(param, NULL), "|", 2);
+    if (!f || !f[0] || !f[1]) { g_strfreev(f); return; }
+    sync = hb_sync_service_sync(hb_sync_service_default());
+    if (!strcmp(f[1], "other")) {
+        hb_sync_conflict_take_other(sync, f[0]);
+        hb_sync_service_sync_now(hb_sync_service_default());
+    } else {
+        hb_sync_conflict_keep_local(sync, f[0]);
+    }
+    g_printerr("RESOLVE-RESULT id=%s mode=%s\n", f[0], f[1]);
+    fflush(stderr);
+    g_strfreev(f);
+}
+
+/* app.dev-words <24 words> → 弹恢复码网格（dev 截图） */
+static void on_dev_words(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    GtkWindow *win;
+    (void)a; (void)ud;
+    if (!param) return;
+    win = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (win)
+        hb_account_view_dev_words(GTK_WIDGET(win),
+                                  g_variant_get_string(param, NULL));
+}
+
+/* app.objcount <type|"all"> → 打印同步范围对象数量（dev） */
+static void on_dev_objcount(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    static const char *types[] = {
+        "host", "group", "key", "snippet", "forward", "known", "settings",
+    };
+    const char *want;
+    size_t i;
+    (void)a; (void)ud;
+    want = param ? g_variant_get_string(param, NULL) : "all";
+    for (i = 0; i < G_N_ELEMENTS(types); i++) {
+        size_t n = 0;
+        hb_obj **list;
+        if (strcmp(want, "all") && strcmp(want, types[i])) continue;
+        list = hb_store_list(hb_store_default(), types[i], &n);
+        g_printerr("OBJCOUNT type=%s n=%zu\n", types[i], n);
+        if (list) {
+            size_t k;
+            for (k = 0; k < n; k++) {
+                const char *nm = hb_obj_get_str(list[k], "name");
+                g_printerr("OBJ id=%s name=%s\n", hb_obj_id(list[k]),
+                           nm ? nm : "-");
+            }
+            hb_obj_list_free(list, n);
+        }
+    }
+    fflush(stderr);
+}
+
+/* app.setfield "id|k=v" → 改字段；v 后缀 #i 为 int（dev） */
+static void on_dev_setfield(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    gchar **f;
+    hb_obj *o = NULL;
+    gchar *eq;
+    (void)a; (void)ud;
+    if (!param) return;
+    f = g_strsplit(g_variant_get_string(param, NULL), "|", 3);
+    if (!f || !f[0] || !f[1]) { g_strfreev(f); return; }
+    eq = strchr(f[1], '=');
+    if (!eq) { g_strfreev(f); return; }
+    *eq = 0;
+    if (hb_vault_get(hb_store_vault(hb_store_default()), f[0], &o) == HB_OK
+        && o) {
+        if (g_str_has_suffix(eq + 1, "#i"))
+            hb_obj_set_int(o, f[1], g_ascii_strtoll(eq + 1, NULL, 10));
+        else
+            hb_obj_set_str(o, f[1], eq + 1);
+        hb_vault_put(hb_store_vault(hb_store_default()), o);
+        g_printerr("SETFIELD-RESULT id=%s ok=1\n", f[0]);
+        fflush(stderr);
+        hb_obj_free(o);
+    }
+    g_strfreev(f);
+}
 #endif /* !NDEBUG */
 
 /* ------------------------------ 生命周期 ------------------------------ */
@@ -186,8 +434,54 @@ static void hb_application_startup(GApplication *app)
         g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
         g_object_unref(sa);
 
+        sa = g_simple_action_new("close-host", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_close_host),
+                         app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
         sa = g_simple_action_new("open-host", G_VARIANT_TYPE_STRING);
         g_signal_connect(sa, "activate", G_CALLBACK(on_dev_open_host), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("sync-auth", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_sync_auth), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("sync-state", NULL);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_sync_state), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("mkobj", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_mkobj), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("setfield", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_setfield), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("setsecret", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_setsecret), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("resolve", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_resolve), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("dev-words", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_words), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("objcount", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_objcount), app);
         g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
         g_object_unref(sa);
     }

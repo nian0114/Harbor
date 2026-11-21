@@ -8,6 +8,7 @@
 #include "hb-logs-view.h"
 #include "hb-forward-view.h"
 #include "hb-store.h"
+#include "hb-account-view.h"
 
 #include <stdio.h>
 
@@ -223,6 +224,8 @@ static void hb_vault_page_init(HbVaultPage *vp)
             page = hb_logs_view_new(hb_store_default());
         else if (!strcmp(SECTIONS[i].id, "fwd"))
             page = hb_forward_view_new(hb_store_default());
+        else if (!strcmp(SECTIONS[i].id, "account"))
+            page = hb_account_view_new(hb_store_default());
         else
             page = empty_page(SECTIONS[i].id, SECTIONS[i].label,
                               SECTIONS[i].icon, SECTIONS[i].fr);

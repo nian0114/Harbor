@@ -714,3 +714,28 @@ checkbutton.pick-row { padding: 7px 8px; }
 }
 .hb-rd-disc { color: #cdd4e4; font-size: 14px; font-weight: 600; }
 .hb-code { font-family: Monospace; font-size: 11.5px; }
+
+/* ==== FR-11 账号与同步 ==== */
+.acct-field-label  { font-size: 9px; font-weight: 700;
+                     color: alpha(@window_fg_color, .4);
+                     text-transform: uppercase; letter-spacing: .06em; }
+.acct-field        { margin-bottom: 4px; }
+.hb-red            { color: @error_color; font-size: 12px; }
+.hb-dim            { color: alpha(@window_fg_color, .45); font-size: 11px; }
+.mono              { font-family: monospace; }
+.hb-avatar         { border-radius: 50%;
+                     background: alpha(@accent_color, .18);
+                     color: @accent_color; font-weight: 700; }
+.acct-words        { padding: 10px; border-radius: 8px;
+                     background: alpha(@window_fg_color, .04); }
+.acct-row          { padding: 6px 0; }
+.acct-dname        { font-weight: 600; }
+.acct-conflict-vals { padding: 6px; border-radius: 6px;
+                      background: alpha(@window_fg_color, .04); }
+.acct-wrap         { padding: 18px 22px; }
+.acct-grid         { }
+.e2ee-banner       { padding: 12px 14px; border-radius: 10px;
+                     background: alpha(@accent_color, .10);
+                     border: 1px solid alpha(@accent_color, .35); }
+.e2ee-t1           { font-weight: 700; color: @accent_color; }
+.e2ee-t2           { font-size: 11px; color: alpha(@window_fg_color, .6); }
