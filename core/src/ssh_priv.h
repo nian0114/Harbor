@@ -50,6 +50,8 @@ typedef struct {
     size_t           clen;
     uint8_t          pbuf[PUMP_BUF];   /* channel → pair 暂存 */
     size_t           plen;
+    int              txop;             /* 在飞出包属主：PTX_*（libssh2≥1.11
+                                        * 单出包槽，非属主调用会被错记） */
 } pump_t;
 
 typedef struct {

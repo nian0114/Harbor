@@ -1109,6 +1109,35 @@ auth_fail:
 
 /* ------------------------------ ProxyJump 泵 ------------------------------ */
 
+/* libssh2 ≥1.11 会话级只有一个出站 packet 槽：有包未发完时，别的
+ * transport_send 会替它续发并把成功错记给调用方（调用方负载根本没
+ * 入包，真正的属主还会把同一负载再发一遍 → 内层密文流坏）。泵在
+ * 外层 session 上只有三个生产者，按属主门控即可。 */
+enum { PTX_NONE = 0, PTX_W, PTX_RD, PTX_EOF };
+
+static int pump_pend(pump_t *p)
+{
+    if (!(libssh2_session_block_directions(p->sess) &
+          LIBSSH2_SESSION_BLOCK_OUTBOUND)) {
+        p->txop = PTX_NONE;
+        return 0;
+    }
+    return 1;
+}
+
+/* 该生产者可否发起会产生 SSH 包的调用：无挂起或属主同参。 */
+static int pump_try(pump_t *p, int op)
+{
+    return !pump_pend(p) || p->txop == op;
+}
+
+/* 调用后登记属主；属主重试未排完不改写。 */
+static void pump_note(pump_t *p, int op)
+{
+    if (pump_pend(p) && p->txop == PTX_NONE)
+        p->txop = op;
+}
+
 static void *pump_run(void *arg)
 {
     pump_t *p = arg;
@@ -1118,8 +1147,16 @@ static void *pump_run(void *arg)
         int r;
         if (p->stop)
             break;
+        /* 挂起包排空：RD 属主或无属主时，0 字节 read 触发内部
+         * window-adjust 的同参续发（无属主则 mismatch-resume 代偿）。 */
+        if (pump_pend(p) && p->txop != PTX_W && p->txop != PTX_EOF) {
+            char j;
+            (void)libssh2_channel_read(p->ch, &j, 0);
+            pump_note(p, PTX_RD);
+        }
         pf[0].fd = p->hop_fd;
-        pf[0].events = (short)(POLLIN | (p->clen ? POLLOUT : 0));
+        pf[0].events = (short)(POLLIN |
+                               ((p->clen || pump_pend(p)) ? POLLOUT : 0));
         pf[0].revents = 0;
         pf[1].fd = p->pair;
         pf[1].events = (short)((p->chan_eof ? 0 : POLLIN) |
@@ -1147,9 +1184,10 @@ static void *pump_run(void *arg)
                      errno != EINTR)
                 p->pair_eof = true;
         }
-        if (p->clen) {
+        if (p->clen && pump_try(p, PTX_W)) {
             ssize_t n = libssh2_channel_write(p->ch, (const char *)p->cbuf,
                                               p->clen);
+            pump_note(p, PTX_W);
             if (n > 0) {
                 memmove(p->cbuf, p->cbuf + n, p->clen - (size_t)n);
                 p->clen -= (size_t)n;
@@ -1158,10 +1196,12 @@ static void *pump_run(void *arg)
             }
         }
 
-        /* channel → pair：channel_read 到 pbuf，再尽量写 pair */
-        if (!p->chan_eof && p->plen < sizeof p->pbuf) {
+        /* channel → pair：channel_read 到 pbuf，再尽量写 pair。
+         * read 内部可能发 window-adjust，同样受挂起门控。 */
+        if (!p->chan_eof && p->plen < sizeof p->pbuf && pump_try(p, PTX_RD)) {
             ssize_t n = libssh2_channel_read(p->ch, (char *)p->pbuf + p->plen,
                                              sizeof p->pbuf - p->plen);
+            pump_note(p, PTX_RD);
             if (n > 0) {
                 p->plen += (size_t)n;
                 /* libssh2 内部可能还压着已解密数据而 socket 不可读 →
@@ -1177,6 +1217,9 @@ static void *pump_run(void *arg)
             if (n > 0) {
                 memmove(p->pbuf, p->pbuf + n, p->plen - (size_t)n);
                 p->plen -= (size_t)n;
+                /* pbuf 排空后 channel 队列里可能还有明文 →
+                 * 下轮 poll 不等待，尽快 channel_read 续上 */
+                tmo = 0;
             } else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
                        errno != EINTR) {
                 p->pair_eof = true;   /* 内层已死 → channel 也无意义 */
@@ -1194,9 +1237,12 @@ static void *pump_run(void *arg)
             }
         }
         /* 上行缓存必须先发完，再向 channel 宣告 EOF，否则截断尾包 */
-        if (p->pair_eof && p->clen == 0 && !p->sent_eof) {
-            libssh2_channel_send_eof(p->ch);  /* 通知远端：下行已断 */
-            p->sent_eof = true;
+        if (p->pair_eof && p->clen == 0 && !p->sent_eof &&
+            pump_try(p, PTX_EOF)) {
+            int rc = libssh2_channel_send_eof(p->ch);
+            pump_note(p, PTX_EOF);
+            if (rc != LIBSSH2_ERROR_EAGAIN)
+                p->sent_eof = true;
         }
         if (p->chan_eof && p->pair_eof && p->plen == 0 && p->clen == 0)
             break;
