@@ -36,6 +36,11 @@ void        hb_conn_ctl_set_forward(HbConnCtl *c, const hb_pf_rule *rule);
  * 关闭并释放 session。 */
 void        hb_conn_ctl_cancel(HbConnCtl *c);
 
+/* 同 cancel 的前半段（关对话框 + 应答挂起事件），但把 session 的所有权
+ * 交还调用方——供调用方在工作线程里 close/free，避免 UI 线程阻塞。
+ * 必须在主线程调用；之后 ctl 不再拥有该 session。 */
+hb_session *hb_conn_ctl_steal_session(HbConnCtl *c);
+
 /* 当前 session（借用；创建前为 NULL） */
 hb_session *hb_conn_ctl_session(HbConnCtl *c);
 

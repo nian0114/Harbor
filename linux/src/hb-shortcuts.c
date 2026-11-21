@@ -123,6 +123,18 @@ static gboolean dispatch(HbWindow *win, const char *id)
     return FALSE;
 }
 
+/* 焦点是否落在开了「快捷键透传」的远程桌面画布内：该画布向上标记了
+ * hb-rd-passthrough，此时全部按键放行给远端。 */
+static gboolean focus_in_rd_passthrough(HbWindow *win)
+{
+    GtkWidget *f = gtk_window_get_focus(GTK_WINDOW(win));
+    GtkWidget *w;
+    for (w = f; w; w = gtk_widget_get_parent(w))
+        if (g_object_get_data(G_OBJECT(w), "hb-rd-passthrough"))
+            return TRUE;
+    return FALSE;
+}
+
 static gboolean on_key(GtkEventControllerKey *kc, guint keyval,
                        guint code, GdkModifierType state, gpointer ud)
 {
@@ -132,6 +144,10 @@ static gboolean on_key(GtkEventControllerKey *kc, guint keyval,
     const HbShortcut *s;
     size_t i;
     (void)kc; (void)code;
+
+    /* 远程桌面快捷键透传：画布自己的 key controller 吃掉全部按键 */
+    if (focus_in_rd_passthrough(win))
+        return FALSE;
 
     /* Alt/Ctrl + 1…9：表里有展示行，派发在这里统一做 */
     if ((m == SC_ALT || m == SC_CTRL) &&

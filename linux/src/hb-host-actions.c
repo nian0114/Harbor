@@ -3,6 +3,7 @@
 #include "hb-dialogs.h"
 #include "hb-host-form.h"
 #include "hb-ssh-page.h"
+#include "hb-desktop-page.h"
 #include "hb-sftp-view.h"
 #include "hb-icons.h"
 
@@ -52,7 +53,36 @@ static void on_page_edit_host(HbStore *st, const char *hid, gpointer page)
     hb_host_action_edit(GTK_WIDGET(page), st, hid);
 }
 
-/* 按 proto 分派：ssh → SSH 页；local → Local 页；rdp/vnc → 占位 toast */
+/* 打开一个远程桌面 tab（rdp/vnc；tab 绑定 host，删主机即关页） */
+static void open_desktop_tab(HbWindow *win, HbStore *st, hb_obj *host)
+{
+    GtkWidget *page;
+    char *tab_id;
+    const char *name = hb_obj_get_str(host, "name");
+    const char *proto = hb_obj_get_str(host, "proto");
+    gboolean rdp = !g_strcmp0(proto, "rdp");
+
+    tab_id = g_strdup_printf("rd-%s", hb_obj_id(host));
+    if (hb_window_has_tab(win, tab_id)) {
+        hb_window_switch_tab(win, tab_id);
+        g_free(tab_id);
+        return;
+    }
+    page = hb_desktop_page_new(st, host);
+    g_signal_connect_swapped(page, "edit-host",
+        G_CALLBACK(on_page_edit_host), st);
+    hb_window_add_tab(win, tab_id,
+                      name && *name ? name : hb_obj_get_str(host, "address"),
+                      rdp ? "win" : "monitor",
+                      page, TRUE, FALSE);
+    hb_window_set_tab_host(win, tab_id, hb_obj_id(host));
+    hb_desktop_page_attach_tab(HB_DESKTOP_PAGE(page), GTK_WIDGET(win),
+                               tab_id);
+    hb_window_switch_tab(win, tab_id);
+    g_free(tab_id);
+}
+
+/* 按 proto 分派：ssh → SSH 页；local → Local 页；rdp/vnc → 桌面页 */
 void hb_host_connect_obj(HbWindow *win, HbStore *st, hb_obj *o)
 {
     const char *proto = hb_obj_get_str(o, "proto");
@@ -62,7 +92,7 @@ void hb_host_connect_obj(HbWindow *win, HbStore *st, hb_obj *o)
     } else if (!strcmp(proto, "ssh")) {
         open_ssh_tab(win, st, o);
     } else if (!strcmp(proto, "rdp") || !strcmp(proto, "vnc")) {
-        hb_toast(GTK_WIDGET(win), "远程桌面（VNC/RDP）将在后续版本提供");
+        open_desktop_tab(win, st, o);
     }
 }
 

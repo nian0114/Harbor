@@ -879,6 +879,20 @@ hb_session *hb_conn_ctl_session(HbConnCtl *c)
     return c->sess;
 }
 
+hb_session *hb_conn_ctl_steal_session(HbConnCtl *c)
+{
+    hb_session *s;
+    force_close_dialog(c);
+    s = c->sess;
+    if (s && c->awaiting_reply) {
+        hb_session_prompt_reply(s, NULL);
+        hb_session_hostkey_reply(s, FALSE);
+        c->awaiting_reply = FALSE;
+    }
+    c->sess = NULL;
+    return s;
+}
+
 void hb_conn_ctl_set_forward(HbConnCtl *c, const hb_pf_rule *rule)
 {
     if (!rule) return;
