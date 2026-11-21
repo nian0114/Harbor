@@ -1037,7 +1037,7 @@ static void t_rdp(void)
         rd_pump(rd, &w);
     }
     CHECK(w.n_cert >= 1);
-    CHECK_EQ_INT(w.cert_code, 0); /* fp 不匹配：unknown（changed 语义是旧值有记录） */
+    CHECK_EQ_INT(w.cert_code, 1); /* 已存指纹且不符 → changed（vault 为准） */
     hb_rd_cert_reply(rd, false);
     CHECK(rd_wait(rd, &w, p_err, 10000));
     CHECK_EQ_INT(w.err_code, HB_RD_ERR_CERT_REJECTED);

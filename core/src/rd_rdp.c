@@ -150,6 +150,10 @@ static bool cert_prompt(hb_rd *rd, int changed, const char *fp,
         snprintf(be->fp, sizeof be->fp, "%s", fp);
         return true; /* 与受信指纹一致：直接接受（本次会话） */
     }
+    /* Harbor 以 vault 指纹为准：已存指纹且不符即"证书变更"，
+     * 与 freerdp 自身 known_hosts 视角的 CHANGED 标志无关（它对
+     * 隧道随机端口永远无知，FLAG 恒为 0）。 */
+    changed = changed || (rd->o.cert_fp != NULL);
     char sum[640];
     snprintf(sum, sizeof sum, "CN=%s\n颁发者: %s\n主机: %s",
              subj && *subj ? subj : "?", issuer && *issuer ? issuer : "?",
