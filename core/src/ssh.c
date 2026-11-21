@@ -152,9 +152,9 @@ static void *dns_run(void *arg)
     return NULL;
 }
 
-/* 0 成功；W_* 负码 */
-static int dns_resolve(hb_ssh *h, const char *host, int port,
-                       int timeout_ms, struct addrinfo **res_out)
+/* 0 成功；W_* 负码（导出给 pf.c：remote 规则本地解析 dest） */
+int hb__ssh_resolve(hb_ssh *h, const char *host, int port,
+                    int timeout_ms, struct addrinfo **res_out)
 {
     dns_job *j;
     int64_t dl;
@@ -606,6 +606,7 @@ const char *hb_ssh_err_name(int code)
     case HB_SSH_ERR_HOSTKEY_CHANGED:  return "hostkey_changed";
     case HB_SSH_ERR_HOSTKEY_REJECTED: return "hostkey_rejected";
     case HB_SSH_ERR_CANCELLED:        return "cancelled";
+    case HB_SSH_ERR_FORWARD:          return "forward_failed";
     default:                          return "error";
     }
 }
@@ -1291,7 +1292,7 @@ static int hop_up(hb_ssh *h, size_t i)
     if (i == 0) {
         struct addrinfo *res = NULL;
         stage(h, hp, 0, "解析 %s…", hp->cfg.host);
-        w = dns_resolve(h, hp->cfg.host, hp->cfg.port, h->timeout_ms, &res);
+        w = hb__ssh_resolve(h, hp->cfg.host, hp->cfg.port, h->timeout_ms, &res);
         if (w) {
             if (w == W_CANCEL)
                 return fail_wait(h, w, HB_SSH_ERR_RESOLVE);
@@ -1698,7 +1699,7 @@ static const char *ssh_exit_text_op(void *ctx)
 }
 
 /* keepalive/半开检测节拍：返回值同 ssh_tick_op。SFTP 引擎复用。 */
-int hb__ssh_ka_tick(hb_ssh *h)
+int hb__ssh_ka_tick(hb_ssh *h, int may_send)
 {
     int64_t now, left;
     int next = 0;
@@ -1720,7 +1721,8 @@ int hb__ssh_ka_tick(hb_ssh *h)
         } else {
             h->ka_miss = 0;
         }
-        if (libssh2_keepalive_send(hb__ssh_target(h)->sess, &next) == 0) {
+        if (may_send &&
+            libssh2_keepalive_send(hb__ssh_target(h)->sess, &next) == 0) {
             h->ka_last_out = now;
             if (next > 0)
                 h->ka_next = now + (int64_t)next * 1000;
@@ -1744,7 +1746,7 @@ static int ssh_tick_op(void *ctx)
 {
     hb_ssh *h = ctx;
     hop *hp = hb__ssh_target(h);
-    int r;
+    int may, r;
 
     /* 排空挂起出站包：W 属主留给 flush_write 同参重试（read 替它续发
      * 正是要修的错记→重复）；其余属主（RD 的 adjust / resize / close /
@@ -1764,12 +1766,14 @@ static int ssh_tick_op(void *ctx)
         if (rc != LIBSSH2_ERROR_EAGAIN)
             h->rsz_rows = h->rsz_cols = 0;
     }
-    /* keepalive 也产包：挂起期间跳过（判死最多晚 50ms）；keepalive
-     * 关闭时本节拍仍须运行 —— 上面两段的排空/补发全靠它驱动。 */
+    /* keepalive 也产包：挂起期间（除自身重发/无主遗留可代偿）不发；
+     * keepalive 关闭时本节拍仍须运行（上面两段的排空/补发靠它）。 */
     r = -1;
-    if (h->keepalive_s > 0 && !shell_pend(h)) {
-        r = hb__ssh_ka_tick(h);
-        shell_note(h, STX_KA);
+    if (h->keepalive_s > 0) {
+        may = !shell_pend(h) || h->stx == STX_NONE || h->stx == STX_KA;
+        r = hb__ssh_ka_tick(h, may);
+        if (may)
+            shell_note(h, STX_KA);
     }
     /* 仍有挂起或待补发 → 短超时兜底：非 W 属主只有本函数代偿；
      * POLLIN 久不来也要保证 50ms 内再排一次，否则 write 一直被门住。 */
@@ -1824,6 +1828,10 @@ static void ssh_destroy_op(void *ctx)
     if (h->sftp_eng) {
         hb__sftp_eng_free(h->sftp_eng);
         h->sftp_eng = NULL;
+    }
+    if (h->pf_eng) {
+        hb__pf_eng_free(h->pf_eng);
+        h->pf_eng = NULL;
     }
     /* 内 → 外依次拆除（先停靠外的泵） */
     for (i = h->nhops; i > 0; i--)
@@ -1990,6 +1998,9 @@ static int ssh_connect_op(void *ctx, hb_session *s)
     if (h->mode == HB_SSH_MODE_SFTP)
         return target_sftp(h, hb__ssh_target(h),
                            hb_now_ms() + HANDSHAKE_MS) ? -1 : 0;
+    if (h->mode == HB_SSH_MODE_FORWARD)
+        return hb__pf_connect(h->pf_eng, h, hb__ssh_target(h),
+                              hb_now_ms() + HANDSHAKE_MS) ? -1 : 0;
     return target_shell(h, hb__ssh_target(h),
                         hb_now_ms() + HANDSHAKE_MS) ? -1 : 0;
 }
@@ -2013,24 +2024,34 @@ static bool hop_cfg_copy(c_hop *dst, const hb_ssh_hop *src)
     return true;
 }
 
-hb_session *hb_session_new_ssh(const hb_ssh_opts *opts,
-                               int rows, int cols, int scrollback_lines)
+/* pf_eng：仅 FORWARD 模式由调用方预建并移交（local/dynamic 监听器在
+ * 调用线程上已绑好），本函数无条件接管（失败路径经 destroy 释放）。 */
+static hb_session *new_ssh_impl(const hb_ssh_opts *opts, int rows, int cols,
+                                int scrollback_lines, void *pf_eng)
 {
     hb_ssh *h;
     hb_session_transport tr;
     size_t i;
 
-    if (!opts || !opts->target.host || !opts->target.user)
+    if (!opts || !opts->target.host || !opts->target.user) {
+        hb__pf_eng_free(pf_eng);
         return NULL;
+    }
     h = calloc(1, sizeof *h);
-    if (!h)
+    if (!h) {
+        hb__pf_eng_free(pf_eng);
         return NULL;
+    }
     h->nhops = opts->njumps + 1;
     h->hops = calloc(h->nhops, sizeof *h->hops);
     if (!h->hops) {
+        hb__pf_eng_free(pf_eng);
         free(h);
         return NULL;
     }
+    h->pf_eng = pf_eng;
+    if (opts->mode == HB_SSH_MODE_FORWARD && !h->pf_eng)
+        goto fail;
     h->timeout_ms = (opts->connect_timeout_s > 0 ? opts->connect_timeout_s : 15)
                     * 1000;
     h->keepalive_s = opts->keepalive_s;
@@ -2104,6 +2125,8 @@ hb_session *hb_session_new_ssh(const hb_ssh_opts *opts,
     tr.connect = ssh_connect_op;
     if (h->mode == HB_SSH_MODE_SFTP)
         tr.run = hb__sftp_run;
+    else if (h->mode == HB_SSH_MODE_FORWARD)
+        tr.run = hb__pf_run;
 
     {
         hb_session *s = hb_session_new_transport(&tr, rows, cols,
@@ -2116,6 +2139,17 @@ hb_session *hb_session_new_ssh(const hb_ssh_opts *opts,
 fail:
     ssh_destroy_op(h);
     return NULL;
+}
+
+hb_session *hb_session_new_ssh(const hb_ssh_opts *opts,
+                               int rows, int cols, int scrollback_lines)
+{
+    return new_ssh_impl(opts, rows, cols, scrollback_lines, NULL);
+}
+
+hb_session *hb__ssh_new_forward(const hb_ssh_opts *opts, void *pf_eng)
+{
+    return new_ssh_impl(opts, 0, 0, 0, pf_eng);
 }
 
 hb_session *hb_session_new_sftp(const hb_ssh_opts *opts)

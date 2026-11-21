@@ -12,5 +12,6 @@
 #include "watch.h"
 #include "knownhosts.h"
 #include "snippet.h"
+#include "pf.h"
 
 #endif

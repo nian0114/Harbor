@@ -2172,7 +2172,7 @@ int hb__sftp_run(void *ctx, hb_session *s)
             if (e->shutting && !e->act_h && !e->pend_h && !e->draining)
                 break;                  /* 清理完 */
 
-            tmo = hb__ssh_ka_tick(h);
+            tmo = hb__ssh_ka_tick(h, 1);
             if (h->disconnected) {
                     e->conn_dead = true;
                 continue;
@@ -2229,7 +2229,7 @@ int hb__sftp_run(void *ctx, hb_session *s)
                 h->disconnected = true;
             }
         }
-        (void)hb__ssh_ka_tick(h);
+        (void)hb__ssh_ka_tick(h, 1);
         if (h->disconnected)
             e->conn_dead = true;
     }

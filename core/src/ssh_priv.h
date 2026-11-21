@@ -9,6 +9,7 @@
 
 #include <libssh2.h>
 #include <libssh2_sftp.h>
+#include <netdb.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -85,24 +86,40 @@ typedef struct {
     bool        disconnected;
     bool        disconnect_emitted;
     char        errbuf[256];   /* 技术细节 → ERROR.text2 */
-    hb_ssh_mode mode;          /* SHELL / SFTP */
+    hb_ssh_mode mode;          /* SHELL / SFTP / FORWARD */
     void       *sftp_eng;      /* SFTP 引擎（sftp.c 所有；SHELL 为 NULL） */
+    void       *pf_eng;        /* 转发引擎（pf.c 所有；非 FORWARD 为 NULL） */
     int         stx;           /* 目标会话挂起出站包属主（STX_*，见 ssh.c） */
     int         rsz_rows, rsz_cols;  /* 待补发的 pty 尺寸（>0 = 未送达） */
 } hb_ssh;
 
-/* ---- sftp.c 需要的 ssh.c 导出（均仅 session 线程上下文调用） ---- */
+/* ---- sftp.c / pf.c 需要的 ssh.c 导出（均仅 session 线程上下文调用） ---- */
 hop *hb__ssh_target(hb_ssh *h);
 int  hb__ssh_wait_dir(hb_ssh *h, hop *hp, int64_t deadline_ms);
 void hb__ssh_set_err(hb_ssh *h, const char *fmt, ...);
 void hb__ssh_set_lib_err(hb_ssh *h, LIBSSH2_SESSION *sess);
 void hb__ssh_emit_error(hb_ssh *h, int code, const char *text);
-int  hb__ssh_ka_tick(hb_ssh *h);   /* keepalive/半开检测节拍，同 ssh_tick_op */
+/* keepalive/半开检测节拍，同 ssh_tick_op。may_send=0 时只跑判死逻辑不发
+ * keepalive（转发引擎在出站包挂起期间用，避免替别人续发被错记）。 */
+int  hb__ssh_ka_tick(hb_ssh *h, int may_send);
+/* 线程化 getaddrinfo（socktype=STREAM）：0 成功；W_* 负码。 */
+int  hb__ssh_resolve(hb_ssh *h, const char *host, int port,
+                     int timeout_ms, struct addrinfo **res_out);
+/* FORWARD 模式构造：eng 由 pf.c 预创建（local/dynamic 监听器已绑定），
+ * 本函数无条件接管所有权（含失败路径）。mode 由调用方设进 opts。 */
+hb_session *hb__ssh_new_forward(const hb_ssh_opts *opts, void *pf_eng);
 
 /* ---- ssh.c 需要的 sftp.c 导出 ---- */
 void *hb__sftp_eng_new(void);
 void  hb__sftp_eng_free(void *eng);
 int   hb__sftp_eng_bind(void *eng, hb_session *s, LIBSSH2_SFTP *sf);
 int   hb__sftp_run(void *ctx, hb_session *s);   /* tr.run 钩子 */
+
+/* ---- ssh.c 需要的 pf.c 导出 ---- */
+void  hb__pf_eng_free(void *eng);
+/* connect 阶段收尾（remote 规则向服务器要监听；local/dynamic 只收尾）。
+ * 0 成功 → tr.run 接管；<0 失败（ERROR 已发）。 */
+int   hb__pf_connect(void *eng, hb_ssh *h, hop *hp, int64_t deadline_ms);
+int   hb__pf_run(void *ctx, hb_session *s);     /* tr.run 钩子 */
 
 #endif /* HB_SSH_PRIV_H */

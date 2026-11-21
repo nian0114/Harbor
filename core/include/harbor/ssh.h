@@ -36,7 +36,8 @@ typedef struct {
 
 typedef enum {
     HB_SSH_MODE_SHELL = 0,  /* 交互 shell / exec（默认） */
-    HB_SSH_MODE_SFTP        /* SFTP 子系统：无 PTY，detect_os 忽略 */
+    HB_SSH_MODE_SFTP,       /* SFTP 子系统：无 PTY，detect_os 忽略 */
+    HB_SSH_MODE_FORWARD     /* 端口转发：无 PTY，detect_os 忽略 */
 } hb_ssh_mode;
 
 typedef struct {
@@ -76,6 +77,7 @@ typedef enum {
     HB_SSH_ERR_CHANNEL,         /* channel / shell 建立失败 */
     HB_SSH_ERR_DISCONNECTED,    /* 已连接后断开 */
     HB_SSH_ERR_CANCELLED,       /* 用户取消 / hb_session_close */
+    HB_SSH_ERR_FORWARD,         /* 转发建立失败（不可重试） */
 } hb_ssh_err;
 
 /* vault 日志用的结果名：unreachable|auth_failed|hostkey_changed|

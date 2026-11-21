@@ -65,8 +65,13 @@ int hb_sshd_start(hb_sshd *fx)
 {
     char path[PATH_MAX + 64];
     char b64[600];
+    char extra[sizeof fx->extra_cfg];
 
+    /* 调用方可在 start 前填 extra_cfg；先取出再清零。 */
+    memcpy(extra, fx->extra_cfg, sizeof extra);
     memset(fx, 0, sizeof *fx);
+    memcpy(fx->extra_cfg, extra, sizeof extra);
+    fx->extra_cfg[sizeof fx->extra_cfg - 1] = 0;
     if (access("/usr/sbin/sshd", X_OK) != 0 ||
         access("/usr/bin/ssh-keygen", X_OK) != 0)
         return 77;
@@ -116,6 +121,10 @@ int hb_sshd_start(hb_sshd *fx)
         FILE *f = fopen(path, "w");
         if (!f)
             return -1;
+        /* extra_cfg 先写：sshd 多数指令取"先出现的值"，
+         * 用它才能覆盖下面的 AllowTcpForwarding yes 等默认行。 */
+        if (fx->extra_cfg[0])
+            fputs(fx->extra_cfg, f);
         fprintf(f,
                 "Port %d\n"
                 "ListenAddress 127.0.0.1\n"

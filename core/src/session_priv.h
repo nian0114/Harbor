@@ -52,6 +52,9 @@ int   hb__session_cmd_fd(hb_session *s);   /* 命令管道读端（供 tr.run po
 /* SFTP 请求结果事件（HB_SESS_EV_SFTP）：r 由事件队列接管所有权。 */
 struct hb_sftp_result;
 void  hb__session_emit_sftp(hb_session *s, struct hb_sftp_result *r);
+/* 转发状态事件（HB_SESS_EV_FORWARD）：st 由事件队列接管所有权。 */
+struct hb_pf_status;
+void  hb__session_emit_pf(hb_session *s, struct hb_pf_status *st);
 
 /* 供 transport 使用：推一个事件到 UI 队列（做字符串拷贝）。 */
 void hb__session_emit(hb_session *s, hb_sess_ev_type type, char mark, int code,

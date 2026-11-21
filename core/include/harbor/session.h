@@ -56,9 +56,12 @@ typedef enum {
     HB_SESS_EV_COMMAND,
     /* SFTP 请求结果（FR-05）：sftp 指向 hb_sftp_result（owned）。 */
     HB_SESS_EV_SFTP,
+    /* 端口转发状态（FR-06）：pf 指向 hb_pf_status（owned）。 */
+    HB_SESS_EV_FORWARD,
 } hb_sess_ev_type;
 
 struct hb_sftp_result;
+struct hb_pf_status;
 
 typedef struct {
     hb_sess_ev_type type;
@@ -68,6 +71,7 @@ typedef struct {
     char  *extra;           /* owned；HOSTKEY 的 known_hosts 行 + randomart */
     hb_watch_hit *watch;    /* owned；仅 HB_SESS_EV_WATCH */
     struct hb_sftp_result *sftp;    /* owned；仅 HB_SESS_EV_SFTP */
+    struct hb_pf_status *pf;        /* owned；仅 HB_SESS_EV_FORWARD */
     int64_t ts_ms;
 } hb_sess_event;
 

@@ -18,6 +18,9 @@ typedef struct {
     char   key[16384];           /* client 私钥文本（内存认证用） */
     char   keyfile[PATH_MAX + 64]; /* client 私钥路径（ssh CLI 用） */
     char   khline[1024];         /* "[127.0.0.1]:port ssh-ed25519 b64" */
+    /* 可选：sshd_config 额外行，写在默认行之前（sshd 取先出现值），
+     * 例如 "AllowTcpForwarding local\n" 覆盖默认的 yes。 */
+    char   extra_cfg[512];
 } hb_sshd;
 
 int  hb_sshd_start(hb_sshd *fx);

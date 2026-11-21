@@ -1,6 +1,7 @@
 #include "harbor/session.h"
 
 #include "harbor/sftp.h"
+#include "harbor/pf.h"
 #include "session_priv.h"
 
 #include <errno.h>
@@ -98,6 +99,10 @@ void hb_sess_event_clear(hb_sess_event *ev)
     if (ev->sftp) {
         hb_sftp_result_free(ev->sftp);
         ev->sftp = NULL;
+    }
+    if (ev->pf) {
+        hb_pf_status_free(ev->pf);
+        ev->pf = NULL;
     }
     ev->text = ev->text2 = ev->extra = NULL;
     ev->watch = NULL;
@@ -410,6 +415,31 @@ void hb__session_emit_sftp(hb_session *s, struct hb_sftp_result *r)
     }
     n->ev.type = HB_SESS_EV_SFTP;
     n->ev.sftp = r;
+    n->ev.ts_ms = hb_now_ms();
+    pthread_mutex_lock(&s->mu);
+    if (s->ev_tail)
+        s->ev_tail->next = n;
+    else
+        s->ev_head = n;
+    s->ev_tail = n;
+    pthread_mutex_unlock(&s->mu);
+    if (write(s->ev_w, &w, 1) < 0) {}
+}
+
+/* 转发状态事件：st 的所有权移交事件队列 */
+void hb__session_emit_pf(hb_session *s, struct hb_pf_status *st)
+{
+    ev_node *n;
+    char w = 'e';
+    if (!s || !st)
+        return;
+    n = calloc(1, sizeof *n);
+    if (!n) {
+        hb_pf_status_free(st);
+        return;
+    }
+    n->ev.type = HB_SESS_EV_FORWARD;
+    n->ev.pf = st;
     n->ev.ts_ms = hb_now_ms();
     pthread_mutex_lock(&s->mu);
     if (s->ev_tail)
