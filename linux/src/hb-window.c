@@ -7,6 +7,7 @@
 #include "hb-ssh-page.h"
 #include "hb-session-page.h"
 #include "hb-workspace.h"
+#include "hb-forward-mgr.h"
 #include "hb-store.h"
 
 #include <stdio.h>
@@ -865,6 +866,9 @@ static void hb_window_init(HbWindow *win)
 
     g_signal_connect(hb_notify_default(), "changed",
                      G_CALLBACK(on_notify_changed), win);
+
+    /* FR-06：转发管理器拿到窗口（对话框父级 + 启动恢复 enabled 规则） */
+    hb_forward_mgr_set_window(hb_forward_mgr_default(), win);
 }
 
 HbWindow *hb_window_new(GtkApplication *app)

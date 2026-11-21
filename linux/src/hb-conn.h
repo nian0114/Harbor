@@ -3,6 +3,7 @@
 
 #include <gtk/gtk.h>
 #include <harbor/session.h>
+#include <harbor/pf.h>
 #include "hb-store.h"
 
 G_BEGIN_DECLS
@@ -10,7 +11,7 @@ G_BEGIN_DECLS
 #define HB_TYPE_CONN_CTL (hb_conn_ctl_get_type())
 G_DECLARE_FINAL_TYPE(HbConnCtl, hb_conn_ctl, HB, CONN_CTL, GObject)
 
-typedef enum { HB_CONN_SHELL, HB_CONN_SFTP } HbConnMode;
+typedef enum { HB_CONN_SHELL, HB_CONN_SFTP, HB_CONN_FORWARD } HbConnMode;
 
 /* SSH/SFTP 连接流程控制器：拥有与 hb-ssh-page 完全相同的安全流程
  * （TOFU/密钥变更/口令对话框、使用前确认、known_hosts 写入、凭据
@@ -27,6 +28,9 @@ HbConnCtl  *hb_conn_ctl_new(HbStore *st, GtkWidget *dialog_parent,
  * reuse_vt 仅 SHELL 有意义（重连保 scrollback，接管所有权）。 */
 void        hb_conn_ctl_start(HbConnCtl *c, const char *host_id,
                               hb_vt *reuse_vt, int rows, int cols);
+
+/* FORWARD 模式专用：start 前设置转发规则（深拷贝，可随改随重设）。 */
+void        hb_conn_ctl_set_forward(HbConnCtl *c, const hb_pf_rule *rule);
 
 /* 关闭挂起对话框、对阻塞中的 PROMPT/HOSTKEY 应答 NULL/FALSE、
  * 关闭并释放 session。 */

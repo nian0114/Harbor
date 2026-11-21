@@ -628,6 +628,7 @@ checkbutton.pick-row { padding: 7px 8px; }
     background-color: @hb_sidebar_act; border-radius: 6px; padding: 8px 10px; }
 .pill.err { background-color: #fdebec; color: #b3373b; }
 .pill.run { background-color: #e8f1fd; color: #2f66c4; }
+.pill.wait { background-color: #fdf3e3; color: #b4761a; }
 .hb-iconbtn.saved { color: @hb_blue; }
 
 /* ---------- SFTP 双栏 ---------- */

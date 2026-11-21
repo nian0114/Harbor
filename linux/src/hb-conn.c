@@ -1,5 +1,6 @@
 #include "hb-conn.h"
 #include "hb-dialogs.h"
+#include "hb-forward-mgr.h"
 
 #include <harbor/ssh.h>
 #include <harbor/keys.h>
@@ -57,6 +58,10 @@ struct _HbConnCtl {
      *（属于下一次成功连接 —— 与原页面字段语义一致），continue_connect
      * 消费。仅 SHELL。 */
     hb_vt       *reuse_vt;
+
+    /* FORWARD 模式：转发规则（字符串深拷贝，rule 字段指入本对象） */
+    hb_pf_rule   rule;
+    char        *rule_bind, *rule_dest;
 };
 
 G_DEFINE_TYPE(HbConnCtl, hb_conn_ctl, G_TYPE_OBJECT)
@@ -284,7 +289,8 @@ static void log_start(HbConnCtl *c)
     l.user = c->huser;
     l.host = c->hname;
     l.host_id = c->host_id;
-    l.proto = c->mode == HB_CONN_SFTP ? "SFTP" : "SSH";
+    l.proto = c->mode == HB_CONN_SFTP    ? "SFTP" :
+              c->mode == HB_CONN_FORWARD ? "SSH/Forward" : "SSH";
     l.result = "connecting";
     l.duration_s = -1;
     l.saved = false;
@@ -703,6 +709,28 @@ static void continue_connect(HbConnCtl *c, int rows, int cols)
     if (c->mode == HB_CONN_SFTP) {
         c->sess = hb_session_new_sftp(&x->o);
         if (reuse) hb_vt_free(reuse);   /* SFTP 无 vt，入参作废 */
+    } else if (c->mode == HB_CONN_FORWARD) {
+        char *ferr = NULL;
+        if (reuse) hb_vt_free(reuse);   /* FORWARD 无 vt，入参作废 */
+        /* 断开检测靠 keepalive：host 显式关掉时也兜底 30s。 */
+        if (x->o.keepalive_s <= 0)
+            x->o.keepalive_s = 30;
+        c->sess = hb_session_new_forward(&x->o, &c->rule, NULL, &ferr);
+        if (!c->sess) {
+            /* 绑定冲突等（code=0：不可重试，由 owner 置 FAILED） */
+            char *t = g_strdup_printf("无法监听 %s:%d",
+                c->rule.bind_addr && *c->rule.bind_addr
+                    ? c->rule.bind_addr : "127.0.0.1",
+                c->rule.bind_port);
+            log_finish(c, "error", ferr ? ferr : "bind failed");
+            c->log_id = 0;
+            g_signal_emit(c, sigs[SIG_FAILED], 0, 0, t, ferr);
+            g_free(t);
+            free(ferr);
+            conn_ctx_free(x);
+            if (thost) hb_obj_free(thost);
+            return;
+        }
     } else {
         x->o.reuse_vt = reuse;
         c->sess = hb_session_new_ssh(&x->o, rows, cols,
@@ -849,6 +877,18 @@ void hb_conn_ctl_cancel(HbConnCtl *c)
 hb_session *hb_conn_ctl_session(HbConnCtl *c)
 {
     return c->sess;
+}
+
+void hb_conn_ctl_set_forward(HbConnCtl *c, const hb_pf_rule *rule)
+{
+    if (!rule) return;
+    c->rule = *rule;
+    g_free(c->rule_bind);
+    g_free(c->rule_dest);
+    c->rule_bind = g_strdup(rule->bind_addr);
+    c->rule_dest = g_strdup(rule->dest_addr);
+    c->rule.bind_addr = c->rule_bind;
+    c->rule.dest_addr = c->rule_dest;
 }
 
 /* ------------------------- 事件处理 ------------------------- */
@@ -1017,7 +1057,20 @@ static void on_connected_ev(HbConnCtl *c)
         hb_obj_free(h);
     }
 
-    g_signal_emit(c, sigs[SIG_CONNECTED], 0);
+    {
+        /* 信号 handler（autostart 等）可能 cancel/释放 owner：
+         * 发射期间给 c 加引用，并先拷出 host_id。 */
+        char *hid = g_strdup(c->host_id);
+        g_object_ref(c);
+        g_signal_emit(c, sigs[SIG_CONNECTED], 0);
+
+        /* FR-06 联动：SHELL/SFTP 连上主机 X → 拉起 via==X 且
+         * autostart 的转发规则（FORWARD 自身不触发，避免规则互相牵扯）。 */
+        if (c->mode != HB_CONN_FORWARD && hid)
+            hb_forward_mgr_autostart(hid);
+        g_free(hid);
+        g_object_unref(c);
+    }
 }
 
 static void on_error_ev(HbConnCtl *c, const hb_sess_event *ev)
@@ -1146,6 +1199,8 @@ static void hb_conn_ctl_finalize(GObject *o)
     g_free(c->pending_line);
     g_free(c->pending_host);
     g_free(c->pending_keyfp);
+    g_free(c->rule_bind);
+    g_free(c->rule_dest);
     G_OBJECT_CLASS(hb_conn_ctl_parent_class)->finalize(o);
 }
 
