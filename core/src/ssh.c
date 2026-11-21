@@ -1482,6 +1482,50 @@ static int target_shell(hb_ssh *h, hop *hp, int64_t dl)
     return 0;
 }
 
+/* ---- SHELL 目标会话出站包属主门控 ----
+ * 与 ProxyJump 泵同一原因：libssh2 会话级只有一个挂起出站 packet 槽。
+ * channel_write EAGAIN 留下 write_state=created 的半成品；此刻
+ * channel_read 的内部 window-adjust / keepalive_send / pty-size
+ * request / wait_closed 的 close 包续发同一槽位会被错记成功，随后
+ * write 重试把同一负载再组包重发 → 终端输入重复（大粘贴必现）。
+ * 目标会话上能产包的入口全部按属主门控；不可重试属主在 tick 里
+ * 用 0 字节 channel_read 的 mismatch-resume 代偿排空。 */
+enum {
+    STX_NONE = 0,
+    STX_W,      /* channel_write（可同参重试，只它自己排） */
+    STX_RD,     /* channel_read 内部 window-adjust */
+    STX_EOF,    /* channel_send_eof */
+    STX_RSZ,    /* channel_request_pty_size */
+    STX_CLS,    /* channel_wait_closed 的 close 包 */
+    STX_KA,     /* keepalive_send */
+    STX_ORPHAN  /* 无登记属主（如 connect 尾声遗留） */
+};
+
+/* 目标会话有挂起出站包？顺带在排空后复位属主。 */
+static int shell_pend(hb_ssh *h)
+{
+    hop *hp = hb__ssh_target(h);
+    if (!(libssh2_session_block_directions(hp->sess) &
+          LIBSSH2_SESSION_BLOCK_OUTBOUND)) {
+        h->stx = STX_NONE;
+        return 0;
+    }
+    return 1;
+}
+
+/* 该生产者可否发起会产生包的调用。 */
+static int shell_try(hb_ssh *h, int op)
+{
+    return !shell_pend(h) || h->stx == op;
+}
+
+/* 调用后登记属主（仅当尚无属主）。 */
+static void shell_note(hb_ssh *h, int op)
+{
+    if (shell_pend(h) && h->stx == STX_NONE)
+        h->stx = op;
+}
+
 /* ------------------------------ transport ops ------------------------------ */
 
 hop *hb__ssh_target(hb_ssh *h)
@@ -1508,9 +1552,18 @@ static ssize_t ssh_read_op(void *ctx, char *buf, size_t len)
         errno = EIO;
         return -1;
     }
+    /* 挂起包属主不是 read 时不能调：read 内部的 window-adjust 会替
+     * 挂起包（如 channel_write 半成品）续发并被错记，属主重试时再
+     * 发一遍 → 负载重复。挂起态等属主续发排完再来。 */
+    if (!shell_try(h, STX_RD)) {
+        errno = EAGAIN;
+        return -1;
+    }
     n = libssh2_channel_read(hp->chan, buf, len);
+    shell_note(h, STX_RD);
     if (n == LIBSSH2_ERROR_EAGAIN) {
         n = libssh2_channel_read_stderr(hp->chan, buf, len);
+        shell_note(h, STX_RD);
         if (n == LIBSSH2_ERROR_EAGAIN) {
             errno = EAGAIN;
             return -1;
@@ -1541,7 +1594,15 @@ static ssize_t ssh_write_op(void *ctx, const char *buf, size_t len)
         errno = EIO;
         return -1;
     }
+    /* 同理：别人（read 的 adjust / keepalive / resize / close）的包
+     * 还挂着时不能写 —— write 的半成品若被外人续发错记，这里重试
+     * 会把同一段输入再发一遍（大粘贴必坏）。 */
+    if (!shell_try(h, STX_W)) {
+        errno = EAGAIN;
+        return -1;
+    }
     n = libssh2_channel_write(hp->chan, buf, len);
+    shell_note(h, STX_W);
     if (n == LIBSSH2_ERROR_EAGAIN) {
         errno = EAGAIN;
         return -1;
@@ -1561,12 +1622,26 @@ static int ssh_resize_op(void *ctx, int rows, int cols)
     int rc, i;
     if (!hp->chan)
         return -1;
+    /* 记下最新尺寸：被门控/超时没发出去时由 tick 补发 ——
+     * session.c 对 resize 失败直接丢弃，不存这里会丢尺寸。 */
+    h->rsz_rows = rows;
+    h->rsz_cols = cols;
+    /* 挂起包属主不是 resize → 本次不发（不能让这个包替别人续发
+     * 错记），存下即返回，由 tick 补发。 */
+    if (!shell_try(h, STX_RSZ))
+        return 0;
     for (i = 0; i < 20; i++) {
         rc = libssh2_channel_request_pty_size_ex(hp->chan, cols, rows, 0, 0);
+        shell_note(h, STX_RSZ);
         if (rc != LIBSSH2_ERROR_EAGAIN)
             break;
+        /* 自己的包挂着只能同参重试（mismatch-resume 也行：发出去的
+         * 仍是同一个尺寸请求，重试重复发幂等无害） */
         usleep(20000);
     }
+    if (rc == LIBSSH2_ERROR_EAGAIN)
+        return 0;             /* 仍未发完 → 留存，tick 补发 */
+    h->rsz_rows = h->rsz_cols = 0;  /* 送达或对端明确拒绝，不再补 */
     return rc == 0 ? 0 : -1;
 }
 
@@ -1588,6 +1663,10 @@ static bool ssh_poll_exit_op(void *ctx, int *code)
         return false;
     if (!libssh2_channel_eof(hp->chan))
         return false;
+    /* wait_closed 内部发 close 包 —— 别的属主的包还挂着时本轮先不
+     * 收尾（属主重试或 tick 代偿排空后下一轮再来），否则续发错记。 */
+    if (!shell_try(h, STX_CLS))
+        return false;
     /* exit-status 分组可能比 eof 晚几个包到达：EOF 后在非阻塞模式下
      * 再 drain 一小段时间（≤500ms）等 channel close，保证
      * get_exit_status 拿到的是真实退出码而非默认 0。 */
@@ -1597,6 +1676,7 @@ static bool ssh_poll_exit_op(void *ctx, int *code)
         while ((rc = libssh2_channel_wait_closed(hp->chan)) ==
                LIBSSH2_ERROR_EAGAIN && hb_now_ms() < dl)
             usleep(10000);
+        shell_note(h, STX_CLS);
         (void)rc;
     }
     *code = libssh2_channel_get_exit_status(hp->chan);
@@ -1662,7 +1742,40 @@ int hb__ssh_ka_tick(hb_ssh *h)
 
 static int ssh_tick_op(void *ctx)
 {
-    return hb__ssh_ka_tick(ctx);
+    hb_ssh *h = ctx;
+    hop *hp = hb__ssh_target(h);
+    int r;
+
+    /* 排空挂起出站包：W 属主留给 flush_write 同参重试（read 替它续发
+     * 正是要修的错记→重复）；其余属主（RD 的 adjust / resize / close /
+     * keepalive / 无主遗留）用 0 字节 channel_read 代偿 —— 其内部
+     * window-adjust 以 channel 内缓冲同参续发（RD），或对一次性包
+     * mismatch-resume 直接发掉，负载本身都是想发的那个包，无害。 */
+    if (shell_pend(h) && h->stx != STX_W && hp->chan) {
+        char j;
+        (void)libssh2_channel_read(hp->chan, &j, 0);
+        shell_note(h, STX_RD);
+    }
+    /* 补发留存的 resize：槽位一空就发；仍 EAGAIN 则下次再来。 */
+    if (h->rsz_rows > 0 && hp->chan && shell_try(h, STX_RSZ)) {
+        int rc = libssh2_channel_request_pty_size_ex(
+                     hp->chan, h->rsz_cols, h->rsz_rows, 0, 0);
+        shell_note(h, STX_RSZ);
+        if (rc != LIBSSH2_ERROR_EAGAIN)
+            h->rsz_rows = h->rsz_cols = 0;
+    }
+    /* keepalive 也产包：挂起期间跳过（判死最多晚 50ms）；keepalive
+     * 关闭时本节拍仍须运行 —— 上面两段的排空/补发全靠它驱动。 */
+    r = -1;
+    if (h->keepalive_s > 0 && !shell_pend(h)) {
+        r = hb__ssh_ka_tick(h);
+        shell_note(h, STX_KA);
+    }
+    /* 仍有挂起或待补发 → 短超时兜底：非 W 属主只有本函数代偿；
+     * POLLIN 久不来也要保证 50ms 内再排一次，否则 write 一直被门住。 */
+    if ((shell_pend(h) || h->rsz_rows > 0) && (r < 0 || r > 50))
+        r = 50;
+    return r;
 }
 
 /* ------------------------------ 释放 ------------------------------ */
@@ -1984,7 +2097,9 @@ hb_session *hb_session_new_ssh(const hb_ssh_opts *opts,
     tr.poll_exit = ssh_poll_exit_op;
     tr.close = ssh_close_op;
     tr.destroy = ssh_destroy_op;
-    tr.tick = h->keepalive_s > 0 ? ssh_tick_op : NULL;
+    /* tick 必须始终装上：keepalive 关时它也是挂起包排空/resize 补发
+     * 的唯一驱动者（无事时返回 -1，不产生空转唤醒）。 */
+    tr.tick = ssh_tick_op;
     tr.exit_text = ssh_exit_text_op;
     tr.connect = ssh_connect_op;
     if (h->mode == HB_SSH_MODE_SFTP)

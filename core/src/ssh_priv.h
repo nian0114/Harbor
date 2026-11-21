@@ -87,6 +87,8 @@ typedef struct {
     char        errbuf[256];   /* 技术细节 → ERROR.text2 */
     hb_ssh_mode mode;          /* SHELL / SFTP */
     void       *sftp_eng;      /* SFTP 引擎（sftp.c 所有；SHELL 为 NULL） */
+    int         stx;           /* 目标会话挂起出站包属主（STX_*，见 ssh.c） */
+    int         rsz_rows, rsz_cols;  /* 待补发的 pty 尺寸（>0 = 未送达） */
 } hb_ssh;
 
 /* ---- sftp.c 需要的 ssh.c 导出（均仅 session 线程上下文调用） ---- */

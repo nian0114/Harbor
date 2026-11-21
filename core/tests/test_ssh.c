@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <pwd.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -1143,6 +1144,159 @@ static void test_keepalive(void)
     hb_session_free(s);
 }
 
+/* 粘贴期间不停 resize 的线程：keepalive=0 时 tick 仍是挂起包排空与
+ * resize 补发的唯一驱动 —— 没有它任何 RSZ/CLX/无主挂起都会把
+ * read/write 永远门死（会话冻结）。 */
+typedef struct {
+    hb_session  *s;
+    volatile int stop;
+} rsz_arg;
+
+static void *rsz_thread(void *arg)
+{
+    rsz_arg *ra = arg;
+    int i = 0;
+    while (!ra->stop) {
+        hb_session_resize(ra->s, 24 + (i % 3) * 8, 80 + (i % 5) * 10);
+        i++;
+        usleep(40000);
+    }
+    return NULL;
+}
+
+/* 出站挂起包错记回归：libssh2 会话级只有一个挂起出站 packet 槽，
+ * channel_write 的半成品若被 channel_read 的内部 window-adjust /
+ * keepalive 续发错记，write 重试会把同一负载再发一遍（输入重复）。
+ * 场景 = 大粘贴 + 远端并发大输出：yes 洪水让 read/adjust 不停产包，
+ * head -c N 恰好收 N 字节落盘，与期望文件逐字节 cmp。 */
+static void test_paste_dup(void)
+{
+    hb_ssh_opts o = base_opts();
+    hb_session *s;
+    drv d;
+    const char *kl[] = { fix_khline };
+    uint8_t *data;
+    const size_t len = 16u << 20;
+    size_t i;
+    char cmd[520], exp_path[64], in_path[64], res_path[64];
+    FILE *fp;
+    int64_t dl;
+
+    snprintf(exp_path, sizeof exp_path, "/tmp/hb-paste-exp-%d", getpid());
+    snprintf(in_path, sizeof in_path, "/tmp/hb-paste-in-%d", getpid());
+    snprintf(res_path, sizeof res_path, "/tmp/hb-paste-res-%d", getpid());
+    data = malloc(len);
+    CHECK(data != NULL);
+    if (!data)
+        return;
+    for (i = 0; i < len; i++)
+        data[i] = (uint8_t)(i * 2654435761u >> 24);
+    fp = fopen(exp_path, "wb");
+    CHECK(fp != NULL);
+    if (fp) {
+        CHECK(fwrite(data, 1, len, fp) == len);
+        fclose(fp);
+    }
+
+    /* yes 洪水只为了让 channel_read 在写期间不停产 adjust 包；
+     * 收满 N 字节后 cmp —— 结果写文件，不走屏幕（洪水瞬间把任何
+     * 输出行顶出 scrollback）。exec 带 PTY：stty raw 关行律，
+     * 否则负载里的 ^C/^Z/^D 会杀停 head。
+     * 关键在"远端慢慢读"：直读时远端瞬间排空、TX 从不拥塞，半成
+     * 品根本不出现；死等又让远端窗口归零、write 在窗口检查处就
+     * EAGAIN（不建包）。限速消费让窗口保持 >0 的同时 TX 持续堵
+     * —— 半成品 + adjust 交错，正是错记→重复的场景。 */
+    snprintf(cmd, sizeof cmd,
+             "stty raw -echo; yes & YP=$!; head -c %zu | "
+             "python3 -c 'import sys,time;r=sys.stdin.buffer;"
+             "o=open(\"%s\",\"wb\");"
+             "[(o.write(x),time.sleep(0.003)) "
+             "for x in iter(lambda: r.read(65536),b\"\")]' ; "
+             "kill $YP 2>/dev/null; cmp -s %s %s; echo $? > %s",
+             len, in_path, in_path, exp_path, res_path);
+    o.known_lines = kl;
+    o.nknown = 1;
+    o.keepalive_s = 0;          /* 关 keepalive：RSZ/ORPHAN 挂起的排空
+                               * 只能全靠 tick 驱动（回归用例） */
+    /* 经一跳 ProxyJump：内层会话走 socketpair（内核缓冲小），给
+     * 挂起包更多出现机会；直通 TCP 上远端读太快反而难得挂起。 */
+    {
+        static hb_ssh_hop j;
+        j = o.target;
+        j.label = "jmp";
+        o.jumps = &j;
+        o.njumps = 1;
+    }
+    o.command = cmd;
+    drv_init(&d);
+    s = hb_session_new_ssh(&o, 24, 80, 200);
+    CHECK(s != NULL);
+    if (!s)
+        goto out;
+
+    dl = now_ms() + 10000;
+    while (!d.connected && now_ms() < dl && !d.exited) {
+        struct pollfd pf = { .fd = hb_session_event_fd(s),
+                             .events = POLLIN, .revents = 0 };
+        hb_sess_event ev;
+        if (poll(&pf, 1, 50) > 0 && (pf.revents & POLLIN))
+            while (hb_session_next_event(s, &ev))
+                drv_take(&d, s, &ev);
+    }
+    CHECK_EQ_INT(d.connected, 1);
+
+    /* 粘贴期间持续 resize：被门控时尺寸存入 hb_ssh 由 tick 补发；
+     * keepalive=0 下 tick 若缺席，挂起属主会永久门死 read/write。 */
+    rsz_arg ra = { .s = s, .stop = 0 };
+    pthread_t rth;
+    int rth_on = (pthread_create(&rth, NULL, rsz_thread, &ra) == 0);
+
+    hb_session_write(s, (const char *)data, len);
+
+    /* 结果写进 res 文件：0=逐字节一致；1=cmp 失败（有重复/错位）；
+     * 文件迟迟不出 = head 没等到 N 字节（数据丢失/流坏）也算失败。 */
+    {
+        int res = -1;
+        dl = now_ms() + 30000;
+        while (res < 0 && now_ms() < dl) {
+            char rb[8] = {0};
+            FILE *rf = fopen(res_path, "r");
+            if (rf) {
+                if (fgets(rb, sizeof rb, rf))
+                    res = atoi(rb);
+                fclose(rf);
+                if (res >= 0)
+                    break;
+            }
+            {
+                struct pollfd pf = { .fd = hb_session_event_fd(s),
+                                     .events = POLLIN, .revents = 0 };
+                hb_sess_event ev;
+                if (poll(&pf, 1, 50) > 0 && (pf.revents & POLLIN))
+                    while (hb_session_next_event(s, &ev))
+                        drv_take(&d, s, &ev);
+            }
+            if (d.exited && res < 0)
+                break;   /* 会话结束了还没 res 文件 → 直接判失败 */
+        }
+        CHECK_EQ_INT(res, 0);
+    }
+    if (rth_on) {
+        ra.stop = 1;
+        pthread_join(rth, NULL);
+    }
+    hb_session_close(s);
+    hb_session_free(s);
+    s = NULL;
+out:
+    if (s)
+        hb_session_free(s);
+    free(data);
+    unlink(exp_path);
+    unlink(in_path);
+    unlink(res_path);
+}
+
 /* ------------------------------ parse_target 单元 ------------------------------ */
 
 static void test_parse_target(void)
@@ -1221,6 +1375,7 @@ int main(void)
     test_agent();
     test_osinfo();
     test_interactive();
+    test_paste_dup();
     test_cancel_connect();
     test_cancel_during_hostkey();
     test_keepalive();
