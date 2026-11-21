@@ -151,6 +151,7 @@ pt   = UTF-8 JSON:
 | 401 | `device_revoked` | 本设备已被吊销；附 `"wipe": bool` |
 | 409 | `email_taken` | 注册邮箱已存在 |
 | 429 | `rate_limited` | 附 `"retry_after": 秒` |
+| 500 | `server_error` | 服务端内部错误（客户端按可重试处理） |
 
 ### 6.1 账号（无需 token）
 
@@ -181,7 +182,8 @@ pt   = UTF-8 JSON:
 - `POST /objects` `{changes: [{id, type, base_seq, blob}]}`（≤ 200 条）
   → `{results: [{id, ok: true, seq} | {id, ok: false, conflict: {seq, blob, type}}]}`。
   **比较并交换**：服务端当前该 id 的 seq 等于 `base_seq`（不存在时须为 0）才接受并分配新 seq；
-  否则返回当前版本。逐条原子。
+  否则返回当前版本。逐条原子：批量内各条变更独立执行 CAS，失败项不写库且不影响其它项；
+  实现可将整个批量放在一个事务中，但不得因单项冲突回滚已接受的项。
 
 ### 6.3 WebSocket
 
