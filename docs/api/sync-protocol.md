@@ -170,6 +170,9 @@ pt   = UTF-8 JSON:
 ### 6.2 已登录
 
 - `POST /password` `{auth_key_old, auth_key, kdf, wrapped_vk_pw}` → `{}`。
+- `POST /recovery` `{auth_key, rc_auth, wrapped_vk_rc}` → `{}`：用当前口令换一套新恢复码
+  （新 `E`）；旧恢复码立即失效。客户端不在本机保存 `E`/恢复码：恢复码只在注册与轮换时
+  显示一次，忘记了就轮换。`auth_key` 错误按认证失败计入限流。
 - `POST /logout` → `{}`（吊销当前 token / 设备）。
 - `GET /devices` → `{devices: [{id, name, platform, created, last_seen, current}]}`。
 - `POST /devices/{id}/revoke` `{wipe: bool}` → `{}`。被吊销设备之后的任何请求得到
