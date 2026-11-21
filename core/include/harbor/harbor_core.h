@@ -10,6 +10,7 @@
 #include "hostio.h"
 #include "keys.h"
 #include "watch.h"
+#include "rd.h"
 #include "knownhosts.h"
 #include "snippet.h"
 #include "pf.h"
