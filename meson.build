@@ -7,7 +7,9 @@ project('harbor', 'c',
     ],
 )
 
-add_project_arguments('-D_GNU_SOURCE', language: 'c')
+if host_machine.system() != 'darwin'
+    add_project_arguments('-D_GNU_SOURCE', language: 'c')
+endif
 
 # Release builds must compile the dev hooks out: warn loudly if a
 # release/plain buildtype still has asserts on (NDEBUG off means the

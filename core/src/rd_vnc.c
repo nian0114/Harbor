@@ -2,6 +2,7 @@
  * hb_rd_close 仅通过 be->sock 的 shutdown 打断阻塞中的 I/O。 */
 
 #include "rd_priv.h"
+#include "sockutil.h"
 
 #include <rfb/rfbclient.h>
 
@@ -211,6 +212,10 @@ static int tcp_connect(hb_rd *rd, int timeout_s, hb_rd_err *err, char *det, size
         fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
         if (fd < 0)
             continue;
+        /* libvncclient 之后要在这个 fd 上 send：macOS 无 MSG_NOSIGNAL，
+         * 关 SO_NOSIGPIPE（Linux 该调用为 no-op，libvnc 内部用
+         * MSG_NOSIGNAL 或全局屏蔽）。 */
+        hb__sock_no_sigpipe(fd);
         int fl = fcntl(fd, F_GETFL);
         fcntl(fd, F_SETFL, fl | O_NONBLOCK);
         int r = connect(fd, p->ai_addr, p->ai_addrlen);

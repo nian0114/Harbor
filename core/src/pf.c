@@ -13,6 +13,7 @@
 
 #include "harbor/pf.h"
 #include "ssh_priv.h"
+#include "sockutil.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -27,6 +28,10 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/event.h>
+#include <sys/time.h>
+#endif
 
 #define PF_BUF       (64 * 1024)   /* 每连接每方向缓冲 */
 #define PF_MAX_CONN  256           /* 每规则并发连接上限 */
@@ -145,6 +150,9 @@ typedef struct pfeng {
     bool        cap_warned;
     bool        conn_dead;
     bool        shutting;
+#ifdef __APPLE__
+    int         kq;            /* POLLRDHUP 替代：ssh socket 挂 kqueue */
+#endif
 } pfeng;
 
 /* ------------------------------ 状态上报 ------------------------------ */
@@ -527,9 +535,9 @@ static struct addrinfo *resolve_numeric(const char *addr, int port)
 static int mk_listener_fd(const struct addrinfo *ai)
 {
     int fd, one = 1;
-    fd = socket(ai->ai_family,
-                ai->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC,
-                ai->ai_protocol);
+    fd = hb__socket(ai->ai_family,
+                    ai->ai_socktype | HB_SOCK_NONBLOCK | HB_SOCK_CLOEXEC,
+                    ai->ai_protocol);
     if (fd < 0)
         return -1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
@@ -1099,8 +1107,8 @@ static void accept_step(pfeng *e, int *prog)
         for (;;) {
             struct sockaddr_storage ss;
             socklen_t sl = sizeof ss;
-            int fd = accept4(e->lfds[i], (struct sockaddr *)&ss, &sl,
-                             SOCK_NONBLOCK | SOCK_CLOEXEC);
+            int fd = hb__accept4(e->lfds[i], (struct sockaddr *)&ss, &sl,
+                                 HB_SOCK_NONBLOCK | HB_SOCK_CLOEXEC);
             pfconn *c;
             if (fd < 0)
                 break;
@@ -1184,9 +1192,10 @@ static void lconn_step(pfeng *e, pfconn *c, int *prog)
             conn_kill(e, c);
             return;
         }
-        c->fd = socket(c->ai->ai_family,
-                       c->ai->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC,
-                       c->ai->ai_protocol);
+        c->fd = hb__socket(c->ai->ai_family,
+                           c->ai->ai_socktype | HB_SOCK_NONBLOCK |
+                               HB_SOCK_CLOEXEC,
+                           c->ai->ai_protocol);
         if (c->fd < 0) {
             c->ai = c->ai->ai_next;
             return;
@@ -1225,7 +1234,7 @@ static void lconn_step(pfeng *e, pfconn *c, int *prog)
 static void dn_flush(pfeng *e, pfconn *c, int *prog)
 {
     if (c->fd >= 0 && c->dn_len) {
-        ssize_t n = send(c->fd, c->dn, c->dn_len, MSG_NOSIGNAL);
+        ssize_t n = send(c->fd, c->dn, c->dn_len, HB_MSG_NOSIGNAL);
         if (n > 0) {
             memmove(c->dn, c->dn + n, c->dn_len - (size_t)n);
             c->dn_len -= (size_t)n;
@@ -1467,6 +1476,24 @@ int hb__pf_run(void *ctx, hb_session *s)
     e->hp = hb__ssh_target(h);
     e->last_stats = hb_now_ms();
     emit_st(e, HB_PF_EV_LISTENING, NULL);
+#ifdef __APPLE__
+    /* POLLRDHUP 的 Darwin 等效：kqueue + EVFILT_READ|EV_CLEAR。
+     * 边沿触发 —— 新数据到达或对端 FIN 各只唤醒一次，内核缓冲里
+     * 残留的未消费包不会让 fd 恒就绪（保住"无空转"），FIN 经
+     * kev.flags & EV_EOF 侦测（同 RDHUP 一样覆盖半关）。kqueue fd
+     * 本身可进 poll(2)；创建失败降级为 POLLERR|POLLHUP 门控 +
+     * ≤100ms 周期 MSG_PEEK。 */
+    e->kq = kqueue();
+    if (e->kq >= 0) {
+        struct kevent ke;
+        EV_SET(&ke, (uintptr_t)e->hp->sock, EVFILT_READ,
+               EV_ADD | EV_CLEAR, 0, 0, NULL);
+        if (kevent(e->kq, &ke, 1, NULL, 0, NULL) < 0) {
+            close(e->kq);
+            e->kq = -1;
+        }
+    }
+#endif
 
     /* local/dynamic：开一个闲置 session channel 当 transport 排空口。
      * 没有它，闲暇期 keepalive 回复等杂散入站没人喂 libssh2，POLLIN
@@ -1528,8 +1555,15 @@ int hb__pf_run(void *ctx, hb_session *s)
 
         /* ---- poll ---- */
         {
+#ifdef __APPLE__
+            /* macOS：pf[0]=cmd，pf[1]=kqueue（或降级时 ssh sock），
+             * pf[2]=ssh sock（POLLOUT/错误）。Linux：pf[1]=ssh sock。 */
+            struct pollfd pf[3 + 8 + PF_MAX_CONN];
+            int nf = 3;
+#else
             struct pollfd pf[2 + 8 + PF_MAX_CONN];
             int nf = 2;
+#endif
             int dirs, tmo, n, i;
             pfconn *c;
 
@@ -1549,6 +1583,38 @@ int hb__pf_run(void *ctx, hb_session *s)
             pf[0].fd = cmd_fd;
             pf[0].events = POLLIN;
             pf[0].revents = 0;
+#ifdef __APPLE__
+            if (e->kq >= 0) {
+                /* 数据到达与 FIN 都经 kqueue 边沿事件送达 */
+                pf[1].fd = e->kq;
+                pf[1].events = POLLIN;
+                pf[1].revents = 0;
+            } else {
+                /* 兜底：与 Linux 相同的 POLLIN 门控 + 周期 MSG_PEEK */
+                pf[1].fd = e->hp->sock;
+                pf[1].events = POLLERR | POLLHUP;
+                if (e->conns || e->drain ||
+                    (h->ka_next && h->ka_last_out > h->ka_last_in))
+                    pf[1].events |= POLLIN;
+                pf[1].revents = 0;
+                if (tmo < 0 || tmo > 100)
+                    tmo = 100;
+            }
+            pf[2].fd = e->hp->sock;
+            pf[2].revents = 0;
+            dirs = libssh2_session_block_directions(e->hp->sess);
+            pf[2].events =
+                (dirs & LIBSSH2_SESSION_BLOCK_OUTBOUND) ? POLLOUT : 0;
+            /* 数据就绪同时走 pf[2] 的 POLLIN（与 Linux 同级触发门控）：
+             * kqueue 边沿在缓冲留残包时不再重触发 —— libssh2 每次只搬
+             * 一个传输块，conn 的 dn 缓冲满压时 channel_read 会提前停，
+             * 内核残留字节没有新边沿可等 → 只能靠无关 fd 或超时醒来
+             * 的潜在停顿。POLLIN 门控照旧：空闲不订（无空转），FIN
+             * 依旧由 kqueue EV_EOF 捕获。 */
+            if (e->conns || e->drain ||
+                (h->ka_next && h->ka_last_out > h->ka_last_in))
+                pf[2].events |= POLLIN;
+#else
             pf[1].fd = e->hp->sock;
             /* POLLRDHUP 必订：对端 FIN 或 jump 泵 shutdown(SHUT_WR) 的
              * 半关只报 POLLIN/RDHUP 而不报 POLLHUP；漏订则 EOF 的 POLLIN
@@ -1563,6 +1629,7 @@ int hb__pf_run(void *ctx, hb_session *s)
             if (dirs & LIBSSH2_SESSION_BLOCK_OUTBOUND)
                 pf[1].events |= POLLOUT;
             pf[1].revents = 0;
+#endif
 
             if (!e->shutting) {
                 for (i = 0; i < e->nlfds &&
@@ -1625,6 +1692,48 @@ int hb__pf_run(void *ctx, hb_session *s)
                 while ((nr = read(cmd_fd, junk, sizeof junk)) > 0)
                     ;
             }
+#ifdef __APPLE__
+            if (pf[1].fd == e->kq) {
+                if (pf[1].revents & POLLIN) {
+                    /* 取走待发 kevent：EV_EOF/EV_ERROR → 对端已断；
+                     * 纯数据到达 → 记 ka_last_in（与 POLLIN 同义）。 */
+                    struct kevent kev[8];
+                    struct timespec zt = { 0, 0 };
+                    int nev, ki;
+                    nev = kevent(e->kq, NULL, 0, kev, 8, &zt);
+                    for (ki = 0; ki < nev; ki++) {
+                        if (kev[ki].flags & (EV_EOF | EV_ERROR)) {
+                            e->conn_dead = true;
+                            h->disconnected = true;
+                        } else {
+                            h->ka_last_in = hb_now_ms();
+                        }
+                    }
+                }
+            } else {
+                if (pf[1].revents & POLLIN)
+                    h->ka_last_in = hb_now_ms();
+                if (pf[1].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+                    e->conn_dead = true;
+                    h->disconnected = true;
+                }
+                /* 兜底路径：MSG_PEEK 区分 EOF 与未消费数据 */
+                {
+                    char pk;
+                    ssize_t pn = recv(e->hp->sock, &pk, 1, MSG_PEEK);
+                    if (pn == 0) {
+                        e->conn_dead = true;
+                        h->disconnected = true;
+                    }
+                }
+            }
+            if (pf[2].revents & POLLIN)
+                h->ka_last_in = hb_now_ms();
+            if (pf[2].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+                e->conn_dead = true;
+                h->disconnected = true;
+            }
+#else
             if (pf[1].revents & POLLIN)
                 h->ka_last_in = hb_now_ms();
             if (pf[1].revents &
@@ -1632,6 +1741,7 @@ int hb__pf_run(void *ctx, hb_session *s)
                 e->conn_dead = true;
                 h->disconnected = true;
             }
+#endif
         }
         {
             int may = !tx_pending(e) || e->txop == TX_KA ||
@@ -1644,6 +1754,12 @@ int hb__pf_run(void *ctx, hb_session *s)
     }
 
     /* ---- 收尾 ---- */
+#ifdef __APPLE__
+    if (e->kq >= 0) {
+        close(e->kq);
+        e->kq = -1;
+    }
+#endif
     close_listeners(e);
     if (e->conn_dead) {
         if (!h->disconnect_emitted) {

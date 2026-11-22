@@ -8,6 +8,7 @@
 #include "harbor/ssh.h"
 
 #include "ssh_priv.h"
+#include "sockutil.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -219,9 +220,10 @@ static int tcp_connect(hb_ssh *h, struct addrinfo *res, int timeout_ms,
     bool any_refused = false, any_other = false;
 
     for (; res; res = res->ai_next) {
-        int fd = socket(res->ai_family,
-                        res->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC,
-                        res->ai_protocol);
+        int fd = hb__socket(res->ai_family,
+                            res->ai_socktype | HB_SOCK_NONBLOCK |
+                                HB_SOCK_CLOEXEC,
+                            res->ai_protocol);
         int rc;
         if (fd < 0)
             continue;
@@ -1214,7 +1216,7 @@ static void *pump_run(void *arg)
                 p->chan_eof = true;
         }
         if (p->plen && (pf[1].revents & POLLOUT)) {
-            ssize_t n = send(p->pair, p->pbuf, p->plen, MSG_NOSIGNAL);
+            ssize_t n = send(p->pair, p->pbuf, p->plen, HB_MSG_NOSIGNAL);
             if (n > 0) {
                 memmove(p->pbuf, p->pbuf + n, p->plen - (size_t)n);
                 p->plen -= (size_t)n;
@@ -1259,8 +1261,9 @@ static int pump_start(hb_ssh *h, hop *inner)
     int pr[2];
     pump_t *p = &inner->pump;
 
-    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0,
-                   pr) != 0) {
+    if (hb__socketpair(AF_UNIX,
+                       SOCK_STREAM | HB_SOCK_NONBLOCK | HB_SOCK_CLOEXEC,
+                       0, pr) != 0) {
         hb__ssh_set_err(h, "socketpair: %s", strerror(errno));
         return W_SOCK;
     }
