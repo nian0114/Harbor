@@ -1,0 +1,25 @@
+# Meson cross file：Intel Mac 上为 arm64 构建 core。
+# 模板 —— scripts/build-macos-core.sh 将 @HARBOR_MACOS_SYSROOT@ 替换为
+# $HARBOR_MACOS_SYSROOT 后写入构建目录使用。
+
+[binaries]
+c = ['clang', '-arch', 'arm64']
+ar = 'ar'
+strip = 'strip'
+pkgconfig = '@HARBOR_MACOS_SYSROOT@/tools/bin/pkgconf'
+pkg-config = '@HARBOR_MACOS_SYSROOT@/tools/bin/pkgconf'
+
+[host_machine]
+system = 'darwin'
+subsystem = 'macos'
+kernel = 'xnu'
+cpu_family = 'aarch64'
+cpu = 'arm64'
+endian = 'little'
+
+[built-in options]
+c_args = ['-mmacosx-version-min=13.0']
+c_link_args = ['-mmacosx-version-min=13.0']
+
+[properties]
+pkg_config_libdir = ['@HARBOR_MACOS_SYSROOT@/arm64/lib/pkgconfig']
