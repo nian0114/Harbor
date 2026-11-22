@@ -74,6 +74,8 @@ void hb_vt_set_event_fn(hb_vt *v, hb_vt_event_fn fn, void *ud);
 void hb_vt_set_osc52_allowed(hb_vt *v, bool allowed);   /* default false */
 
 void hb_vt_feed(hb_vt *v, const char *bytes, size_t len);
+/* 回到出厂态：清两屏、scrollback、模式与光标（FR-12：重放快照前复位） */
+void hb_vt_hard_reset(hb_vt *v);
 void hb_vt_resize(hb_vt *v, int rows, int cols);
 void hb_vt_size(hb_vt *v, int *rows, int *cols);
 
@@ -94,6 +96,16 @@ const char *hb_vt_title(hb_vt *v);
 
 int  hb_vt_mouse_mode(hb_vt *v);        /* 0 none, 1 click, 2 drag, 3 move */
 bool hb_vt_bracketed_paste(hb_vt *v);
+bool hb_vt_app_cursor(hb_vt *v);        /* DECCKM ?1：application 光标键 */
+bool hb_vt_app_keypad(hb_vt *v);        /* DECPAM ESC=：application keypad */
+
+/* ANSI 重建流：在全新 rows×cols hb_vt 上回放即可重建终端（FR-12 §5）。
+ * 内容：scrollback 尾部（≤ max_scrollback 行，带 SGR）、ESC[H ESC[2J、
+ * 可见屏逐行（带 SGR、宽字符占位）、alt 屏（先主屏再 ?1049h 再备用屏）、
+ * 光标位置/可见性/闪烁/形状、以及影响输入编码的模式（DECCKM、bracketed
+ * paste、application keypad、mouse）。调用方必须已持有 vt 锁
+ * （在 session tap / run_on_thread 回调里取，保证与 dseq 同点）。 */
+void hb_vt_snapshot_ansi(hb_vt *v, int max_scrollback, char **out, size_t *len);
 
 /* -------- 输入 -------- */
 

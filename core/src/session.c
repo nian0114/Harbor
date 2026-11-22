@@ -20,6 +20,12 @@ typedef struct ev_node {
     struct ev_node *next;
 } ev_node;
 
+typedef struct run_node {
+    hb_session_run_fn fn;
+    void *ud;
+    struct run_node *next;
+} run_node;
+
 struct hb_session {
     hb_session_transport tr;
     hb_vt   *vt;
@@ -53,6 +59,9 @@ struct hb_session {
 
     hb_session_tap_fn tap;
     void *tap_ud;
+
+    /* run_on_thread 队列：UI 追加、线程取干 */
+    struct run_node *run_head, *run_tail;
 
     void *udata;            /* transport 私有数据（SFTP 引擎） */
 
@@ -792,6 +801,26 @@ static bool sess_pending_write(hb_session *s)
     return p;
 }
 
+/* session 线程：取干并执行 run 队列（read→tap→feed 间隙调用） */
+static void sess_run_queued(hb_session *s)
+{
+    for (;;) {
+        run_node *n;
+        pthread_mutex_lock(&s->mu);
+        n = s->run_head;
+        if (n) {
+            s->run_head = n->next;
+            if (!s->run_head)
+                s->run_tail = NULL;
+        }
+        pthread_mutex_unlock(&s->mu);
+        if (!n)
+            break;
+        n->fn(s, n->ud);
+        free(n);
+    }
+}
+
 static void *sess_thread(void *arg)
 {
     hb_session *s = arg;
@@ -879,6 +908,10 @@ static void *sess_thread(void *arg)
         } else {
             pthread_mutex_unlock(&s->mu);
         }
+
+        /* run_on_thread 队列：此刻处于两次 read→tap→feed 之间，
+         * 回调取到的 vt 状态与下一个 tap 的 dseq 严格同点。 */
+        sess_run_queued(s);
 
         /* 写冲刷 */
         if (pf[1].revents & (POLLOUT | POLLIN) || sess_pending_write(s))
@@ -1297,6 +1330,40 @@ void hb_session_set_tap(hb_session *s, hb_session_tap_fn fn, void *ud)
     pthread_mutex_unlock(&s->mu);
 }
 
+void hb_session_run_on_thread(hb_session *s, hb_session_run_fn fn, void *ud)
+{
+    run_node *n;
+    char w = 'r';
+    bool run_now = false;
+    if (!s || !fn)
+        return;
+    pthread_mutex_lock(&s->mu);
+    run_now = !s->th_started || s->exited;
+    if (!run_now) {
+        n = calloc(1, sizeof *n);
+        if (n) {
+            n->fn = fn;
+            n->ud = ud;
+            if (s->run_tail)
+                s->run_tail->next = n;
+            else
+                s->run_head = n;
+            s->run_tail = n;
+        }
+    }
+    pthread_mutex_unlock(&s->mu);
+    if (run_now) {
+        /* 线程已退出：vt 不再被喂，调用方线程持锁运行即可（语义同点）。 */
+        if (s->vt)
+            hb_vt_lock(s->vt);
+        fn(s, ud);
+        if (s->vt)
+            hb_vt_unlock(s->vt);
+        return;
+    }
+    if (write(s->cmd_w, &w, 1) < 0) {}
+}
+
 void hb_session_free(hb_session *s)
 {
     ev_node *n;
@@ -1325,6 +1392,11 @@ void hb_session_free(hb_session *s)
     }
     close(s->cmd_r); close(s->cmd_w);
     close(s->ev_r);  close(s->ev_w);
+    while (s->run_head) {
+        run_node *n = s->run_head;
+        s->run_head = n->next;
+        free(n);
+    }
     free(s->wq);
     if (s->reply_secret)
         hb_secret_free(s->reply_secret);

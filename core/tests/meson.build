@@ -78,3 +78,9 @@ test_sync = executable('test_sync', 'test_sync.c',
     dependencies: harbor_core_dep,
 )
 test('sync', test_sync, timeout: 300)
+
+test_share = executable('test_share', 'test_share.c',
+    include_directories: [include_directories('../src'), include_directories('../third_party/cjson')],
+    dependencies: harbor_core_dep,
+)
+test('share', test_share, timeout: 180)

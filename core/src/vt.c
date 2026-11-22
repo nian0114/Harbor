@@ -1,6 +1,7 @@
 #include "harbor/vt.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -69,10 +70,13 @@ struct hb_vt {
     int      cursor_shape;
     bool     cursor_visible, cursor_blink;
     bool     bracketed_paste;
+    bool     app_cursor;   /* DECCKM ?1h */
+    bool     app_keypad;   /* DECPAM ESC= */
 
-    scan_state scan;   /* ?2004 侦测状态机 */
+    scan_state scan;   /* ?2004 / ?1 侦测状态机 */
     long       scan_num;
     bool       scan_have;
+    unsigned   scan_pend;  /* 已见参数位掩码：bit0=?1, bit1=?2004 */
 
     /* OSC 分片累积 */
     int    osc_cmd;
@@ -1030,13 +1034,23 @@ static void scan_byte(hb_vt *v, unsigned char ch)
             v->scan = SCAN_CSI;
         return;
     case SCAN_ESC:
-        v->scan = (ch == '[') ? SCAN_CSI : SCAN_TEXT;
+        if (ch == '[')
+            v->scan = SCAN_CSI;
+        else if (ch == '=') {          /* DECPAM：application keypad */
+            v->app_keypad = true;
+            v->scan = SCAN_TEXT;
+        } else if (ch == '>') {        /* DECPNM */
+            v->app_keypad = false;
+            v->scan = SCAN_TEXT;
+        } else
+            v->scan = SCAN_TEXT;
         return;
     case SCAN_CSI:
         if (ch == '?') {
             v->scan = SCAN_PRIV;
             v->scan_num = 0;
             v->scan_have = false;
+            v->scan_pend = 0;
         } else {
             v->scan = SCAN_TEXT;
         }
@@ -1050,13 +1064,21 @@ static void scan_byte(hb_vt *v, unsigned char ch)
             return;
         }
         if (ch == ';') {
+            if (v->scan_have) {
+                if (v->scan_num == 1)      v->scan_pend |= 1;
+                if (v->scan_num == 2004)   v->scan_pend |= 2;
+            }
             v->scan_num = 0;
             v->scan_have = false;
             return;
         }
         if (ch == 'h' || ch == 'l') {
-            if (v->scan_have && v->scan_num == 2004)
-                v->bracketed_paste = (ch == 'h');
+            if (v->scan_have) {
+                if (v->scan_num == 1)      v->scan_pend |= 1;
+                if (v->scan_num == 2004)   v->scan_pend |= 2;
+            }
+            if (v->scan_pend & 1) v->app_cursor = (ch == 'h');
+            if (v->scan_pend & 2) v->bracketed_paste = (ch == 'h');
             v->scan = SCAN_TEXT;
             return;
         }
@@ -1231,6 +1253,11 @@ void hb_vt_feed(hb_vt *v, const char *bytes, size_t len)
             csi = 1;
         }
         if (!csi) {
+            /* DECPAM/DECPNM（ESC=/ESC>）不走状态机也要跟踪 keypad 模式 */
+            if (q < end && *q == '=')
+                v->app_keypad = true;
+            else if (q < end && *q == '>')
+                v->app_keypad = false;
             p = q;                  /* 非 CSI 的 ESC 序列：略过 ESC 一字节 */
             continue;
         }
@@ -1389,6 +1416,274 @@ bool hb_vt_bracketed_paste(hb_vt *v)
     return b;
 }
 
+bool hb_vt_app_cursor(hb_vt *v)
+{
+    bool b;
+    lock(v);
+    b = v->app_cursor;
+    unlock(v);
+    return b;
+}
+
+bool hb_vt_app_keypad(hb_vt *v)
+{
+    bool b;
+    lock(v);
+    b = v->app_keypad;
+    unlock(v);
+    return b;
+}
+
+/* ------------------------- ANSI 快照（FR-12 §5） ------------------------- */
+
+static size_t utf8_encode(uint32_t cp, char out[4]);
+
+typedef struct {
+    char  *buf;
+    size_t len, cap;
+    pen_t  pen;             /* 已发出的当前 pen */
+} sbuf;
+
+static void sb_put(sbuf *b, const char *s, size_t n)
+{
+    if (b->len + n + 1 > b->cap) {
+        size_t nc = b->cap ? b->cap : 4096;
+        char *nb;
+        while (b->len + n + 1 > nc)
+            nc *= 2;
+        nb = realloc(b->buf, nc);
+        if (!nb)
+            return;
+        b->buf = nb;
+        b->cap = nc;
+    }
+    memcpy(b->buf + b->len, s, n);
+    b->len += n;
+    b->buf[b->len] = 0;
+}
+
+static void sb_puts(sbuf *b, const char *s) { sb_put(b, s, strlen(s)); }
+
+static void sb_fmt(sbuf *b, const char *fmt, int a, int c)
+{
+    char t[32];
+    int n = snprintf(t, sizeof t, fmt, a, c);
+    if (n > 0)
+        sb_put(b, t, (size_t)n);
+}
+
+static bool pen_eq(const pen_t *a, const pen_t *b)
+{
+    return a->attrs == b->attrs &&
+           a->fg.type == b->fg.type && a->fg.idx == b->fg.idx &&
+           a->fg.r == b->fg.r && a->fg.g == b->fg.g && a->fg.b == b->fg.b &&
+           a->bg.type == b->bg.type && a->bg.idx == b->bg.idx &&
+           a->bg.r == b->bg.r && a->bg.g == b->bg.g && a->bg.b == b->bg.b;
+}
+
+/* 颜色 → SGR 参数段（如 "38;5;196" / "48;2;1;2;3"；默认色 → 空） */
+static void sgr_color(char *out, int prefix, const hb_color *c)
+{
+    if (c->type == HB_COLOR_INDEXED)
+        sprintf(out, "%d;5;%d", prefix, c->idx);
+    else if (c->type == HB_COLOR_RGB)
+        sprintf(out, "%d;2;%d;%d;%d", prefix, c->r, c->g, c->b);
+    else
+        out[0] = 0;
+}
+
+/* pen 变化时发完整 SGR：0m 复位后逐项设置（简单且确定） */
+static void sgr_set(sbuf *b, const pen_t *p)
+{
+    char seg[192], col[40];
+    size_t n = 0;
+    if (pen_eq(&b->pen, p))
+        return;
+    memcpy(seg, "\x1b[0", 3);
+    n = 3;
+    if (p->attrs & HB_ATTR_BOLD)        seg[n++] = ';', seg[n++] = '1';
+    if (p->attrs & HB_ATTR_DIM)         { seg[n++]=';'; seg[n++]='2'; }
+    if (p->attrs & HB_ATTR_ITALIC)      { seg[n++]=';'; seg[n++]='3'; }
+    if (p->attrs & HB_ATTR_UNDERLINE)   { seg[n++]=';'; seg[n++]='4'; }
+    if (p->attrs & HB_ATTR_DUNDERLINE)  { memcpy(seg+n,";4:2",4); n+=4; }
+    if (p->attrs & HB_ATTR_CURLY)       { memcpy(seg+n,";4:3",4); n+=4; }
+    if (p->attrs & HB_ATTR_BLINK)       { seg[n++]=';'; seg[n++]='5'; }
+    if (p->attrs & HB_ATTR_REVERSE)     { seg[n++]=';'; seg[n++]='7'; }
+    if (p->attrs & HB_ATTR_CONCEAL)     { seg[n++]=';'; seg[n++]='8'; }
+    if (p->attrs & HB_ATTR_STRIKE)      { seg[n++]=';'; seg[n++]='9'; }
+    sgr_color(col, 38, &p->fg);
+    if (col[0]) {
+        size_t l = strlen(col);
+        seg[n++] = ';';
+        memcpy(seg + n, col, l);
+        n += l;
+    }
+    sgr_color(col, 48, &p->bg);
+    if (col[0]) {
+        size_t l = strlen(col);
+        seg[n++] = ';';
+        memcpy(seg + n, col, l);
+        n += l;
+    }
+    seg[n++] = 'm';
+    sb_put(b, seg, n);
+    b->pen = *p;
+}
+
+static pen_t cell_pen(const hb_cell *c)
+{
+    pen_t p;
+    p.attrs = c->attrs;
+    p.fg = c->fg;
+    p.bg = c->bg;
+    return p;
+}
+
+/* 输出一行 cells（含 SGR run、宽字符尾随跳过）。空白格用 ECH
+ * （擦除为当前 pen 的空白）而不是写字面空格，保证回放侧 cell 仍
+ * 为“未写入空白”（chars[0]==0）与源一致。 */
+static void emit_cells(sbuf *b, const hb_cell *cells, int n)
+{
+    int i;
+    for (i = 0; i < n; i++) {
+        const hb_cell *c = &cells[i];
+        pen_t p;
+        int k;
+        if (c->width == 0)
+            continue;                  /* 宽字符尾随格 */
+        p = cell_pen(c);
+        if (c->chars[0] == 0) {
+            int run = 1;
+            pen_t pp;
+            /* 连续同 pen 的空白合并成一次 ECH */
+            while (i + run < n &&
+                   cells[i + run].width != 0 &&
+                   cells[i + run].chars[0] == 0 &&
+                   (pp = cell_pen(&cells[i + run]), pen_eq(&pp, &p)))
+                run++;
+            sgr_set(b, &p);
+            /* ECH 以当前 pen 擦成空白（不移动光标），再 CUF 跳过 */
+            sb_fmt(b, "\x1b[%dX\x1b[%dC", run, run);
+            i += run - 1;
+            continue;
+        }
+        sgr_set(b, &p);
+        {
+            char enc[4 * HB_VT_MAX_CHARS];
+            size_t l = 0;
+            for (k = 0; k < HB_VT_MAX_CHARS && c->chars[k]; k++)
+                l += utf8_encode(c->chars[k], enc + l);
+            sb_put(b, enc, l);
+        }
+    }
+}
+
+/* 把一屏绘制进流：每行 CUP 定位 + cells；wrapped 行不加 CUP 让其续行 */
+static void emit_screen(sbuf *b, hb_vt *v, row_t **screen)
+{
+    int r;
+    for (r = 0; r < v->rows; r++) {
+        row_t *row = screen[r];
+        if (r == 0 || !row || !row->wrapped) {
+            /* wrapped 行是上一行的软续行：不加 CUP，内容直接续写 */
+            sb_fmt(b, "\x1b[%d;1H", r + 1, 0);
+        }
+        if (row) {
+            emit_cells(b, row->cells, row->used);
+            /* 下一行是本行的软续行 → 本行必须写满 cols 才触发 autowrap */
+            if (r + 1 < v->rows && screen[r + 1] &&
+                screen[r + 1]->wrapped && row->used < v->cols) {
+                pen_t fp;
+                int pad;
+                fp.attrs = 0;
+                fp.fg = row->fill_fg;
+                fp.bg = row->fill_bg;
+                sgr_set(b, &fp);
+                for (pad = row->used; pad < v->cols; pad++)
+                    sb_put(b, " ", 1);
+            }
+        }
+    }
+}
+
+void hb_vt_snapshot_ansi(hb_vt *v, int max_scrollback, char **out, size_t *len)
+{
+    sbuf b = {0};
+    int i, nlines, first, r, c, shape;
+    bool vis, bl;
+    VTermPos pos = {0, 0};
+
+    *out = NULL;
+    *len = 0;
+    lock(v);
+
+    memset(&b.pen, 0, sizeof b.pen);
+    b.pen.fg.type = HB_COLOR_DEFAULT_FG;
+    b.pen.bg.type = HB_COLOR_DEFAULT_BG;
+
+    /* ---- scrollback 尾部：最旧→最新；wrapped 行无换行让回放自然续行 ---- */
+    nlines = v->sb_len < max_scrollback ? v->sb_len : max_scrollback;
+    first = v->sb_len - nlines;           /* ring 中跳过最旧的 */
+    for (i = 0; i < nlines; i++) {
+        int idx = (v->sb_start + first + i) % v->sb_cap;
+        const sb_line *l = &v->sb[idx];
+        emit_cells(&b, v->sb_arena + l->off, l->n);
+        if (l->wraps_next) {
+            /* 满宽才续行：不足则以 fill 色补空格到 cols 触发 autowrap */
+            pen_t fp;
+            int pad;
+            fp.attrs = 0;
+            fp.fg = l->fg;
+            fp.bg = l->bg;
+            sgr_set(&b, &fp);
+            for (pad = l->n; pad < v->cols; pad++)
+                sb_put(&b, " ", 1);
+        } else {
+            sb_put(&b, "\r\n", 2);
+        }
+    }
+    /* 补 rows-1 个换行：光标从 row0 出发，到行底之前不产生 scroll；
+     * 之后每个 \r\n 推一行 → 恰好 nlines 行滚入 scrollback，余下的
+     * 空行留在屏上被 2J 清掉。 */
+    if (nlines)
+        for (i = 0; i + 1 < v->rows; i++)
+            sb_put(&b, "\r\n", 2);
+
+    /* ---- 可见屏：清屏后逐行 ---- */
+    sb_puts(&b, "\x1b[H\x1b[2J");
+    emit_screen(&b, v, v->prim);
+    if (v->alt_active) {
+        sb_puts(&b, "\x1b[?1049h");
+        emit_screen(&b, v, v->alt);
+    }
+
+    /* ---- 模式（影响输入编码的） ---- */
+    sb_puts(&b, v->app_cursor ? "\x1b[?1h" : "\x1b[?1l");
+    sb_puts(&b, v->app_keypad ? "\x1b=" : "\x1b>");
+    sb_puts(&b, v->bracketed_paste ? "\x1b[?2004h" : "\x1b[?2004l");
+    if (v->mouse_mode == 1)      sb_puts(&b, "\x1b[?1000h");
+    else if (v->mouse_mode == 2) sb_puts(&b, "\x1b[?1002h");
+    else if (v->mouse_mode == 3) sb_puts(&b, "\x1b[?1003h");
+    else                         sb_puts(&b, "\x1b[?1000l\x1b[?1002l\x1b[?1003l");
+
+    /* ---- 光标 ---- */
+    vterm_state_get_cursorpos(v->state, &pos);
+    r = pos.row; c = pos.col; vis = v->cursor_visible;
+    bl = v->cursor_blink; shape = v->cursor_shape;
+    sb_fmt(&b, "\x1b[%d;%dH", r + 1, c + 1);
+    sb_puts(&b, vis ? "\x1b[?25h" : "\x1b[?25l");
+    {
+        /* DECSCUSR：奇数=闪烁；1/2 块 3/4 下划线 5/6 竖条 */
+        int base = shape == VTERM_PROP_CURSORSHAPE_UNDERLINE ? 3
+                 : shape == VTERM_PROP_CURSORSHAPE_BAR_LEFT  ? 5 : 1;
+        sb_fmt(&b, "\x1b[%d q", bl ? base : base + 1, 0);
+    }
+
+    unlock(v);
+    *out = b.buf;
+    *len = b.len;
+}
+
 uint64_t hb_vt_generation(hb_vt *v)
 {
     uint64_t g;
@@ -1402,6 +1697,39 @@ void hb_vt_clear_scrollback(hb_vt *v)
 {
     lock(v);
     sb_clear(v);
+    v->gen++;
+    unlock(v);
+}
+
+void hb_vt_hard_reset(hb_vt *v)
+{
+    int i;
+    if (!v)
+        return;
+    lock(v);
+    vterm_state_reset(v->state, 1);
+    for (i = 0; i < v->rows; i++) {
+        row_blank(v, v->prim[i]);
+        row_blank(v, v->alt[i]);
+    }
+    v->buf = v->prim;
+    v->alt_active = false;
+    sb_clear(v);
+    v->total_pushed = 0;
+    memset(&v->pen, 0, sizeof v->pen);
+    v->pen.fg.type = HB_COLOR_DEFAULT_FG;
+    v->pen.bg.type = HB_COLOR_DEFAULT_BG;
+    v->pg_row = -1;
+    v->mouse_mode = 0;
+    v->cursor_shape = VTERM_PROP_CURSORSHAPE_BLOCK;
+    v->cursor_visible = true;
+    v->cursor_blink = false;
+    v->bracketed_paste = false;
+    v->app_cursor = false;
+    v->app_keypad = false;
+    v->scan = SCAN_TEXT;
+    v->scan_pend = 0;
+    v->scan_have = false;
     v->gen++;
     unlock(v);
 }

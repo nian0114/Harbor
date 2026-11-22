@@ -115,6 +115,13 @@ void hb_session_free(hb_session *s);    /* join 线程；close 与否都安全 *
 typedef void (*hb_session_tap_fn)(hb_session *s, const char *bytes, size_t len, void *ud);
 void hb_session_set_tap(hb_session *s, hb_session_tap_fn fn, void *ud);
 
+/* 让 fn 在 session 线程上、两次 read→tap→feed 之间运行（FR-12：快照与
+ * dseq 必须在输出流的同一点截取）。存活时经 cmd 管道入队唤醒执行；
+ * 会话已退出时立即在调用方线程、持有 vt 锁下运行（线程不再触碰 vt）。
+ * fn 不得阻塞。 */
+typedef void (*hb_session_run_fn)(hb_session *s, void *ud);
+void hb_session_run_on_thread(hb_session *s, hb_session_run_fn fn, void *ud);
+
 /* NULL cfg = 关闭完成监控；非 NULL 深拷贝并立即在 session 线程生效。
  * 运行中调用安全：引擎替换原子发生在 session 互斥锁内。
  * 命中经 HB_SESS_EV_WATCH 上报（EOF hit 保证在 EXIT 之前）。 */
