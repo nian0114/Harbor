@@ -47,7 +47,8 @@ def scan(src):
             i += 1
 
 WRAP_MACROS = ('_', 'N_', 'HB_TR', 'HB_N_', 'ngettext',
-               'Q_', 'C_', 'g_dgettext', 'dgettext', 'gettext')
+               'Q_', 'C_', 'g_dgettext', 'dgettext', 'gettext',
+               'L',)  # L() = macOS Swift NSLocalizedString 封装
 
 def wrapped(src, s):
     """True if chain start s sits inside a wrap-macro call: walk back to
@@ -104,6 +105,19 @@ def main():
                 if any(rel == f and sub_ in text for f, sub_, _ in ALLOWLIST):
                     continue
                 bad.append((rel, lineno(src, s0), text))
+    for p in sorted((root / 'macos').rglob('*.swift')):
+        rel = str(p.relative_to(root))
+        src = p.read_text()
+        for ch in chains(src, list(scan(src))):
+            s0, e0 = ch[0][0], ch[-1][1]
+            text = src[s0:e0]
+            if not CJK.search(text):
+                continue
+            if wrapped(src, s0):
+                continue
+            if any(rel == f and sub_ in text for f, sub_, _ in ALLOWLIST):
+                continue
+            bad.append((rel, lineno(src, s0), text))
     for rel, ln, text in bad:
         print(f'{rel}:{ln}: unwrapped CJK literal {text[:80]}')
     if bad:
