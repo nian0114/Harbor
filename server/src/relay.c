@@ -153,8 +153,10 @@ static void qflush(SharePart *p)
         }
         f = g_queue_pop_head(&p->outq);
         p->outq_bytes -= f->len;
-        soup_websocket_connection_send_binary(p->conn, f->data,
-                                              f->len);
+        if (soup_websocket_connection_get_state(p->conn) ==
+            SOUP_WEBSOCKET_STATE_OPEN)
+            soup_websocket_connection_send_binary(p->conn, f->data,
+                                                  f->len);
         g_free(f->data);
         g_free(f);
     }
@@ -676,7 +678,9 @@ static void share_ws_connected(SoupServer *server, SoupServerMessage *msg,
             "{\"t\":\"joined\",\"id\":%u,\"role\":\"%s\",\"device\":\"%s\"}",
             p->id, role == R_MEMBER ? "member" : "guest",
             p->device ? p->device : "");
-        soup_websocket_connection_send_text(r->owner->conn, j);
+        if (soup_websocket_connection_get_state(r->owner->conn) ==
+            SOUP_WEBSOCKET_STATE_OPEN)
+            soup_websocket_connection_send_text(r->owner->conn, j);
     }
     hb_log(srv, 2, "share %s part %u role=%d connected", id, p->id, role);
 out:
