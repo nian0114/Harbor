@@ -3122,3 +3122,27 @@ void hb_sftp_view_open_host(HbSftpView *v, const char *host_id)
     pane_pick(&v->pane[0], NULL);       /* 左 = Local home */
     pane_pick(&v->pane[1], host_id);    /* 右 = host 连接 */
 }
+
+/* tray "在线会话" 计数：已建立远端 sess 的 pane 数。 */
+guint hb_sftp_view_online(HbSftpView *v)
+{
+    guint n = 0;
+    int i;
+    for (i = 0; i < 2; i++)
+        if (v->pane[i].sess)
+            n++;
+    return n;
+}
+
+/* tray "全部断开"：远端 pane 回 select（本地 pane 无连接可断）。 */
+void hb_sftp_view_disconnect_all(HbSftpView *v)
+{
+    int i;
+    for (i = 0; i < 2; i++) {
+        Pane *p = &v->pane[i];
+        if (p->ctl || p->sess) {
+            pane_teardown_conn(p);
+            pane_set_state(p, PS_SELECT);
+        }
+    }
+}

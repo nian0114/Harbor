@@ -2011,3 +2011,21 @@ GtkWidget *hb_desktop_page_new(HbStore *st, hb_obj *host)
     start_attempt(p, FALSE);
     return GTK_WIDGET(p);
 }
+
+gboolean hb_desktop_page_connected(HbDesktopPage *p)
+{
+    return p->connected;
+}
+
+/* tray "全部断开"：摘走 rd+隧道到工作线程 close，UI 回连接页。 */
+void hb_desktop_page_disconnect(HbDesktopPage *p)
+{
+    stop_backoff(p);
+    p->gen++;
+    p->connected = FALSE;
+    p->connecting_now = FALSE;
+    hide_disc(p);
+    detach_session(p);
+    gtk_stack_set_visible_child_name(GTK_STACK(p->stack), "connect");
+    tab_dot(p, NULL);
+}

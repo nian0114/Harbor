@@ -1282,3 +1282,35 @@ void hb_workspace_pick_targets(GtkWidget *win, HbStore *st)
     g_object_weak_ref(G_OBJECT(dlg), pick_ctx_free, c);
     adw_dialog_present(dlg, win);
 }
+
+static hb_session *pane_session(WsNode *n)
+{
+    HbSessionPage *sp = page_of(n);
+    if (HB_IS_TERM_PAGE(sp))
+        return hb_term_page_session(HB_TERM_PAGE(sp));
+    if (HB_IS_SSH_PAGE(sp))
+        return hb_ssh_page_session(HB_SSH_PAGE(sp));
+    return NULL;
+}
+
+guint hb_workspace_online(HbWorkspace *w)
+{
+    GList *l;
+    guint n = 0;
+    for (l = w->leaves; l; l = l->next) {
+        WsNode *wn = l->data;
+        if (!hb_session_page_is_dead(page_of(wn)) && pane_session(wn))
+            n++;
+    }
+    return n;
+}
+
+void hb_workspace_disconnect_all(HbWorkspace *w)
+{
+    GList *l;
+    for (l = w->leaves; l; l = l->next) {
+        hb_session *s = pane_session(l->data);
+        if (s)
+            hb_session_close(s);
+    }
+}

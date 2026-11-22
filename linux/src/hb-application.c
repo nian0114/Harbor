@@ -13,8 +13,13 @@
 #include "hb-host-actions.h"
 #include "hb-sync.h"
 #include "hb-account-view.h"
+#include "hb-tray.h"
+#include "hb-forward-mgr.h"
+#include "hb-share.h"
+#include "hb-login.h"
 #ifndef NDEBUG
 #include "hb-share.h"
+#include "hb-login.h"
 #include "hb-share-page.h"
 #include "hb-share-dialog.h"
 #include <stdio.h>
@@ -38,6 +43,10 @@ char *hb_opt_host_view;
 char *hb_opt_theme;
 char *hb_opt_open_local;    /* "" = 只开页；非空 = 启动后注入 CMD\n */
 char *hb_opt_connect;       /* --connect=user@host[:port] 启动即快速连接 */
+int   hb_opt_background;    /* --background：托盘可用时不开窗（自启动用） */
+
+static HbTray *app_tray;
+static gboolean tray_notify_shown;
 
 /* ------------------------------ 截图 ------------------------------ */
 
@@ -727,6 +736,18 @@ static void on_dev_vault_open(GSimpleAction *a, GVariant *p, gpointer ud)
 
 /* ------------------------------ 生命周期 ------------------------------ */
 
+#ifndef NDEBUG
+/* app.window-close：dev 动作，触发 close-request（= WM X 按钮路径）。 */
+static void on_dev_win_close(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    GtkWindow *w;
+    (void)a; (void)p;
+    w = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (w)
+        gtk_window_close(w);
+}
+#endif
+
 /* app.show-tab <tab_id>：监控通知的默认动作 —— 呈现窗口并切到该
  * tab；tab 已关则什么都不做（遍历所有窗口）。 */
 static void on_show_tab(GSimpleAction *a, GVariant *param, gpointer ud)
@@ -746,6 +767,119 @@ static void on_show_tab(GSimpleAction *a, GVariant *param, gpointer ud)
             return;
         }
     }
+}
+
+/* ------------------------------ 托盘 ------------------------------ */
+
+static int tray_count_online(void *ud)
+{
+    GList *ws, *l;
+    int n = 0;
+    (void)ud;
+    ws = gtk_application_get_windows(
+        GTK_APPLICATION(g_application_get_default()));
+    for (l = ws; l; l = l->next)
+        if (HB_IS_WINDOW(l->data))
+            n += hb_window_online_count(HB_WINDOW(l->data));
+    n += (int)hb_forward_mgr_running_count(hb_forward_mgr_default());
+    return n;
+}
+
+static void tray_activate(void *ud)
+{
+    GList *ws, *l;
+    (void)ud;
+    ws = gtk_application_get_windows(
+        GTK_APPLICATION(g_application_get_default()));
+    for (l = ws; l; l = l->next)
+        if (HB_IS_WINDOW(l->data)) {
+            gtk_window_present(GTK_WINDOW(l->data));
+            return;
+        }
+    g_application_activate(g_application_get_default());
+}
+
+static void tray_disconnect_all(void *ud)
+{
+    GList *ws, *l;
+    (void)ud;
+    ws = gtk_application_get_windows(
+        GTK_APPLICATION(g_application_get_default()));
+    for (l = ws; l; l = l->next)
+        if (HB_IS_WINDOW(l->data))
+            hb_window_disconnect_all(HB_WINDOW(l->data));
+    hb_forward_mgr_stop_all(hb_forward_mgr_default());
+    hb_tray_sessions_changed(app_tray);
+}
+
+static void tray_quit(void *ud)
+{
+    (void)ud;
+    g_application_quit(g_application_get_default());
+}
+
+gboolean hb_application_tray_available(void)
+{
+    return hb_tray_available(app_tray);
+}
+
+/* 会话状态变化的统一上报点（窗口/页面在加删 tab、改 dot 时调）。 */
+void hb_app_note_sessions(void)
+{
+    hb_tray_sessions_changed(app_tray);
+}
+
+/* 读 settings 的 close_to_tray（默认 TRUE）。 */
+static gboolean want_close_to_tray(void)
+{
+    hb_obj *o = NULL;
+    gboolean v = TRUE;
+    if (hb_vault_settings(hb_store_vault(hb_store_default()),
+                          &o) == HB_OK && o) {
+        v = hb_obj_get_bool(o, "close_to_tray", TRUE);
+        hb_obj_free(o);
+    }
+    return v;
+}
+
+/* 关窗 → 托盘可用时隐窗保活，一次性通知提示。返回 TRUE 吞掉关闭。 */
+static gboolean on_close_request(GtkWindow *win, gpointer ud)
+{
+    GNotification *n;
+    (void)ud;
+    if (!want_close_to_tray() || !hb_tray_available(app_tray))
+        return FALSE;
+    gtk_widget_set_visible(GTK_WIDGET(win), FALSE);
+    g_application_hold(g_application_get_default());
+    if (!tray_notify_shown) {
+        tray_notify_shown = TRUE;
+        n = g_notification_new("Harbor 仍在托盘中运行");
+        g_notification_set_body(n, "会话保持连接；点托盘图标可重新打开窗口。");
+        g_application_send_notification(
+            g_application_get_default(), "tray-alive", n);
+        g_object_unref(n);
+    }
+    return TRUE;
+}
+
+/* ------------------------- start_at_login ------------------------- */
+
+
+/* --background：3s 内 watcher 出现 → 保持无窗；否则正常开窗。 */
+static gboolean bg_check(gpointer ud)
+{
+    GtkWidget *win = ud;
+    static int ticks;
+    if (hb_tray_available(app_tray)) {
+        g_application_hold(g_application_get_default());
+        return G_SOURCE_REMOVE;
+    }
+    if (++ticks >= 12) {          /* ~3s */
+        ticks = 0;
+        gtk_window_present(GTK_WINDOW(win));
+        return G_SOURCE_REMOVE;
+    }
+    return G_SOURCE_CONTINUE;
 }
 
 static void hb_application_startup(GApplication *app)
@@ -774,12 +908,31 @@ static void hb_application_startup(GApplication *app)
     g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
     g_object_unref(sa);
 
+    sa = g_simple_action_new("quit", NULL);
+    g_signal_connect(sa, "activate", G_CALLBACK(tray_quit), NULL);
+    g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+    g_object_unref(sa);
+    gtk_application_set_accels_for_action(GTK_APPLICATION(app),
+        "app.quit", (const char *[]){ "<Ctrl>q", NULL });
+
+    {
+        HbTrayHooks hooks = { tray_count_online, tray_activate,
+                              tray_disconnect_all, tray_quit, NULL };
+        app_tray = hb_tray_new(&hooks);
+    }
+
 #ifndef NDEBUG
     /* shot/feed/open-host 会经 org.gtk.Actions 导出到 session bus，
      * 任何同 bus 进程都能驱动会话 —— 仅 debug build + 显式开关。 */
     if (!g_strcmp0(g_getenv("HARBOR_DEV_ACTIONS"), "1")) {
         sa = g_simple_action_new("shot", G_VARIANT_TYPE_STRING);
         g_signal_connect(sa, "activate", G_CALLBACK(on_dev_shot), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("window-close", NULL);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_win_close), app);
         g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
         g_object_unref(sa);
 
@@ -1064,7 +1217,15 @@ static void hb_application_activate(GApplication *app)
         }
     }
 
-    gtk_window_present(GTK_WINDOW(win));
+    g_signal_connect(win, "close-request",
+                     G_CALLBACK(on_close_request), NULL);
+
+    if (hb_opt_background) {
+        /* --background：等托盘 watcher ~3s；出现则不开窗 */
+        g_timeout_add(250, bg_check, win);
+    } else {
+        gtk_window_present(GTK_WINDOW(win));
+    }
 
     if (hb_opt_screenshot)
         g_timeout_add(hb_opt_screenshot_delay, take_shot, win);

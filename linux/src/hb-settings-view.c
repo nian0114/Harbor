@@ -8,6 +8,9 @@
 #include "hb-shortcuts.h"
 #include "hb-terminal.h"
 #include "hb-term-theme.h"
+#include "hb-application.h"
+#include "hb-login.h"
+#include "hb-dialogs.h"
 
 #include <adwaita.h>
 #include <string.h>
@@ -48,6 +51,7 @@ struct _HbSettingsView {
     GtkWidget   *font_lbl, *lh_lbl;
     GtkWidget   *family_dd, *sb_dd;
     GtkWidget   *blink_sw, *osc52_sw;
+    GtkWidget   *tray_sw, *login_sw;
     GtkWidget   *sftp_spin;
     GtkWidget   *pv_view;       /* .hb-term-view.theme-* 容器 */
     GtkWidget   *pv_term;       /* HbTerminal（预览模式） */
@@ -173,6 +177,10 @@ static gboolean save_cb(gpointer ud)
         hb_obj_set_int(o, "sftp_concurrency",
             (int64_t)gtk_spin_button_get_value_as_int(
                 GTK_SPIN_BUTTON(v->sftp_spin)));
+        hb_obj_set_bool(o, "close_to_tray",
+            gtk_switch_get_active(GTK_SWITCH(v->tray_sw)));
+        hb_obj_set_bool(o, "start_at_login",
+            gtk_switch_get_active(GTK_SWITCH(v->login_sw)));
         hb_vault_put(hb_store_vault(v->store), o);
         hb_obj_free(o);
     }
@@ -303,6 +311,7 @@ static void refresh(HbSettingsView *v)
     double fs = 13, lh = 1.5;
     int sb = 10000;
     gboolean blink = TRUE, osc52 = FALSE;
+    gboolean ctt = TRUE, sal = FALSE;
     size_t i;
 
     if (hb_vault_settings(hb_store_vault(v->store), &o) == HB_OK && o) {
@@ -313,6 +322,8 @@ static void refresh(HbSettingsView *v)
         sb = (int)hb_obj_get_int(o, "scrollback", 10000);
         blink = hb_obj_get_bool(o, "cursor_blink", true);
         osc52 = hb_obj_get_bool(o, "osc52", false);
+        ctt = hb_obj_get_bool(o, "close_to_tray", true);
+        sal = hb_obj_get_bool(o, "start_at_login", false);
     }
     if (!theme || !*theme) theme = "harbor";
     if (!family || !*family) family = "Monospace";
@@ -361,6 +372,8 @@ static void refresh(HbSettingsView *v)
                                        (guint)i);
     gtk_switch_set_active(GTK_SWITCH(v->blink_sw), blink);
     gtk_switch_set_active(GTK_SWITCH(v->osc52_sw), osc52);
+    gtk_switch_set_active(GTK_SWITCH(v->tray_sw), ctt);
+    gtk_switch_set_active(GTK_SWITCH(v->login_sw), sal);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(v->sftp_spin),
         CLAMP((double)hb_obj_get_int(o, "sftp_concurrency", 3), 1, 8));
     v->updating = FALSE;
@@ -615,6 +628,34 @@ static GtkWidget *build_shortcuts_panel(void)
     return panel;
 }
 
+/* start_at_login 开关：立即写/删 user unit；失败则回退开关。 */
+static void on_login_sw(GObject *sw, GParamSpec *ps, gpointer ud)
+{
+    HbSettingsView *v = ud;
+    GError *err = NULL;
+    gboolean want = gtk_switch_get_active(GTK_SWITCH(sw));
+    (void)ps;
+    if (v->updating)
+        return;
+    if (!hb_login_set_enabled(want, &err)) {
+        v->updating = TRUE;
+        gtk_switch_set_active(GTK_SWITCH(sw), FALSE);
+        v->updating = FALSE;
+        hb_toast(GTK_WIDGET(v), err ? err->message : "写入自启动项失败");
+        g_clear_error(&err);
+        return;
+    }
+    schedule_save(v);
+}
+
+static void on_tray_sw(GObject *sw, GParamSpec *ps, gpointer ud)
+{
+    HbSettingsView *v = ud;
+    (void)sw; (void)ps;
+    if (!v->updating)
+        schedule_save(v);
+}
+
 static void hb_settings_view_init(HbSettingsView *v)
 {
     GtkWidget *scroll, *outer, *grid, *left, *right;
@@ -833,6 +874,32 @@ static void hb_settings_view_init(HbSettingsView *v)
         gtk_label_set_xalign(GTK_LABEL(txt), 0);
         gtk_box_append(GTK_BOX(hint), txt);
         gtk_box_append(GTK_BOX(right), hint);
+    }
+
+    /* ===== 底部：系统托盘与启动 ===== */
+    {
+        GtkWidget *grp = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+        GtkWidget *tray_row, *sub;
+        gtk_widget_add_css_class(grp, "panel");
+        gtk_box_append(GTK_BOX(outer), grp);
+        gtk_box_append(GTK_BOX(grp),
+            panel_head("window", "系统托盘与启动",
+                       "关闭窗口时驻留托盘、登录时自动启动。"));
+
+        tray_row = switch_row("关闭时驻留系统托盘", NULL,
+                              &v->tray_sw, G_CALLBACK(on_tray_sw), v);
+        gtk_box_append(GTK_BOX(grp), tray_row);
+        if (!hb_application_tray_available()) {
+            gtk_widget_set_sensitive(tray_row, FALSE);
+            sub = gtk_label_new("当前桌面未提供系统托盘");
+            gtk_widget_add_css_class(sub, "hb-dim");
+            gtk_label_set_xalign(GTK_LABEL(sub), 0);
+            gtk_box_append(GTK_BOX(grp), sub);
+        }
+        gtk_box_append(GTK_BOX(grp),
+            switch_row("登录时自动启动",
+                       "图形会话启动时以 --background 后台运行",
+                       &v->login_sw, G_CALLBACK(on_login_sw), v));
     }
 
     /* ===== 底部：快捷键 ===== */

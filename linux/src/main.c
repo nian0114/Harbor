@@ -42,6 +42,9 @@ int main(int argc, char **argv)
           "open a Local terminal tab; =CMD injects CMD", "[CMD]" },
         { "connect", 0, G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_STRING,
           &hb_opt_connect, "quick-connect user@host[:port]", "TARGET" },
+        { "background", 0, 0, G_OPTION_ARG_NONE, &hb_opt_background,
+          "start hidden if a system tray is available (login autostart)",
+          NULL },
         { NULL },
     };
     GOptionContext *ctx;

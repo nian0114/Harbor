@@ -20,6 +20,11 @@ void hb_sftp_view_attach_tab(HbSftpView *v, GtkWidget *win,
 /* 入口点：左栏 = Local home，右栏 = host_id 并开始连接 */
 void hb_sftp_view_open_host(HbSftpView *v, const char *host_id);
 
+/* 在线的远端连接数（tray "N 个会话在线" 用） */
+guint hb_sftp_view_online(HbSftpView *v);
+/* 断掉所有远端连接，pane 回 select；tab/窗口保留 */
+void  hb_sftp_view_disconnect_all(HbSftpView *v);
+
 G_END_DECLS
 
 #endif

@@ -58,6 +58,11 @@ guint    hb_workspace_paste_all(HbWorkspace *w, const char *text,
 void     hb_workspace_move_focus(HbWorkspace *w, int dir); /* 0左 1右 2上 3下 */
 void     hb_workspace_open_find(HbWorkspace *w);
 
+/* tray "在线会话"：叶子 pane 中非 dead 的 session 数；
+ * "全部断开"：逐 pane hb_session_close（pane/tab 保留，显 dead）。 */
+guint    hb_workspace_online(HbWorkspace *w);
+void     hb_workspace_disconnect_all(HbWorkspace *w);
+
 /* 目标选择对话框：2-4 个目标（hosts + Local）→ 新建 workspace tab */
 void     hb_workspace_pick_targets(GtkWidget *win, HbStore *st);
 

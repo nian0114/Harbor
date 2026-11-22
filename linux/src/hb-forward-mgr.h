@@ -39,6 +39,8 @@ void hb_forward_mgr_start(HbForwardMgr *m, const char *rule_id);
 void hb_forward_mgr_stop(HbForwardMgr *m, const char *rule_id);
 void hb_forward_mgr_start_all(HbForwardMgr *m);   /* enabled=true 的全部 */
 void hb_forward_mgr_stop_all(HbForwardMgr *m);
+/* 运行中（含退避重连）的规则数 —— tray "在线会话" 计数用 */
+guint hb_forward_mgr_running_count(HbForwardMgr *m);
 
 /* 当前状态；FALSE = 从未启动（按 STOPPED 处理）。 */
 gboolean hb_forward_mgr_status(HbForwardMgr *m, const char *rule_id,

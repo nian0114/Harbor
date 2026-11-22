@@ -8,7 +8,10 @@
 #include "hb-session-page.h"
 #include "hb-workspace.h"
 #include "hb-forward-mgr.h"
+#include "hb-sftp-view.h"
+#include "hb-desktop-page.h"
 #include "hb-store.h"
+#include "hb-application.h"
 
 #include <stdio.h>
 
@@ -154,6 +157,7 @@ void hb_window_close_tab(HbWindow *win, const char *id)
     gtk_widget_unparent(t->box);
     g_signal_emit(win, sigs[SIG_TAB_CLOSED], 0, t->id);
     free_tab_rec(t);
+    hb_app_note_sessions();
     if (was_active) {
         GList *adj = g_list_nth(win->tabs, idx ? idx - 1 : 0);
         win->active = adj ? adj->data : NULL;
@@ -200,6 +204,7 @@ void hb_window_close_host_tabs(HbWindow *win, const char *host_id)
 void hb_window_set_tab_dot(HbWindow *win, const char *id, const char *dot)
 {
     HbTabRec *t = find_tab(win, id);
+    hb_app_note_sessions();          /* dot 变化大多意味着会话状态变化 */
     static const char *cls[] = { "ok", "err", "share", "pending" };
     int i;
     if (!t) return;
@@ -227,6 +232,59 @@ void hb_window_clear_watch_dot(HbWindow *win, const char *id, guint token)
     if (t && t->watch_dot && t->watch_token == token) {
         t->watch_dot = FALSE;
         hb_window_set_tab_dot(win, id, NULL);
+    }
+}
+
+/* ---------------- tray：在线会话计数 / 全部断开 ---------------- */
+
+static hb_session *tab_session(HbTabRec *t)
+{
+    if (HB_IS_TERM_PAGE(t->page))
+        return hb_term_page_session(HB_TERM_PAGE(t->page));
+    if (HB_IS_SSH_PAGE(t->page))
+        return hb_ssh_page_session(HB_SSH_PAGE(t->page));
+    return NULL;
+}
+
+/* "N 个会话在线"：存活 terminal pane + SFTP 连接 + 桌面连接。
+ * 端口转发规则单独由 application 层加。共享 viewer 不算（那是看别人
+ * 的会话，断开它不影响本机会话数）。 */
+int hb_window_online_count(HbWindow *win)
+{
+    GList *l;
+    int n = 0;
+    for (l = win->tabs; l; l = l->next) {
+        HbTabRec *t = l->data;
+        if (HB_IS_WORKSPACE(t->page))
+            n += (int)hb_workspace_online(HB_WORKSPACE(t->page));
+        else if (HB_IS_SFTP_VIEW(t->page))
+            n += (int)hb_sftp_view_online(HB_SFTP_VIEW(t->page));
+        else if (HB_IS_DESKTOP_PAGE(t->page))
+            n += hb_desktop_page_connected(HB_DESKTOP_PAGE(t->page))
+                 ? 1 : 0;
+        else if (HB_IS_SESSION_PAGE(t->page) &&
+                 !hb_session_page_is_dead(HB_SESSION_PAGE(t->page)) &&
+                 tab_session(t))
+            n++;
+    }
+    return n;
+}
+
+/* "全部断开"：会话断线（tab 保留，显示断开/重连状态），规则停。 */
+void hb_window_disconnect_all(HbWindow *win)
+{
+    GList *l;
+    for (l = win->tabs; l; l = l->next) {
+        HbTabRec *t = l->data;
+        hb_session *s;
+        if (HB_IS_WORKSPACE(t->page))
+            hb_workspace_disconnect_all(HB_WORKSPACE(t->page));
+        else if (HB_IS_SFTP_VIEW(t->page))
+            hb_sftp_view_disconnect_all(HB_SFTP_VIEW(t->page));
+        else if (HB_IS_DESKTOP_PAGE(t->page))
+            hb_desktop_page_disconnect(HB_DESKTOP_PAGE(t->page));
+        else if ((s = tab_session(t)))
+            hb_session_close(s);
     }
 }
 
@@ -378,6 +436,7 @@ void hb_window_add_tab(HbWindow *win, const char *id, const char *title,
     /* 新 tab 立即激活，与原型一致 */
     win->active = t;
     win->tabs = g_list_append(win->tabs, t);
+    hb_app_note_sessions();
     refresh_active(win);
 }
 

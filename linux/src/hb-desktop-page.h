@@ -17,6 +17,11 @@ GtkWidget *hb_desktop_page_new(HbStore *st, hb_obj *host);
 void       hb_desktop_page_attach_tab(HbDesktopPage *p, GtkWidget *win,
                                       const char *tab_id);
 
+/* tray "在线会话" 计数用；tray "全部断开"：detach 当前 rd/tun
+ * 会话并回 connect 视图（tab 保留）。 */
+gboolean   hb_desktop_page_connected(HbDesktopPage *p);
+void       hb_desktop_page_disconnect(HbDesktopPage *p);
+
 G_END_DECLS
 
 #endif

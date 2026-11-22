@@ -682,3 +682,18 @@ static void hb_forward_mgr_init(HbForwardMgr *m)
     m->store_changed_h = g_signal_connect(m->store, "changed",
         G_CALLBACK(on_store_changed), m);
 }
+
+guint hb_forward_mgr_running_count(HbForwardMgr *m)
+{
+    GHashTableIter it;
+    gpointer v;
+    guint n = 0;
+    g_hash_table_iter_init(&it, m->runs);
+    while (g_hash_table_iter_next(&it, NULL, &v)) {
+        hb_fwd_state st = ((FwdRun *)v)->state;
+        if (st == HB_FWD_CONNECTING || st == HB_FWD_LISTENING ||
+            st == HB_FWD_RECONNECTING)
+            n++;
+    }
+    return n;
+}
