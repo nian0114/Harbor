@@ -14,3 +14,5 @@ GtkWidget *hb_settings_view_new(void);
 G_END_DECLS
 
 #endif
+gboolean hb_settings_view_sc_dev(HbSettingsView *v, size_t idx,
+                                 const char *accel);

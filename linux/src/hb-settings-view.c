@@ -5,6 +5,7 @@
 #include "hb-settings-view.h"
 #include "hb-store.h"
 #include "hb-icons.h"
+#include "hb-shortcuts.h"
 #include "hb-terminal.h"
 #include "hb-term-theme.h"
 #include "hb-application.h"
@@ -53,6 +54,7 @@ struct _HbSettingsView {
     GtkWidget   *blink_sw, *osc52_sw;
     GtkWidget   *tray_sw, *login_sw;
     GtkWidget   *ui_dd;         /* 外观：浅色/深色/跟随系统 */
+    GPtrArray   *sc_rows;       /* ScRow*，快捷键编辑行 */
     GtkWidget   *sftp_spin;
     GtkWidget   *pv_view;       /* .hb-term-view.theme-* 容器 */
     GtkWidget   *pv_term;       /* HbTerminal（预览模式） */
@@ -158,6 +160,7 @@ static void apply_preview(HbSettingsView *v)
 }
 
 static const char *cur_ui_theme(const HbSettingsView *v);
+static void sc_refresh_all(HbSettingsView *v);
 
 static gboolean save_cb(gpointer ud)
 {
@@ -315,6 +318,7 @@ static void on_reset(GtkButton *b, gpointer ud)
     gtk_switch_set_active(GTK_SWITCH(v->blink_sw), TRUE);
     gtk_switch_set_active(GTK_SWITCH(v->osc52_sw), FALSE);
     v->updating = FALSE;
+    sc_refresh_all(v);
 
     apply_preview(v);
     schedule_save(v);
@@ -406,6 +410,7 @@ static void refresh(HbSettingsView *v)
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(v->sftp_spin),
         CLAMP((double)hb_obj_get_int(o, "sftp_concurrency", 3), 1, 8));
     v->updating = FALSE;
+    sc_refresh_all(v);
 
     apply_preview(v);
     if (o) hb_obj_free(o);
@@ -627,6 +632,225 @@ static GtkWidget *build_preview(HbSettingsView *v)
 
 /* ------------------------------------------------------------------ */
 /* 快捷键编辑                                                          */
+/* ------------------------------------------------------------------ */
+
+typedef struct ScRow_ ScRow;
+static void sc_commit(ScRow *r, const char *accel);
+static void sc_row_update(ScRow *r);
+static void sc_refresh_all(HbSettingsView *v);
+
+struct ScRow_ {
+    HbSettingsView *v;
+    size_t          idx;
+    GtkWidget      *btn;      /* 显示/捕获按键的按钮 */
+    GtkWidget      *rst;      /* ↺ 恢复默认 */
+    gboolean        capturing;
+};
+
+static void sc_row_update(ScRow *r)
+{
+    hb_obj *o = NULL;
+    guint k = 0;
+    GdkModifierType m = 0;
+    char *lbl;
+
+    if (hb_vault_settings(hb_store_vault(r->v->store), &o) == HB_OK && o)
+        hb_shortcuts_effective_row(o, r->idx, &k, &m);
+    lbl = hb_shortcut_accel_label(k, m);
+    gtk_button_set_label(GTK_BUTTON(r->btn), lbl);
+    g_free(lbl);
+    hb_obj_free(o);
+}
+
+/* 捕获态按键：Esc 取消；Backspace/Delete 禁用；其他→新绑定 */
+static gboolean sc_capture_key(GtkEventControllerKey *kc, guint keyval,
+                               guint code, GdkModifierType st, gpointer ud)
+{
+    ScRow *r = ud;
+    (void)kc; (void)code;
+
+    if (!r->capturing)
+        return FALSE;
+    if (keyval == GDK_KEY_Escape) {
+        r->capturing = FALSE;
+        sc_row_update(r);
+        return TRUE;
+    }
+    if (keyval == GDK_KEY_BackSpace || keyval == GDK_KEY_Delete) {
+        sc_commit(r, "");
+        return TRUE;
+    }
+    /* 忽略纯修饰键 */
+    if (keyval == GDK_KEY_Control_L || keyval == GDK_KEY_Control_R ||
+        keyval == GDK_KEY_Shift_L || keyval == GDK_KEY_Shift_R ||
+        keyval == GDK_KEY_Alt_L || keyval == GDK_KEY_Alt_R ||
+        keyval == GDK_KEY_Meta_L || keyval == GDK_KEY_Meta_R ||
+        keyval == GDK_KEY_Super_L || keyval == GDK_KEY_Super_R)
+        return TRUE;
+    {
+        GdkModifierType m = st & (GDK_CONTROL_MASK | GDK_SHIFT_MASK |
+                                  GDK_ALT_MASK);
+        guint k = gdk_keyval_to_lower(keyval);
+        char *accel = gtk_accelerator_name(k, m);
+        sc_commit(r, accel);
+        g_free(accel);
+    }
+    return TRUE;
+}
+
+/* 应用新绑定：冲突 → 对方解绑；终端常用 Ctrl+字母 → 警告但允许 */
+static void sc_commit(ScRow *r, const char *accel)
+{
+    HbSettingsView *v = r->v;
+    hb_obj *o = NULL;
+    guint k = 0;
+    GdkModifierType m = 0;
+    int conf;
+
+    r->capturing = FALSE;
+    if (!hb_shortcut_accel_parse(accel, &k, &m)) {
+        hb_toast(GTK_WIDGET(v), "无效的快捷键");
+        sc_row_update(r);
+        return;
+    }
+    if (hb_vault_settings(hb_store_vault(v->store), &o) != HB_OK || !o) {
+        sc_row_update(r);
+        return;
+    }
+    conf = hb_shortcut_conflict(o, r->idx, k, m);
+    if (conf >= 0) {
+        const HbShortcut *sc = hb_shortcuts(NULL);
+        hb_shortcuts_apply_override(o, (size_t)conf, "");
+        {
+            char *m2 = g_strdup_printf("与「%s」冲突，已解绑对方",
+                                       sc[conf].label);
+            hb_toast(GTK_WIDGET(v), m2);
+            g_free(m2);
+        }
+    }
+    if (k && m == GDK_CONTROL_MASK &&
+        k >= GDK_KEY_a && k <= GDK_KEY_z)
+        hb_toast(GTK_WIDGET(v),
+                 "警告：Ctrl+字母在终端里常是 shell 控制键");
+    hb_shortcuts_apply_override(o, r->idx, accel);
+    hb_vault_put(hb_store_vault(v->store), o);
+    hb_obj_free(o);
+    sc_refresh_all(v);
+}
+
+static void sc_reset_row(ScRow *r)
+{
+    hb_obj *o = NULL;
+    if (hb_vault_settings(hb_store_vault(r->v->store), &o) == HB_OK && o) {
+        hb_shortcuts_apply_override(o, r->idx, NULL);
+        hb_vault_put(hb_store_vault(r->v->store), o);
+        hb_obj_free(o);
+        sc_refresh_all(r->v);
+    }
+}
+
+static void on_sc_reset_all(GtkButton *b, gpointer ud)
+{
+    HbSettingsView *v = ud;
+    hb_obj *o = NULL;
+    (void)b;
+    if (hb_vault_settings(hb_store_vault(v->store), &o) == HB_OK && o) {
+        hb_shortcuts_reset_all(o);
+        hb_vault_put(hb_store_vault(v->store), o);
+        hb_obj_free(o);
+        sc_refresh_all(v);
+    }
+}
+
+static void on_sc_btn(GtkButton *b, gpointer ud)
+{
+    ScRow *r = ud;
+    (void)b;
+    r->capturing = TRUE;
+    gtk_button_set_label(GTK_BUTTON(r->btn),
+                         "按下新的快捷键…（Esc 取消，Backspace 禁用）");
+    gtk_widget_grab_focus(r->btn);
+}
+
+static void sc_refresh_all(HbSettingsView *v)
+{
+    if (v->sc_rows)
+        for (guint i = 0; i < v->sc_rows->len; i++)
+            sc_row_update(g_ptr_array_index(v->sc_rows, i));
+}
+
+static GtkWidget *build_shortcuts_panel(HbSettingsView *v)
+{
+    GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    GtkWidget *grid, *rst_all;
+    const HbShortcut *sc;
+    size_t n, i;
+    int row = 0;
+
+    gtk_widget_add_css_class(panel, "panel");
+    gtk_box_append(GTK_BOX(panel),
+        panel_head("terminal", "快捷键",
+                   "点击按键编辑；Backspace 禁用，↺ 恢复默认。"
+                   "Alt/Ctrl+1…9 家族固定。"));
+    grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 18);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+    sc = hb_shortcuts(&n);
+    if (!v->sc_rows)
+        v->sc_rows = g_ptr_array_new_with_free_func(g_free);
+    for (i = 0; i < n; i++) {
+        GtkWidget *l = gtk_label_new(sc[i].label);
+        ScRow *r = g_new0(ScRow, 1);
+        gtk_label_set_xalign(GTK_LABEL(l), 0);
+        r->v = v;
+        r->idx = i;
+        r->btn = gtk_button_new();
+        gtk_widget_add_css_class(r->btn, "kbd");
+        gtk_widget_set_halign(r->btn, GTK_ALIGN_END);
+        {
+            GtkEventController *kc = gtk_event_controller_key_new();
+            g_signal_connect(kc, "key-pressed",
+                             G_CALLBACK(sc_capture_key), r);
+            gtk_widget_add_controller(r->btn, kc);
+        }
+        if (!hb_shortcut_editable(i)) {
+            gtk_widget_set_sensitive(r->btn, FALSE);
+            {
+                guint k = sc[i].keyval;
+                GdkModifierType m = sc[i].mods;
+                char *lbl = hb_shortcut_accel_label(k, m);
+                /* tab-n 行展示原文案（Alt+1…9） */
+                g_free(lbl);
+                gtk_button_set_label(GTK_BUTTON(r->btn), sc[i].accel);
+            }
+        }
+        g_signal_connect(r->btn, "clicked",
+                         G_CALLBACK(on_sc_btn), r);
+        g_ptr_array_add(v->sc_rows, r);
+        if (hb_shortcut_editable(i))
+            sc_row_update(r);
+        gtk_grid_attach(GTK_GRID(grid), l, (int)(row % 2) * 3,
+                        row / 2, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), r->btn,
+                        (int)(row % 2) * 3 + 1, row / 2, 1, 1);
+        r->rst = gtk_button_new_from_icon_name("view-refresh-symbolic");
+        gtk_widget_add_css_class(r->rst, "flat");
+        gtk_widget_set_tooltip_text(r->rst, "恢复默认");
+        g_signal_connect_swapped(r->rst, "clicked",
+                                 G_CALLBACK(sc_reset_row), r);
+        gtk_grid_attach(GTK_GRID(grid), r->rst,
+                        (int)(row % 2) * 3 + 2, row / 2, 1, 1);
+        row++;
+    }
+    gtk_box_append(GTK_BOX(panel), grid);
+    rst_all = gtk_button_new_with_label("全部恢复默认");
+    gtk_widget_set_halign(rst_all, GTK_ALIGN_END);
+    g_signal_connect(rst_all, "clicked",
+                     G_CALLBACK(on_sc_reset_all), v);
+    gtk_box_append(GTK_BOX(panel), rst_all);
+    return panel;
+}
+
 /* start_at_login 开关：立即写/删 user unit；失败则回退开关。 */
 static void on_login_sw(GObject *sw, GParamSpec *ps, gpointer ud)
 {
@@ -932,6 +1156,8 @@ static void hb_settings_view_init(HbSettingsView *v)
                        &v->login_sw, G_CALLBACK(on_login_sw), v));
     }
 
+    /* ===== 底部：快捷键 ===== */
+    gtk_box_append(GTK_BOX(outer), build_shortcuts_panel(v));
 
 
     v->changed_handler = g_signal_connect(v->store, "changed",
@@ -959,6 +1185,7 @@ static void hb_settings_view_finalize(GObject *o)
 {
     HbSettingsView *v = HB_SETTINGS_VIEW(o);
     g_free(v->pv_theme_id);
+    g_clear_pointer(&v->sc_rows, g_ptr_array_unref);
     G_OBJECT_CLASS(hb_settings_view_parent_class)->finalize(o);
 }
 
@@ -972,4 +1199,36 @@ static void hb_settings_view_class_init(HbSettingsViewClass *klass)
 GtkWidget *hb_settings_view_new(void)
 {
     return g_object_new(HB_TYPE_SETTINGS_VIEW, NULL);
+}
+
+/* ---- dev-action 驱动钩子（截图/自动化验证用；经 dev-ui 调用） ---- */
+
+/* 快捷键行编辑驱动：accel==NULL 进入捕获；之后 accel 模拟一次按键，
+ * 走真实 sc_capture_key（Esc 取消 / Backspace 禁用 / 冲突 / 警告）。 */
+gboolean hb_settings_view_sc_dev(HbSettingsView *v, size_t idx,
+                                 const char *accel)
+{
+    ScRow *r;
+    guint k = 0;
+    GdkModifierType m = 0;
+    if (!v->sc_rows || idx >= v->sc_rows->len)
+        return FALSE;
+    r = g_ptr_array_index(v->sc_rows, idx);
+    if (!accel || !*accel) {
+        on_sc_btn(NULL, r);
+        return TRUE;
+    }
+    if (!strcmp(accel, "#reset")) {
+        sc_reset_row(r);
+        return TRUE;
+    }
+    if (!strcmp(accel, "#resetall")) {
+        on_sc_reset_all(NULL, v);
+        return TRUE;
+    }
+    if (!r->capturing)
+        return FALSE;
+    if (!gtk_accelerator_parse(accel, &k, &m) || !k)
+        return FALSE;
+    return sc_capture_key(NULL, k, 0, m, r);
 }

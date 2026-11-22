@@ -1002,6 +1002,17 @@ static void on_dev_ui(GSimpleAction *a, GVariant *param, gpointer ud)
         if (hv)
             hb_hosts_view_set_list_mode(HB_HOSTS_VIEW(hv),
                                         !strcmp(f[1], "1"));
+    } else if ((!strcmp(f[0], "scedit") || !strcmp(f[0], "sckey"))
+               && f[1]) {
+        GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
+        GtkWidget *sv = vp ? hb_vault_page_settings_view(
+                                HB_VAULT_PAGE(vp)) : NULL;
+        if (sv)
+            g_printerr("DEVUI-SC %s\n",
+                hb_settings_view_sc_dev(HB_SETTINGS_VIEW(sv),
+                                        (size_t)atoi(f[1]),
+                    !strcmp(f[0], "sckey") ? f[2] : NULL)
+                    ? "ok" : "fail");
     } else if (!strcmp(f[0], "drawerclose")) {
         GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
         GtkWidget *hv = vp ? hb_vault_page_hosts_view(HB_VAULT_PAGE(vp))
@@ -1020,6 +1031,13 @@ static void on_dev_ui(GSimpleAction *a, GVariant *param, gpointer ud)
             else if (GTK_IS_WINDOW(w)) gtk_window_close(GTK_WINDOW(w));
         }
         g_list_free(tl);
+    } else if (!strcmp(f[0], "key") && f[1]) {
+        guint k = 0;
+        GdkModifierType m = 0;
+        if (gtk_accelerator_parse(f[1], &k, &m) && k)
+            g_printerr("DEVUI-KEY %s %s\n", f[1],
+                hb_shortcuts_inject(HB_WINDOW(win), k, m)
+                    ? "handled" : "ignored");
     }
     fflush(stderr);
     g_strfreev(f);
