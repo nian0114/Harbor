@@ -1,6 +1,8 @@
 import Foundation
+import AppKit
 import Security
 import CHarbor
+import HarborKit
 
 /// 数据目录 + vault + DEK（macOS Keychain generic password，
 /// fallback 0600 vault.key）。
@@ -22,7 +24,9 @@ final class Vault {
         try? FileManager.default.createDirectory(
             at: dataDir, withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700])
-        var dek = Array(loadDEK())
+        var dekData = obtainDEK()
+        var dek = [UInt8](dekData)
+        dekData.resetBytes(in: 0..<dekData.count)
         var v: OpaquePointer?
         let db = dataDir.appendingPathComponent("vault.db").path
         let r = dek.withUnsafeMutableBytes { ptr -> hb_err in
@@ -37,7 +41,13 @@ final class Vault {
 
     // ---- DEK ----
     private var dekAccount: String { "vault-dek:" + dataDir.path }
-    private func keychainGet() -> Data? {
+    private var keyFile: URL {
+        dataDir.appendingPathComponent("vault.key") }
+    private var dbFile: URL {
+        dataDir.appendingPathComponent("vault.db") }
+
+    /// (status, key-data)。status != errSecSuccess 时 data 为 nil。
+    private func keychainRead() -> (OSStatus, Data?) {
         let q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "dev.harbor.Harbor.vault",
@@ -45,23 +55,31 @@ final class Vault {
             kSecReturnData as String: true,
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-              let d = item as? Data, d.count == 32 else { return nil }
-        return d
+        let st = SecItemCopyMatching(q as CFDictionary, &item)
+        guard st == errSecSuccess,
+              let d = item as? Data, d.count == 32
+        else { return (st, nil) }
+        return (st, d)
     }
-    private func keychainSet(_ d: Data) -> Bool {
+    /// SecItemAdd 写入；errSecDuplicateItem 时重读，绝不 SecItemDelete。
+    private func keychainAdd(_ d: Data) -> Bool {
         let q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "dev.harbor.Harbor.vault",
             kSecAttrAccount as String: dekAccount,
+            kSecAttrAccessible as String:
+                kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData as String: d,
         ]
-        SecItemDelete(q as CFDictionary)
-        var add = q
-        add[kSecValueData as String] = d
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+        let st = SecItemAdd(q as CFDictionary, nil)
+        if st == errSecSuccess { return true }
+        if st == errSecDuplicateItem {
+            // 并发写入：以链中现有条目为准（读取路径，无删除）
+            let (rst, rd) = keychainRead()
+            return rst == errSecSuccess && rd != nil
+        }
+        return false
     }
-    private var keyFile: URL {
-        dataDir.appendingPathComponent("vault.key") }
     private func fileDEK() -> Data? {
         (try? Data(contentsOf: keyFile)).flatMap { $0.count == 32 ? $0 : nil }
     }
@@ -79,20 +97,61 @@ final class Vault {
             SecRandomCopyBytes(kSecRandomDefault, 32, $0.baseAddress!) }
         return b
     }
-    private func loadDEK() -> Data {
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["HARBOR_DEK_FILE"] == "1" {
-            // ad-hoc 重签导致 keychain ACL 每次都弹窗：DEBUG 下允许绕开。
-            if let d = fileDEK() { dekFallback = true; return d }
-            let d = genDEK(); _ = fileDEKSet(d); dekFallback = true; return d
+
+    /// 阻塞告警：解释状态，给 重试/退出；重试返回 true 继续循环。
+    private func dekAlert(_ text: String) -> Bool {
+        let a = NSAlert()
+        a.messageText = L("无法读取或保存保险库密钥")
+        a.informativeText = text
+        a.alertStyle = .critical
+        a.addButton(withTitle: L("重试"))
+        a.addButton(withTitle: L("退出"))
+        return a.runModal() == .alertFirstButtonReturn
+    }
+
+    /// 按 DEKPlan 决策取/建 DEK；失败路径要么重试要么退出，
+    /// 绝不销毁已有数据或丢下退出即丢的密钥。
+    private func obtainDEK() -> Data {
+        while true {
+            #if DEBUG
+            let fileMode = ProcessInfo.processInfo
+                .environment["HARBOR_DEK_FILE"] == "1"
+            #else
+            let fileMode = false
+            #endif
+            let (st, kd) = fileMode ? (errSecItemNotFound, nil) : keychainRead()
+            let action = DEKPlan.decide(
+                chainStatus: st, chainHasKey: kd != nil,
+                fileKey: fileDEK() != nil,
+                dbExists: FileManager.default.fileExists(atPath: dbFile.path),
+                fileMode: fileMode)
+            switch action {
+            case .useKeychain:
+                if let kd { return kd }
+                continue   // 决策与读数不一致，重读
+            case .useFile:
+                if let d = fileDEK() { dekFallback = true; return d }
+                continue
+            case .createNew:
+                let d = genDEK()
+                if !fileMode, keychainAdd(d) { return d }
+                if !fileMode, let (_, kd2) = Optional(keychainRead()),
+                    kd2 != nil { return kd2! }
+                if fileDEKSet(d) { dekFallback = true; return d }
+                // 两边都写不进：退出即丢，拒绝运行
+                if dekAlert(L("Keychain 和密钥文件都无法写入，"
+                              + "保险库密钥无法持久保存。")) { continue }
+                NSApp.terminate(nil); exit(1)
+            case .failKeychain(let status):
+                if dekAlert(DEKPlan.describe(status)) { continue }
+                NSApp.terminate(nil); exit(1)
+            case .failKeyUnavailable:
+                if dekAlert(L("找到 vault.db 但读不到解密密钥"
+                              + "（Keychain 和 vault.key 均无）。"
+                              + "为避免数据损毁，已停止启动。")) { continue }
+                NSApp.terminate(nil); exit(1)
+            }
         }
-        #endif
-        if let d = keychainGet() { return d }
-        if let d = fileDEK() { dekFallback = true; return d }
-        let d = genDEK()
-        if keychainSet(d) { return d }
-        if fileDEKSet(d) { dekFallback = true; return d }
-        return d
     }
 
     // ---- 设置（vault settings 单例对象）----
@@ -111,5 +170,70 @@ final class Vault {
         hb_obj_set_str(o, k, val)
         _ = hb_vault_put(v, o)
         hb_obj_free(o)
+    }
+}
+
+// ---------- vault 对象便捷层 ----------
+extension Vault {
+    /// 类型列表（不含 tombstone）。调用方持有 Swift 侧对象。
+    func list(_ type: String) -> [OpaquePointer] {
+        guard let v = vault else { return [] }
+        var out: UnsafeMutablePointer<OpaquePointer?>?
+        var n = 0
+        guard hb_vault_list(v, type, &out, &n) == HB_OK else { return [] }
+        var r: [OpaquePointer] = []
+        for i in 0..<n { if let o = out?[i] { r.append(o) } }
+        // 数组本身 malloc；元素归调用方 hb_obj_free（list_free 会把对象也释放）。
+        free(out)
+        return r
+    }
+    func get(_ id: String) -> OpaquePointer? {
+        guard let v = vault else { return nil }
+        var o: OpaquePointer?
+        guard hb_vault_get(v, id, &o) == HB_OK else { return nil }
+        return o
+    }
+    func put(_ o: OpaquePointer) {
+        guard let v = vault else { return }
+        _ = hb_vault_put(v, o)
+    }
+    func newObj(_ type: String) -> OpaquePointer? { hb_obj_new(type) }
+    func delete(_ id: String) { vault.map { _ = hb_vault_delete($0, id) } }
+    func undelete(_ id: String) {
+        vault.map { _ = hb_vault_undelete($0, id) } }
+    func secret(_ id: String, _ field: String) -> String? {
+        guard let v = vault else { return nil }
+        guard let s = hb_vault_get_secret(v, id, field) else { return nil }
+        defer { hb_secret_free(s) }
+        return String(cString: s)
+    }
+    func setSecret(_ id: String, _ field: String, _ value: String) {
+        vault.map { _ = hb_vault_set_secret($0, id, field, value) }
+    }
+    /// 直接取得 secret 的 C 字符串（调用方负责 wipe + hb_secret_free）。
+    func secretC(_ id: String, _ field: String) -> UnsafeMutablePointer<CChar>? {
+        guard let v = vault else { return nil }
+        return hb_vault_get_secret(v, id, field)
+    }
+}
+
+// 可选 CChar 指针 → Swift String
+extension Optional where Wrapped == UnsafePointer<CChar> {
+    var str: String { map { String(cString: $0) } ?? "" }
+}
+extension Optional where Wrapped == UnsafeMutablePointer<CChar> {
+    var str: String { map { String(cString: $0) } ?? "" }
+}
+extension UnsafePointer where Pointee == CChar {
+    var str: String {
+        guard bitPattern != 0 else { return "" }
+        return String(cString: self)
+    }
+    private var bitPattern: UInt { UInt(bitPattern: self) }
+}
+extension UnsafeMutablePointer where Pointee == CChar {
+    var str: String {
+        guard UInt(bitPattern: self) != 0 else { return "" }
+        return String(cString: self)
     }
 }
