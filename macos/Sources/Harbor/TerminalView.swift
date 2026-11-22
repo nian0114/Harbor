@@ -369,7 +369,15 @@ final class TerminalView: NSView, NSTextInputClient {
 
     private func drawCursor(ctx: CGContext) {
         guard curVis, scrollOff == 0, curRow >= 0, curRow < gridRows else { return }
-        let r = geom.cellRect(row: Int(curRow), col: Int(curCol))
+        // 光标所在格：宽字符头占 2 列；落在尾格时回到头格。
+        var col = Int(curCol)
+        var w = 1
+        if Int(curRow) < grid.count {
+            let line = grid[Int(curRow)]
+            if col < line.count, line[col].width == 0, col > 0 { col -= 1 }
+            if col < line.count, line[col].width == 2 { w = 2 }
+        }
+        let r = geom.cellRect(row: Int(curRow), col: col, width: w)
         let style = curShape == 0 ? Int32(cursorStyle) : curShape
         switch style {
         case 2:
@@ -385,6 +393,26 @@ final class TerminalView: NSView, NSTextInputClient {
             if !curBlink || cursorOn {
                 theme.cursor.color.withAlphaComponent(0.85).setFill()
                 ctx.fill(r)
+                // 反色重绘光标下的字符（含宽字符两列）
+                if Int(curRow) < grid.count, col < grid[Int(curRow)].count {
+                    let c = grid[Int(curRow)][col]
+                    let txt = cellText(c)
+                    if c.chars.0 != 0 {
+                        let ns = NSAttributedString(
+                            string: txt,
+                            attributes: [.font: font,
+                                         .foregroundColor: theme.bg.color])
+                        let line = CTLineCreateWithAttributedString(ns)
+                        ctx.saveGState()
+                        ctx.translateBy(x: r.minX,
+                                        y: geom.baselineY(row: Int(curRow)))
+                        ctx.scaleBy(x: 1, y: -1)
+                        ctx.textMatrix = .identity
+                        ctx.textPosition = .zero
+                        CTLineDraw(line, ctx)
+                        ctx.restoreGState()
+                    }
+                }
             } else {
                 theme.cursor.color.setStroke()
                 ctx.stroke(r.insetBy(dx: 0.5, dy: 0.5))
