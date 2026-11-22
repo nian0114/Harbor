@@ -97,7 +97,7 @@ pt   = UTF-8 JSON:
 |---|---|
 | host | `identity_file`、`last_connected` |
 | forward | `enabled` |
-| settings | `font_size`、`line_height`、`font_family`、`close_to_tray`、`start_at_login` |
+| settings | `font_size`、`line_height`、`font_family`、`close_to_tray`、`start_at_login`、`language` |
 
 ### 4.5 同步范围
 
