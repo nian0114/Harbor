@@ -5,12 +5,20 @@ import HarborKit
 // ---------- AppDelegate + 菜单 ----------
 final class App: NSObject, NSApplicationDelegate {
     var win: MainWindow!
+    #if DEBUG
+    var dev: DevServer?
+    #endif
     func applicationDidFinishLaunching(_ n: Notification) {
         buildMenus()
         win = MainWindow()
         win.center()
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["HARBOR_DEV_ACTIONS"] == "1" {
+            dev = DevServer(win: win)
+        }
+        #endif
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ a: NSApplication)
         -> Bool { true }
