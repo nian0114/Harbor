@@ -1,0 +1,16 @@
+# Example systemd user unit for harbor-server.
+# Install to ~/.config/systemd/user/harbor-server.service and adjust
+# ExecStart / WorkingDirectory / Environment, then:
+#   systemctl --user enable --now harbor-server
+[Unit]
+Description=Harbor sync/share server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/harbor-server --listen 127.0.0.1:8787 --data %h/.local/share/harbor-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

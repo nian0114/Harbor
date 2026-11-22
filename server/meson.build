@@ -13,7 +13,11 @@ harbor_server = executable('harbor-server',
     'src/util.c',
     dependencies: [soup_dep, jsonglib_dep, gio_dep, glib_dep,
                    srv_sqlite_dep, srv_sodium_dep],
+    install: true,
 )
+
+install_data('data/harbor-server.service',
+    install_dir: get_option('datadir') / 'doc' / 'harbor-server')
 
 if get_option('tests')
     subdir('tests')

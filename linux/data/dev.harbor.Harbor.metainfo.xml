@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.harbor.Harbor</id>
+  <name>Harbor</name>
+  <summary>SSH client and remote workspace</summary>
+  <!-- no LICENSE file in the repo → upstream license is proprietary;
+       the metainfo file itself is FSFAP per AppStream convention -->
+  <metadata_license>FSFAP</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <developer id="dev.harbor"><name>Harbor</name></developer>
+  <description>
+    <p>
+      Harbor is a terminal-centric remote workbench: a Vault for
+      credentials and hosts, SSH and local terminals, SFTP file
+      management, port forwarding, shared console sessions, remote
+      desktop, and encrypted sync between devices.
+    </p>
+  </description>
+  <launchable type="desktop-id">dev.harbor.Harbor.desktop</launchable>
+  <url type="homepage">https://harbor.dev</url>
+  <provides>
+    <binary>harbor</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2025-01-01"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

@@ -64,3 +64,8 @@ harbor_exe = executable('harbor',
 
 install_data('data/dev.harbor.Harbor.desktop',
     install_dir: get_option('datadir') / 'applications')
+install_data('data/dev.harbor.Harbor.metainfo.xml',
+    install_dir: get_option('datadir') / 'metainfo')
+
+install_subdir('data/icons/hicolor',
+    install_dir: get_option('datadir') / 'icons')
