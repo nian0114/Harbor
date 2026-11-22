@@ -1,11 +1,15 @@
 [Desktop Entry]
 Name=Harbor
 Comment=SSH client and remote workspace
+Comment[zh_CN]=SSH 客户端与远程工作台
+GenericName=SSH Client
+GenericName[zh_CN]=SSH 客户端
 Exec=harbor
 Icon=dev.harbor.Harbor
 Terminal=false
 Type=Application
 Categories=Network;System;
 Keywords=ssh;terminal;sftp;remote;client;
+Keywords[zh_CN]=ssh;终端;sftp;远程;客户端;
 StartupNotify=true
 StartupWMClass=dev.harbor.Harbor

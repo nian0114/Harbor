@@ -26,6 +26,7 @@ subdir('core')
 
 if get_option('linux')
     subdir('linux')
+    subdir('po')
 endif
 
 # FR-15 i18n coverage gate: any CJK string literal in core/src or

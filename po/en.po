@@ -1,0 +1,4601 @@
+# English translations for Harbor (msgids are the Chinese source strings).
+msgid ""
+msgstr ""
+"Project-Id-Version: harbor 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-22 04:30-0800\n"
+"PO-Revision-Date: 2025-11-22 00:00+0000\n"
+"Last-Translator: Harbor Team\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: core/src/hostio.c:157
+#, c-format
+msgid "跳板 '%s' 无法解析，已忽略"
+msgstr "Jump host '%s' unresolvable, ignored"
+
+#: core/src/hostio.c:263
+#, c-format
+msgid "%s: 跳板 '%s' 指向自身，已忽略"
+msgstr "%s: jump host '%s' points to itself, ignored"
+
+#: core/src/hostio.c:472
+#, c-format
+msgid "hosts[%zu]: 非对象元素，已跳过"
+msgstr "hosts[%zu]: non-object element, skipped"
+
+#: core/src/hostio.c:479
+#, c-format
+msgid "hosts[%zu]: 缺少 name/address，已跳过"
+msgstr "hosts[%zu]: missing name/address, skipped"
+
+#: core/src/hostio.c:552
+#, c-format
+msgid "%s: jump 引用的主机 %s 不存在，已丢弃"
+msgstr "%s: jump references missing host %s, dropped"
+
+#: core/src/hostio.c:570
+#, c-format
+msgid "%s: via 引用的主机 %s 不存在，已丢弃"
+msgstr "%s: via references missing host %s, dropped"
+
+#: core/src/hostio.c:578
+#, c-format
+msgid "%s: key_id 引用的密钥不存在，已丢弃"
+msgstr "%s: key_id references missing key, dropped"
+
+#: core/src/hostio.c:585
+#, c-format
+msgid "%s: startup_snippet 引用的片段不存在，已丢弃"
+msgstr "%s: startup_snippet references missing snippet, dropped"
+
+#: core/src/knownhosts.c:116
+msgid "无法读取现有 known 记录，按空处理"
+msgstr "Cannot read existing known records — treating as empty"
+
+#: core/src/knownhosts.c:145
+#, c-format
+msgid "第 %d 行：跳过通配/取反模式 '%s'（libssh2 无法匹配）"
+msgstr "Line %d: wildcard/negated pattern '%s' skipped (libssh2 cannot match)"
+
+#: core/src/knownhosts.c:156
+#, c-format
+msgid "第 %d 行：无法解析 '%s'"
+msgstr "Line %d: cannot parse '%s'"
+
+#: core/src/knownhosts.c:218
+#, c-format
+msgid "第 %d 行：%s:%d 的 %s 与已有记录冲突（可能已更换主机密钥），已跳过"
+msgstr ""
+"Line %1$d: %4$s for %2$s:%3$d conflicts with an existing record (host key "
+"may have changed), skipped"
+
+#: core/src/knownhosts.c:264
+#, c-format
+msgid "第 %d 行：%s 条目暂不支持，已跳过"
+msgstr "Line %d: %s entries unsupported, skipped"
+
+#: core/src/knownhosts.c:281
+#, c-format
+msgid "第 %d 行：字段不足，已跳过"
+msgstr "Line %d: not enough fields, skipped"
+
+#: core/src/knownhosts.c:285
+#, c-format
+msgid "第 %d 行：base64 密钥解码失败，已跳过"
+msgstr "Line %d: base64 key decode failed, skipped"
+
+#: core/src/pf.c:542
+#, c-format
+msgid "%s:%d 已被占用（%s）"
+msgstr "%s:%d already in use (%s)"
+
+#: core/src/pf.c:544
+msgid "权限不足：绑定 1024 以下端口需要 root"
+msgstr "Permission denied: binding ports below 1024 needs root"
+
+#: core/src/pf.c:546
+#, c-format
+msgid "绑定 %s:%d 失败（%s）"
+msgstr "Bind %s:%d failed (%s)"
+
+#: core/src/pf.c:559 core/src/pf.c:626
+#, c-format
+msgid "无效绑定地址：%s"
+msgstr "Invalid bind address: %s"
+
+#: core/src/pf.c:592
+#, c-format
+msgid "监听 %s:%d 失败（%s）"
+msgstr "Listen on %s:%d failed (%s)"
+
+#: core/src/pf.c:599
+#, c-format
+msgid "绑定 %s:%d 失败（无可用地址）"
+msgstr "Bind %s:%d failed (no usable address)"
+
+#: core/src/pf.c:618
+#, c-format
+msgid "无效端口：%d"
+msgstr "Invalid port: %d"
+
+#: core/src/pf.c:707
+msgid "无效的转发规则"
+msgstr "Invalid forward rule"
+
+#: core/src/pf.c:712
+msgid "转发规则缺少目标地址或端口"
+msgstr "Forward rule is missing target address or port"
+
+#: core/src/pf.c:717 core/src/pf.c:726 core/src/sftp.c:825 core/src/sftp.c:868
+#: core/src/sftp.c:896 core/src/sftp.c:904 core/src/sftp.c:927
+#: core/src/sftp.c:1021 core/src/sftp.c:1028 core/src/sftp.c:1053
+#: core/src/sftp.c:1307 core/src/sftp.c:1330 core/src/sftp.c:1358
+#: core/src/sftp.c:1386 core/src/sftp.c:1408 core/src/sftp.c:1425
+#: core/src/sftp.c:1438 core/src/sftp.c:1473 core/src/sftp.c:1482
+#: core/src/sftp.c:1495 core/src/sftp.c:1525 core/src/sftp.c:1580
+#: core/src/sftp.c:1640 core/src/sftp.c:1672
+msgid "内存不足"
+msgstr "Out of memory"
+
+#: core/src/pf.c:746 linux/src/hb-conn.c:749
+msgid "无法创建 SSH 会话"
+msgstr "Cannot create SSH session"
+
+#: core/src/pf.c:792
+#, c-format
+msgid "本地监听 %s:%d 已就绪"
+msgstr "Local listener %s:%d ready"
+
+#. remote：向服务器申请 tcpip-forward 监听
+#: core/src/pf.c:798
+#, c-format
+msgid "请求远程转发 %s:%d…"
+msgstr "Requesting remote forward %s:%d…"
+
+#: core/src/pf.c:809 core/src/pf.c:839 core/src/ssh.c:94 core/src/ssh.c:728
+#: core/src/ssh.c:908 core/src/ssh.c:966
+msgid "连接已取消"
+msgstr "Connection cancelled"
+
+#: core/src/pf.c:813
+msgid "请求远程转发超时"
+msgstr "Remote forward request timed out"
+
+#: core/src/pf.c:816
+msgid "远程转发请求失败"
+msgstr "Remote forward request failed"
+
+#: core/src/pf.c:824
+#, c-format
+msgid ""
+"服务器拒绝远程转发 %s:%d：检查 sshd_config AllowTcpForwarding（需 yes 或 "
+"remote）、服务器侧端口是否被占用、1024 以下端口需 root、非回环绑定需 "
+"GatewayPorts"
+msgstr ""
+"Server refused remote forward %s:%d — check sshd_config AllowTcpForwarding "
+"(yes or remote), whether the server-side port is taken, root for ports below "
+"1024, and GatewayPorts for non-loopback binds"
+
+#. dest 本地解析（线程化 + 取消）一次
+#: core/src/pf.c:834
+#, c-format
+msgid "解析转发目标 %s:%d…"
+msgstr "Resolving forward target %s:%d…"
+
+#: core/src/pf.c:844 core/src/pf.c:1080
+#, c-format
+msgid "无法解析转发目标 %s:%d"
+msgstr "Cannot resolve forward target %s:%d"
+
+#: core/src/pf.c:853 core/src/ssh.c:1970
+msgid "已连接"
+msgstr "Connected"
+
+#: core/src/pf.c:1018
+#, c-format
+msgid "打开到 %s:%d 的通道超时"
+msgstr "Opening channel to %s:%d timed out"
+
+#: core/src/pf.c:1055
+#, c-format
+msgid "无法连接目标 %s:%d（经 SSH 服务器）：%s"
+msgstr "Cannot connect to target %s:%d (via SSH server): %s"
+
+#: core/src/pf.c:1114 core/src/pf.c:1146
+#, c-format
+msgid "并发连接数已达上限 %d，新连接已丢弃"
+msgstr "Connection limit %d reached — new connection dropped"
+
+#: core/src/pf.c:1182
+#, c-format
+msgid "无法连接目标 %s:%d（本地）：无可用地址"
+msgstr "Cannot connect to target %s:%d (local): no usable address"
+
+#: core/src/pf.c:1205
+#, c-format
+msgid "连接目标 %s:%d（本地）超时"
+msgstr "Connecting to target %s:%d (local) timed out"
+
+#: core/src/pf.c:1217
+#, c-format
+msgid "无法连接目标 %s:%d（本地）：%s"
+msgstr "Cannot connect to target %s:%d (local): %s"
+
+#: core/src/pf.c:1652 core/src/sftp.c:447 core/src/sftp.c:2242
+#: core/src/ssh.c:102 core/src/ssh.c:1657 core/src/ssh.c:1698
+#: linux/src/hb-fs.c:348 linux/src/hb-sftp-view.c:357
+#: linux/src/hb-sftp-view.c:358 linux/src/hb-sftp-view.c:1271
+#: linux/src/hb-ssh-page.c:847
+msgid "连接已断开"
+msgstr "Disconnected"
+
+#: core/src/rd.c:565
+msgid "无法启动连接线程"
+msgstr "Cannot start connection thread"
+
+#: core/src/rd_rdp.c:158
+#, c-format
+msgid ""
+"CN=%s\n"
+"颁发者: %s\n"
+"主机: %s"
+msgstr ""
+"CN=%s\n"
+"Issuer: %s\n"
+"Host: %s"
+
+#: core/src/rd_rdp.c:248
+msgid "需要 RDP 凭据（用户名 / 密码 / 域）"
+msgstr "RDP credentials required (username / password / domain)"
+
+#: core/src/rd_rdp.c:470
+msgid "RDP 协商 / 认证…"
+msgstr "RDP negotiation / authentication…"
+
+#: core/src/rd_rdp.c:759 core/src/rd_vnc.c:284
+msgid "正在连接…"
+msgstr "Connecting…"
+
+#: core/src/rd_rdp.c:775
+msgid "无法创建 FreeRDP 上下文"
+msgstr "Cannot create FreeRDP context"
+
+#: core/src/rd_rdp.c:827 core/src/rd_rdp.c:860 linux/src/hb-desktop-page.c:933
+msgid "认证失败：用户名或密码错误"
+msgstr "Authentication failed: wrong username or password"
+
+#: core/src/rd_rdp.c:828
+msgid "TLS/加密协商失败"
+msgstr "TLS/encryption negotiation failed"
+
+#: core/src/rd_rdp.c:829 core/src/rd_vnc.c:287
+msgid "连接超时"
+msgstr "Connection timed out"
+
+#: core/src/rd_rdp.c:830 linux/src/hb-desktop-page.c:936
+msgid "证书被拒绝"
+msgstr "Certificate rejected"
+
+#: core/src/rd_rdp.c:831 core/src/rd_vnc.c:288 core/src/rd_vnc.c:326
+#: core/src/sftp.c:448 core/src/sftp.c:1971 linux/src/hb-desktop-page.c:939
+#: linux/src/hb-logs-view.c:53 linux/src/hb-logs-view.c:72
+#: linux/src/hb-logs-view.c:73 linux/src/hb-sftp-view.c:1103
+msgid "已取消"
+msgstr "Cancelled"
+
+#: core/src/rd_rdp.c:832 core/src/rd_vnc.c:289
+msgid "无法连接到服务器"
+msgstr "Cannot connect to server"
+
+#: core/src/rd_rdp.c:833
+msgid "RDP 协议错误"
+msgstr "RDP protocol error"
+
+#: core/src/rd_rdp.c:844 core/src/rd_rdp.c:861 core/src/rd_rdp.c:875
+#: core/src/rd_vnc.c:371 core/src/rd_vnc.c:378 core/src/rd_vnc.c:415
+#: linux/src/hb-desktop-page.c:921 linux/src/hb-desktop-page.c:1820
+msgid "连接中断"
+msgstr "Connection lost"
+
+#: core/src/rd_vnc.c:96 linux/src/hb-desktop-page.c:692
+msgid "服务器要求 VNC 密码"
+msgstr "Server asks for a VNC password"
+
+#: core/src/rd_vnc.c:297
+msgid "RFB 握手…"
+msgstr "RFB handshake…"
+
+#: core/src/rd_vnc.c:328
+msgid "密码错误"
+msgstr "Wrong password"
+
+#: core/src/rd_vnc.c:330
+msgid "RFB 握手失败"
+msgstr "RFB handshake failed"
+
+#: core/src/sftp.c:443 linux/src/hb-fs.c:148
+msgid "没有那个文件或目录"
+msgstr "No such file or directory"
+
+#: core/src/sftp.c:444 linux/src/hb-fs.c:149
+msgid "权限不足"
+msgstr "Permission denied"
+
+#: core/src/sftp.c:445 linux/src/hb-fs.c:150 linux/src/hb-sftp-view.c:1797
+msgid "目标已存在"
+msgstr "Target already exists"
+
+#: core/src/sftp.c:446 linux/src/hb-fs.c:151
+msgid "目录非空"
+msgstr "Directory not empty"
+
+#: core/src/sftp.c:449
+msgid "读写错误"
+msgstr "I/O error"
+
+#: core/src/sftp.c:450 linux/src/hb-sync.c:1021
+msgid "操作失败"
+msgstr "Operation failed"
+
+#: core/src/sftp.c:508
+#, c-format
+msgid "已跳过 %u 个非法文件名、%u 个符号链接"
+msgstr "Skipped %u invalid file names, %u symlinks"
+
+#: core/src/sftp.c:511
+#, c-format
+msgid "已跳过 %u 个非法文件名"
+msgstr "Skipped %u invalid file names"
+
+#: core/src/sftp.c:514
+#, c-format
+msgid "已跳过 %u 个符号链接"
+msgstr "Skipped %u symlinks"
+
+#: core/src/sftp.c:1348
+msgid "目标已存在且不是目录"
+msgstr "Target exists and is not a directory"
+
+#: core/src/sftp.c:1533
+msgid "内部状态错误"
+msgstr "Internal state error"
+
+#: core/src/share.c:1010 linux/src/hb-share-page.c:101
+msgid "只读模式，输入未生效"
+msgstr "Read-only mode — input ignored"
+
+#: core/src/share.c:1918 linux/src/hb-share-page.c:127
+msgid "配对码错误"
+msgstr "Wrong pairing code"
+
+#: core/src/ssh.c:98 core/src/ssh.c:1300 core/src/ssh.c:1326
+msgid "主机不可达或超时"
+msgstr "Host unreachable or timed out"
+
+#. REFUSED/TIMEOUT/TLS/PROTOCOL：错误卡（可手动重试）
+#: core/src/ssh.c:103 linux/src/hb-conn.c:1101 linux/src/hb-connect-view.c:119
+#: linux/src/hb-desktop-page.c:943 linux/src/hb-desktop-page.c:1157
+#: linux/src/hb-sftp-view.c:341
+msgid "连接失败"
+msgstr "Connection failed"
+
+#: core/src/ssh.c:660
+msgid "主机密钥校验初始化失败"
+msgstr "Host key verification init failed"
+
+#: core/src/ssh.c:671
+msgid "无法读取主机密钥"
+msgstr "Cannot read host key"
+
+#: core/src/ssh.c:685
+msgid "主机密钥校验失败"
+msgstr "Host key verification failed"
+
+#: core/src/ssh.c:735
+msgid "主机密钥已变更，可能存在中间人攻击"
+msgstr "Host key has changed — possible man-in-the-middle attack"
+
+#: core/src/ssh.c:736
+msgid "主机密钥未被信任，连接已取消"
+msgstr "Host key not trusted — connection cancelled"
+
+#: core/src/ssh.c:900
+msgid "口令错误，请重试"
+msgstr "Wrong passphrase, try again"
+
+#: core/src/ssh.c:902
+#, c-format
+msgid "私钥 %s 的口令"
+msgstr "Passphrase for key %s"
+
+#: core/src/ssh.c:904 linux/src/hb-keychain-view.c:760
+msgid "私钥口令"
+msgstr "Key passphrase"
+
+#: core/src/ssh.c:959
+msgid "密码错误，请重试"
+msgstr "Wrong password, try again"
+
+#: core/src/ssh.c:961
+#, c-format
+msgid "%s@%s:%d 的密码"
+msgstr "Password for %s@%s:%d"
+
+#: core/src/ssh.c:1107
+msgid "认证失败：服务器拒绝了提供的凭据"
+msgstr "Authentication failed: server rejected the credentials"
+
+#: core/src/ssh.c:1294
+#, c-format
+msgid "解析 %s…"
+msgstr "Resolving %s…"
+
+#: core/src/ssh.c:1305
+#, c-format
+msgid "无法解析主机名 %s"
+msgstr "Cannot resolve hostname %s"
+
+#: core/src/ssh.c:1310
+#, c-format
+msgid "TCP 连接 %s:%d…"
+msgstr "TCP connect %s:%d…"
+
+#: core/src/ssh.c:1318
+#, c-format
+msgid "无法连接：%s:%d 拒绝连接"
+msgstr "Cannot connect: %s:%d refused"
+
+#: core/src/ssh.c:1335
+#, c-format
+msgid "解析 %s（远端）…"
+msgstr "Resolving %s (remote)…"
+
+#: core/src/ssh.c:1336
+#, c-format
+msgid "经跳板 %zu 转发 %s:%d…"
+msgstr "Forwarding %2$s:%3$d via jump %1$zu…"
+
+#: core/src/ssh.c:1348
+msgid "无法建立跳板转发通道"
+msgstr "Cannot open jump forward channel"
+
+#. SSH 握手（非阻塞 + EAGAIN 重试）
+#: core/src/ssh.c:1357
+msgid "SSH 握手…"
+msgstr "SSH handshake…"
+
+#: core/src/ssh.c:1361 core/src/ssh.c:1371
+msgid "SSH 握手失败"
+msgstr "SSH handshake failed"
+
+#: core/src/ssh.c:1378
+#, c-format
+msgid "SSH 握手 · kex %s · %s"
+msgstr "SSH handshake · kex %s · %s"
+
+#: core/src/ssh.c:1386
+#, c-format
+msgid "认证 %s (%s)…"
+msgstr "Authenticating %s (%s)…"
+
+#: core/src/ssh.c:1413
+#, c-format
+msgid "启动 shell (%s)…"
+msgstr "Starting shell (%s)…"
+
+#: core/src/ssh.c:1424
+msgid "无法打开 SSH channel"
+msgstr "Cannot open SSH channel"
+
+#: core/src/ssh.c:1453
+msgid "PTY 请求被拒绝"
+msgstr "PTY request denied"
+
+#: core/src/ssh.c:1472
+msgid "无法启动远程 shell/命令"
+msgstr "Cannot start remote shell/command"
+
+#: core/src/ssh.c:1698
+msgid "连接已关闭 · SSH channel EOF"
+msgstr "Connection closed · SSH channel EOF"
+
+#: core/src/ssh.c:1956
+msgid "启动 SFTP 子系统…"
+msgstr "Starting SFTP subsystem…"
+
+#: core/src/ssh.c:1962
+msgid "无法启动 SFTP 子系统"
+msgstr "Cannot start SFTP subsystem"
+
+#: core/src/ssh.c:1967
+msgid "无法启动 SFTP 引擎"
+msgstr "Cannot start SFTP engine"
+
+#: core/src/ssh.c:2073
+#, c-format
+msgid "[跳板 %zu/%zu %s] "
+msgstr "[jump %zu/%zu %s] "
+
+#: core/src/sshcfg.c:243
+msgid "~user 形式无法展开，已保留原文"
+msgstr "~user form cannot be expanded, kept as-is"
+
+#: core/src/sshcfg.c:285
+#, c-format
+msgid "IdentityFile 含未支持的令牌 %%%c，已保留原文"
+msgstr "IdentityFile contains unsupported token %%%c, kept as-is"
+
+#: core/src/sshcfg.c:382
+msgid "Match 块暂不支持，已忽略"
+msgstr "Match blocks unsupported, ignored"
+
+#: core/src/sshcfg.c:418
+#, c-format
+msgid "%s 暂不支持，已忽略"
+msgstr "%s unsupported, ignored"
+
+#: core/src/sshcfg.c:443
+#, c-format
+msgid "Include 嵌套过深（>%d），已忽略"
+msgstr "Include nested too deep (>%d), ignored"
+
+#: core/src/sshcfg.c:449
+#, c-format
+msgid "无法读取 %s：%s"
+msgstr "Cannot read %s: %s"
+
+#: core/src/sshcfg.c:454
+msgid "不是普通文件，已忽略"
+msgstr "Not a regular file, ignored"
+
+#: core/src/sshcfg.c:459
+msgid "文件过大（>1 MiB），已忽略"
+msgstr "File too large (>1 MiB), ignored"
+
+#: core/src/sshcfg.c:469
+#, c-format
+msgid "读取失败：%s"
+msgstr "Read failed: %s"
+
+#: core/src/sshcfg.c:658
+#, c-format
+msgid "Port 无效（'%s'），已忽略"
+msgstr "Invalid Port ('%s'), ignored"
+
+#: core/src/sshcfg.c:680
+#, c-format
+msgid "ServerAliveInterval 无效（'%s'），已忽略"
+msgstr "Invalid ServerAliveInterval ('%s'), ignored"
+
+#: core/src/watch.c:598
+msgid "会话结束（EOF）"
+msgstr "Session ended (EOF)"
+
+#: core/src/watch.c:665
+msgid "空闲启发式"
+msgstr "Idle heuristic"
+
+#: linux/src/hb-account-view.c:170 linux/src/hb-sync.c:592
+msgid "需要两步验证码"
+msgstr "Two-factor code required"
+
+#: linux/src/hb-account-view.c:175 linux/src/hb-account-view.c:272
+#, c-format
+msgid "尝试次数过多，请 %d 秒后再试"
+msgid_plural "尝试次数过多，请 %d 秒后再试"
+msgstr[0] "Too many attempts — try again in %d second"
+msgstr[1] "Too many attempts — try again in %d seconds"
+
+#: linux/src/hb-account-view.c:181
+msgid "登录失败"
+msgstr "Sign-in failed"
+
+#: linux/src/hb-account-view.c:195 linux/src/hb-account-view.c:324
+#: linux/src/hb-account-view.c:552
+msgid "服务器地址仅支持 https:// 或回环 http://"
+msgstr "Server must be https:// or loopback http://"
+
+#: linux/src/hb-account-view.c:199
+msgid "请填写邮箱与密码"
+msgstr "Enter email and password"
+
+#: linux/src/hb-account-view.c:228
+msgid "首次登录"
+msgstr "First sign-in"
+
+#: linux/src/hb-account-view.c:235
+msgid ""
+"本机 Vault 中已有数据。合并后将上传加密副本并与云端保持一致；丢弃则以云端内容"
+"覆盖本机同步范围内的数据。"
+msgstr ""
+"This Vault already has data. Merge uploads encrypted copies and stays "
+"consistent with the cloud; discard replaces synced local data with the cloud "
+"content."
+
+#: linux/src/hb-account-view.c:237
+msgid "合并本机数据到账号"
+msgstr "Merge local data into the account"
+
+#: linux/src/hb-account-view.c:238
+msgid "丢弃本机数据，使用云端"
+msgstr "Discard local data, use cloud"
+
+#: linux/src/hb-account-view.c:269
+msgid "注册失败"
+msgstr "Registration failed"
+
+#: linux/src/hb-account-view.c:293
+msgid "请填写邮箱"
+msgstr "Enter an email"
+
+#: linux/src/hb-account-view.c:295
+msgid "密码至少 8 位"
+msgstr "Password must be 8+ characters"
+
+#: linux/src/hb-account-view.c:299 linux/src/hb-account-view.c:528
+#: linux/src/hb-account-view.c:619
+msgid "两次密码不一致"
+msgstr "Passwords do not match"
+
+#: linux/src/hb-account-view.c:330 linux/src/hb-account-view.c:1225
+msgid "注册新账号"
+msgstr "Create account"
+
+#: linux/src/hb-account-view.c:332
+msgid ""
+"零知识：Harbor 服务器只存加密数据，无法帮你找回或重置密码。忘记密码且没有 24 "
+"词恢复码或其他已登录设备时，数据不可恢复。"
+msgstr ""
+"Zero knowledge: Harbor servers store only encrypted data and cannot recover "
+"or reset your password. With a forgotten password and no 24-word recovery "
+"code or other signed-in device, data is unrecoverable."
+
+#: linux/src/hb-account-view.c:335 linux/src/hb-account-view.c:562
+#: linux/src/hb-account-view.c:1213
+msgid "邮箱"
+msgstr "Email"
+
+#: linux/src/hb-account-view.c:336 linux/src/hb-account-view.c:1214
+msgid "主密码"
+msgstr "Master password"
+
+#: linux/src/hb-account-view.c:337
+msgid "确认密码"
+msgstr "Confirm password"
+
+#: linux/src/hb-account-view.c:344 linux/src/hb-account-view.c:573
+#: linux/src/hb-account-view.c:644 linux/src/hb-account-view.c:873
+#: linux/src/hb-desktop-page.c:726 linux/src/hb-desktop-page.c:867
+#: linux/src/hb-dialogs.c:197 linux/src/hb-dialogs.c:396
+#: linux/src/hb-dialogs.c:509 linux/src/hb-dialogs.c:613
+#: linux/src/hb-forward-form.c:667 linux/src/hb-host-form.c:1248
+#: linux/src/hb-hosts-view.c:1364 linux/src/hb-keychain-view.c:661
+#: linux/src/hb-keychain-view.c:1073 linux/src/hb-keychain-view.c:1428
+#: linux/src/hb-settings-view.c:1843 linux/src/hb-sftp-view.c:2517
+#: linux/src/hb-snippet-send.c:187 linux/src/hb-snippets-view.c:298
+#: linux/src/hb-ssh-page.c:857 linux/src/hb-workspace.c:1271
+msgid "取消"
+msgstr "Cancel"
+
+#: linux/src/hb-account-view.c:345
+msgid "注册"
+msgstr "Register"
+
+#: linux/src/hb-account-view.c:389
+msgid "词不匹配，请核对恢复码"
+msgstr "Words do not match — check the recovery code"
+
+#: linux/src/hb-account-view.c:408
+msgid "确认恢复码"
+msgstr "Confirm recovery code"
+
+#: linux/src/hb-account-view.c:414
+msgid "请按编号填写对应的词，确认你已正确抄写。"
+msgstr "Fill in the numbered words to confirm your copy."
+
+#: linux/src/hb-account-view.c:416
+#, c-format
+msgid "第 %d 个词"
+msgstr "Word %d"
+
+#: linux/src/hb-account-view.c:425
+msgid "确认"
+msgstr "Confirm"
+
+#: linux/src/hb-account-view.c:456
+msgid "恢复码（请离线抄写）"
+msgstr "Recovery code (write it down offline)"
+
+#: linux/src/hb-account-view.c:458
+msgid ""
+"忘记密码时，24 词恢复码是找回 Vault 的唯一途径——服务端零知识，无法帮你重置。"
+"请离线抄写并妥善保存。"
+msgstr ""
+"If you forget your password, the 24-word recovery code is the only way back "
+"to your Vault — the server is zero-knowledge and cannot reset it. Write it "
+"down offline and keep it safe."
+
+#: linux/src/hb-account-view.c:464 linux/src/hb-account-view.c:742
+#: linux/src/hb-dialogs.c:106 linux/src/hb-host-drawer.c:503
+#: linux/src/hb-hosts-view.c:516 linux/src/hb-share-dialog.c:437
+#: linux/src/hb-snippets-view.c:733 linux/src/hb-terminal.c:1878
+msgid "复制"
+msgstr "Copy"
+
+#: linux/src/hb-account-view.c:465
+msgid "我已保存"
+msgstr "I have saved it"
+
+#: linux/src/hb-account-view.c:498
+msgid "恢复失败"
+msgstr "Restore failed"
+
+#: linux/src/hb-account-view.c:520
+msgid "请输入全部 24 个词"
+msgstr "Enter all 24 words"
+
+#: linux/src/hb-account-view.c:524 linux/src/hb-account-view.c:615
+msgid "新密码至少 8 位"
+msgstr "New password must be 8+ characters"
+
+#: linux/src/hb-account-view.c:558 linux/src/hb-account-view.c:1226
+msgid "用恢复码恢复"
+msgstr "Restore with recovery code"
+
+#: linux/src/hb-account-view.c:560
+msgid "没有恢复码、也没有其他已登录设备时，数据无法恢复（零知识）。"
+msgstr ""
+"Without the recovery code or another signed-in device, data cannot be "
+"recovered (zero knowledge)."
+
+#: linux/src/hb-account-view.c:563
+msgid "24 词恢复码（空格分隔）"
+msgstr "24-word recovery code (space-separated)"
+
+#: linux/src/hb-account-view.c:565 linux/src/hb-account-view.c:636
+msgid "新密码"
+msgstr "New password"
+
+#: linux/src/hb-account-view.c:566 linux/src/hb-account-view.c:637
+msgid "确认新密码"
+msgstr "Confirm new password"
+
+#: linux/src/hb-account-view.c:574
+msgid "恢复"
+msgstr "Restore"
+
+#: linux/src/hb-account-view.c:599
+msgid "修改失败"
+msgstr "Change failed"
+
+#: linux/src/hb-account-view.c:602
+msgid "密码已修改"
+msgstr "Password changed"
+
+#: linux/src/hb-account-view.c:634 linux/src/hb-account-view.c:1342
+msgid "修改密码"
+msgstr "Change password"
+
+#: linux/src/hb-account-view.c:635
+msgid "当前密码"
+msgstr "Current password"
+
+#: linux/src/hb-account-view.c:645
+msgid "修改"
+msgstr "Edit"
+
+#: linux/src/hb-account-view.c:663
+msgid "恢复码轮换失败"
+msgstr "Recovery-code rotation failed"
+
+#: linux/src/hb-account-view.c:680
+msgid "输入主密码以轮换恢复码"
+msgstr "Enter master password to rotate the recovery code"
+
+#: linux/src/hb-account-view.c:693
+msgid "两步验证启用失败"
+msgstr "Failed to enable two-factor authentication"
+
+#: linux/src/hb-account-view.c:696 linux/src/hb-account-view.c:1315
+msgid "两步验证已开启"
+msgstr "Two-factor authentication on"
+
+#: linux/src/hb-account-view.c:730
+msgid "获取两步验证密钥失败"
+msgstr "Failed to get 2FA secret"
+
+#: linux/src/hb-account-view.c:736
+msgid "开启两步验证"
+msgstr "Enable two-factor authentication"
+
+#: linux/src/hb-account-view.c:738
+msgid "在认证器中添加以下密钥（TOTP · SHA1 · 6 位 · 30 秒）。"
+msgstr "Add this key to your authenticator (TOTP · SHA1 · 6 digits · 30 s)."
+
+#: linux/src/hb-account-view.c:763
+msgid "输入当前验证码以启用"
+msgstr "Enter the current code to enable"
+
+#: linux/src/hb-account-view.c:767
+msgid "启用"
+msgstr "Enable"
+
+#: linux/src/hb-account-view.c:782
+msgid "关闭两步验证"
+msgstr "Disable two-factor authentication"
+
+#: linux/src/hb-account-view.c:783
+msgid "验证码"
+msgstr "Verification code"
+
+#: linux/src/hb-account-view.c:786 linux/src/hb-desktop-page.c:1829
+#: linux/src/hb-dialogs.c:542 linux/src/hb-share-page.c:356
+msgid "关闭"
+msgstr "Close"
+
+#: linux/src/hb-account-view.c:817
+msgid "退出账号"
+msgstr "Sign out"
+
+#: linux/src/hb-account-view.c:819
+msgid "退出后停止同步，云端密文保留。本地 Vault 可选择保留或擦除。"
+msgstr ""
+"Signing out stops sync; cloud ciphertext stays. The local Vault can be kept "
+"or wiped."
+
+#: linux/src/hb-account-view.c:822
+msgid "保留本地退出"
+msgstr "Sign out, keep local data"
+
+#: linux/src/hb-account-view.c:823
+msgid "擦除并退出"
+msgstr "Wipe & sign out"
+
+#: linux/src/hb-account-view.c:864
+msgid "吊销设备"
+msgstr "Revoke device"
+
+#: linux/src/hb-account-view.c:865
+#, c-format
+msgid "吊销设备「%s」？该设备将立即断开同步。"
+msgstr "Revoke device \"%s\"? It will be disconnected immediately."
+
+#: linux/src/hb-account-view.c:869
+msgid "同时远程擦除该设备上的数据"
+msgstr "Also wipe data on that device remotely"
+
+#: linux/src/hb-account-view.c:874 linux/src/hb-account-view.c:971
+msgid "吊销"
+msgstr "Revoke"
+
+#: linux/src/hb-account-view.c:949
+msgid "设备"
+msgstr "Devices"
+
+#: linux/src/hb-account-view.c:956
+#, c-format
+msgid "%s · 上次活动 %s%s"
+msgstr "%s · last active %s%s"
+
+#: linux/src/hb-account-view.c:966 linux/src/hb-account-view.c:1078
+msgid "当前"
+msgstr "Current"
+
+#: linux/src/hb-account-view.c:1079
+msgid "另一版本"
+msgstr "Other version"
+
+#: linux/src/hb-account-view.c:1089 linux/src/hb-account-view.c:1090
+msgid "••• (已更改)"
+msgstr "••• (changed)"
+
+#: linux/src/hb-account-view.c:1118
+msgid "保留当前"
+msgstr "Keep current"
+
+#: linux/src/hb-account-view.c:1119
+msgid "使用另一版本"
+msgstr "Use the other version"
+
+#: linux/src/hb-account-view.c:1140
+msgid "主机与分组"
+msgstr "Hosts & groups"
+
+#: linux/src/hb-account-view.c:1141
+msgid "密钥与凭据（E2EE）"
+msgstr "Keys & credentials (E2EE)"
+
+#: linux/src/hb-account-view.c:1142 linux/src/hb-palette.c:98
+#: linux/src/hb-snippets-view.c:1000 linux/src/hb-vault-page.c:22
+#: linux/src/hb-workspace.c:933
+msgid "Snippets"
+msgstr "Snippets"
+
+#: linux/src/hb-account-view.c:1143
+msgid "端口转发规则"
+msgstr "Port forwarding rules"
+
+#: linux/src/hb-account-view.c:1144 linux/src/hb-palette.c:99
+#: linux/src/hb-vault-page.c:23
+msgid "Known Hosts"
+msgstr "Known Hosts"
+
+#: linux/src/hb-account-view.c:1145
+msgid "外观与设置"
+msgstr "Appearance & settings"
+
+#: linux/src/hb-account-view.c:1161
+msgid "同步范围"
+msgstr "Sync scope"
+
+#: linux/src/hb-account-view.c:1163
+msgid "关闭的项目不参与同步。冲突采用版本向量 + LWW 合并。"
+msgstr ""
+"Unchecked items are not synced. Conflicts merge by version vector + LWW."
+
+#: linux/src/hb-account-view.c:1185
+msgid "Shell History（暂不支持）"
+msgstr "Shell History (not yet supported)"
+
+#: linux/src/hb-account-view.c:1208
+msgid "登录 Harbor 账号"
+msgstr "Sign in to Harbor"
+
+#: linux/src/hb-account-view.c:1210
+msgid "登录后从云端拉取密文并在本地解密，恢复全部 Vault 与同步。"
+msgstr ""
+"After sign-in the ciphertext is pulled and decrypted locally, restoring the "
+"whole Vault and sync."
+
+#: linux/src/hb-account-view.c:1211
+msgid "服务器"
+msgstr "Server"
+
+#: linux/src/hb-account-view.c:1215
+msgid "TOTP 验证码"
+msgstr "TOTP code"
+
+#: linux/src/hb-account-view.c:1224
+msgid "登录并同步"
+msgstr "Sign in & sync"
+
+#: linux/src/hb-account-view.c:1238
+msgid "零知识架构：密码错误则无法解密 Vault，服务端不能帮你重置。"
+msgstr ""
+"Zero-knowledge design: a wrong password cannot decrypt the Vault, and the "
+"server cannot reset it."
+
+#: linux/src/hb-account-view.c:1251
+msgid "端到端加密同步已开启 — 服务端零知识"
+msgstr "End-to-end encrypted sync on — zero-knowledge server"
+
+#: linux/src/hb-account-view.c:1255
+msgid ""
+"主密钥由密码经 Argon2id 派生；Vault 数据在设备端用 XChaCha20-Poly1305 加密后"
+"才上传。服务端仅存密文。"
+msgstr ""
+"The master key is derived from your password via Argon2id; Vault data is "
+"encrypted on-device with XChaCha20-Poly1305 before upload. The server only "
+"stores ciphertext."
+
+#: linux/src/hb-account-view.c:1262
+msgid "恢复码"
+msgstr "Recovery code"
+
+#: linux/src/hb-account-view.c:1277
+msgid "已同步 · %H:%M"
+msgstr "Synced · %H:%M"
+
+#: linux/src/hb-account-view.c:1279 linux/src/hb-sync.c:1602
+msgid "已同步"
+msgstr "Synced"
+
+#: linux/src/hb-account-view.c:1290
+msgid "账号"
+msgstr "Account"
+
+#: linux/src/hb-account-view.c:1315
+msgid "两步验证关闭"
+msgstr "Two-factor authentication off"
+
+#: linux/src/hb-account-view.c:1322
+msgid "已开启"
+msgstr "On"
+
+#: linux/src/hb-account-view.c:1322
+msgid "未开启"
+msgstr "Off"
+
+#: linux/src/hb-account-view.c:1330 linux/src/hb-tray.c:123
+msgid "退出"
+msgstr "Quit"
+
+#: linux/src/hb-account-view.c:1341
+msgid "立即同步"
+msgstr "Sync now"
+
+#: linux/src/hb-account-view.c:1343
+msgid "两步验证"
+msgstr "Two-factor authentication"
+
+#: linux/src/hb-account-view.c:1364
+msgid "已登录设备"
+msgstr "Signed-in devices"
+
+#: linux/src/hb-account-view.c:1366
+msgid "正在获取设备列表…"
+msgstr "Fetching device list…"
+
+#: linux/src/hb-account-view.c:1381
+msgid "同步冲突"
+msgstr "Sync conflicts"
+
+#: linux/src/hb-account-view.c:1383
+msgid "以下字段在两个设备上被同时修改，请选择保留哪个版本。"
+msgstr ""
+"These fields were changed on both devices — pick which version to keep."
+
+#: linux/src/hb-account-view.c:1390
+msgid "暂无冲突"
+msgstr "No conflicts"
+
+#: linux/src/hb-application.c:927
+msgid "Harbor 仍在托盘中运行"
+msgstr "Harbor is still running in the tray"
+
+#: linux/src/hb-application.c:928
+msgid "会话保持连接；点托盘图标可重新打开窗口。"
+msgstr "Sessions stay connected; click the tray icon to reopen the window."
+
+#: linux/src/hb-application.c:1423
+msgid "格式：user@hostname[:port]"
+msgstr "Format: user@hostname[:port]"
+
+#: linux/src/hb-application.c:1462
+msgid "Vault"
+msgstr "Vault"
+
+#: linux/src/hb-conn.c:638
+msgid "已拒绝使用密钥，连接已取消"
+msgstr "Key use declined — connection cancelled"
+
+#: linux/src/hb-conn.c:691
+#, c-format
+msgid "跳板主机不存在或已删除（%s）"
+msgstr "Jump host does not exist or was deleted (%s)"
+
+#: linux/src/hb-conn.c:706
+msgid "无法读取主机信息"
+msgstr "Cannot read host info"
+
+#. 绑定冲突等（code=0：不可重试，由 owner 置 FAILED）
+#: linux/src/hb-conn.c:725
+#, c-format
+msgid "无法监听 %s:%d"
+msgstr "Cannot listen on %s:%d"
+
+#: linux/src/hb-conn.c:750
+msgid "主机配置缺少必填字段（如用户名）"
+msgstr "Host config is missing required fields (e.g. username)"
+
+#: linux/src/hb-conn.c:843
+msgid "以下密钥开启了<b>使用前确认</b>：\n"
+msgstr "These keys have <b>confirm before use</b> enabled:\n"
+
+#: linux/src/hb-conn.c:850
+msgid "允许使用这些密钥登录吗？"
+msgstr "Allow signing in with these keys?"
+
+#: linux/src/hb-conn.c:857
+msgid "使用密钥"
+msgstr "Use key"
+
+#: linux/src/hb-conn.c:858
+msgid "允许使用"
+msgstr "Allow"
+
+#. 需要旧指纹：从 vault 里查
+#: linux/src/hb-conn.c:946
+msgid "(未知)"
+msgstr "(unknown)"
+
+#: linux/src/hb-conn.c:969
+msgid "(无本地记录)"
+msgstr "(no local record)"
+
+#: linux/src/hb-conn.c:978
+msgid "(无)"
+msgstr "(none)"
+
+#: linux/src/hb-connect-view.c:129
+msgid "为安全起见已阻断连接 —— 主机密钥与本地记录不符。"
+msgstr ""
+"Connection blocked for safety — host key does not match the stored record."
+
+#: linux/src/hb-connect-view.c:136
+msgid "技术详情"
+msgstr "Technical details"
+
+#: linux/src/hb-connect-view.c:148 linux/src/hb-connect-view.c:325
+msgid "Close"
+msgstr "Close"
+
+#: linux/src/hb-connect-view.c:154 linux/src/hb-host-form.c:1044
+msgid "编辑主机"
+msgstr "Edit host"
+
+#: linux/src/hb-connect-view.c:160 linux/src/hb-sftp-view.c:1194
+msgid "重试"
+msgstr "Retry"
+
+#: linux/src/hb-connect-view.c:228
+msgid "Show logs"
+msgstr "Show logs"
+
+#: linux/src/hb-connect-view.c:228 linux/src/hb-connect-view.c:269
+msgid "Hide logs"
+msgstr "Hide logs"
+
+#: linux/src/hb-connect-view.c:331
+msgid "Start over"
+msgstr "Start over"
+
+#: linux/src/hb-desktop-page.c:283
+msgid "流畅"
+msgstr "Fast"
+
+#: linux/src/hb-desktop-page.c:284
+msgid "高清"
+msgstr "High quality"
+
+#: linux/src/hb-desktop-page.c:284
+msgid "均衡"
+msgstr "Balanced"
+
+#: linux/src/hb-desktop-page.c:459 linux/src/hb-desktop-page.c:472
+#, c-format
+msgid "连接中断 · %ds 后重连"
+msgstr "Connection lost · reconnect in %ds"
+
+#: linux/src/hb-desktop-page.c:487 linux/src/hb-ssh-page.c:313
+msgid "正在重连…"
+msgstr "Reconnecting…"
+
+#: linux/src/hb-desktop-page.c:548
+#, c-format
+msgid "主机对象不存在或已删除"
+msgstr "Host does not exist or was deleted"
+
+#: linux/src/hb-desktop-page.c:576
+#, c-format
+msgid "经由 SSH 主机不存在或已删除"
+msgstr "Via-SSH host does not exist or was deleted"
+
+#: linux/src/hb-desktop-page.c:687
+msgid "RDP 凭据"
+msgstr "RDP credentials"
+
+#: linux/src/hb-desktop-page.c:687
+msgid "VNC 密码"
+msgstr "VNC password"
+
+#: linux/src/hb-desktop-page.c:691
+msgid "远程桌面需要登录凭据"
+msgstr "Remote desktop needs credentials"
+
+#: linux/src/hb-desktop-page.c:698 linux/src/hb-host-drawer.c:327
+#: linux/src/hb-host-form.c:1094
+msgid "用户名"
+msgstr "Username"
+
+#: linux/src/hb-desktop-page.c:704 linux/src/hb-host-drawer.c:149
+#: linux/src/hb-host-form.c:28
+msgid "密码"
+msgstr "Password"
+
+#: linux/src/hb-desktop-page.c:712
+msgid "域（可空）"
+msgstr "Domain (optional)"
+
+#: linux/src/hb-desktop-page.c:718
+msgid "保存到 Vault"
+msgstr "Save to Vault"
+
+#: linux/src/hb-desktop-page.c:730 linux/src/hb-dialogs.c:396
+#: linux/src/hb-host-drawer.c:500 linux/src/hb-hosts-view.c:501
+#: linux/src/hb-hosts-view.c:835 linux/src/hb-hosts-view.c:965
+msgid "连接"
+msgstr "Connect"
+
+#: linux/src/hb-desktop-page.c:812
+msgid "警告：远程桌面证书已变更"
+msgstr "Warning: remote desktop certificate changed"
+
+#: linux/src/hb-desktop-page.c:813
+msgid "验证远程桌面证书"
+msgstr "Verify remote desktop certificate"
+
+#: linux/src/hb-desktop-page.c:822
+msgid ""
+"远程主机的证书与本地记录不一致。这可能是重装或配置变更，也可能是中间人攻击——"
+"除非已带外核实，否则应断开。"
+msgstr ""
+"The remote host certificate does not match the local record. This may be a "
+"reinstall or a config change — or a man-in-the-middle attack. Disconnect "
+"unless verified out-of-band."
+
+#: linux/src/hb-desktop-page.c:824
+msgid "该远程桌面证书未受信任。请通过带外渠道核对指纹后再信任。"
+msgstr ""
+"This remote-desktop certificate is not trusted. Verify the fingerprint out-"
+"of-band before trusting."
+
+#: linux/src/hb-desktop-page.c:840 linux/src/hb-dialogs.c:272
+msgid "旧指纹"
+msgstr "Old fingerprint"
+
+#: linux/src/hb-desktop-page.c:845 linux/src/hb-dialogs.c:276
+msgid "新指纹"
+msgstr "New fingerprint"
+
+#: linux/src/hb-desktop-page.c:867 linux/src/hb-desktop-page.c:1755
+msgid "断开"
+msgstr "Disconnect"
+
+#: linux/src/hb-desktop-page.c:873 linux/src/hb-dialogs.c:296
+msgid "我已核实，更新指纹并继续"
+msgstr "I verified — update fingerprint & continue"
+
+#: linux/src/hb-desktop-page.c:874
+msgid "信任此证书"
+msgstr "Trust this certificate"
+
+#: linux/src/hb-desktop-page.c:1074
+msgid "无法创建远程桌面会话"
+msgstr "Cannot create remote desktop session"
+
+#: linux/src/hb-desktop-page.c:1103
+#, c-format
+msgid "开通 Local 转发 127.0.0.1:%d → %s:%d"
+msgstr "Opened Local forward 127.0.0.1:%d → %s:%d"
+
+#: linux/src/hb-desktop-page.c:1109
+#, c-format
+msgid "%s 握手中…"
+msgstr "%s handshaking…"
+
+#: linux/src/hb-desktop-page.c:1167
+msgid "SSH 隧道断开"
+msgstr "SSH tunnel lost"
+
+#: linux/src/hb-desktop-page.c:1203
+msgid "主机配置错误"
+msgstr "Host configuration error"
+
+#: linux/src/hb-desktop-page.c:1210
+msgid "VNC · 经由 SSH 隧道"
+msgstr "VNC · via SSH tunnel"
+
+#: linux/src/hb-desktop-page.c:1210
+msgid "RDP · 经由 SSH 隧道"
+msgstr "RDP · via SSH tunnel"
+
+#: linux/src/hb-desktop-page.c:1214
+#, c-format
+msgid "正在连接 %s:%d…"
+msgstr "Connecting to %s:%d…"
+
+#: linux/src/hb-desktop-page.c:1282
+msgid "RDP 画质将在重连后生效"
+msgstr "RDP quality takes effect after reconnect"
+
+#: linux/src/hb-desktop-page.c:1283 linux/src/hb-desktop-page.c:1823
+#: linux/src/hb-ssh-page.c:852
+msgid "立即重连"
+msgstr "Reconnect now"
+
+#: linux/src/hb-desktop-page.c:1645
+msgid "发送 Ctrl+Alt+Del"
+msgstr "Send Ctrl+Alt+Del"
+
+#: linux/src/hb-desktop-page.c:1650
+msgid "发送 Win"
+msgstr "Send Win"
+
+#: linux/src/hb-desktop-page.c:1655
+msgid "只读观看"
+msgstr "Watch (read-only)"
+
+#: linux/src/hb-desktop-page.c:1660
+msgid "适应窗口（取消=原始大小）"
+msgstr "Fit to window (cancel = original size)"
+
+#: linux/src/hb-desktop-page.c:1666
+msgid "快捷键透传"
+msgstr "Shortcut passthrough"
+
+#: linux/src/hb-desktop-page.c:1692
+msgid "快捷键透传中"
+msgstr "Shortcut passthrough on"
+
+#: linux/src/hb-desktop-page.c:1697 linux/src/hb-share-dialog.c:103
+#: linux/src/hb-share-page.c:52 linux/src/hb-share-page.c:272
+msgid "只读"
+msgstr "Read-only"
+
+#: linux/src/hb-desktop-page.c:1717
+msgid "画质档位"
+msgstr "Quality"
+
+#: linux/src/hb-desktop-page.c:1769
+#, c-format
+msgid "经由 %s@%s SSH 隧道 · 127.0.0.1:%d → 目标 %s:%d · 目标服务未暴露公网"
+msgstr ""
+"Via %s@%s SSH tunnel · 127.0.0.1:%d → target %s:%d · target not exposed "
+"publicly"
+
+#: linux/src/hb-desktop-page.c:1775
+#, c-format
+msgid "直连 %s:%d"
+msgstr "Direct %s:%d"
+
+#: linux/src/hb-dialogs.c:165
+msgid "首次连接 · 验证主机指纹"
+msgstr "First connect · verify host fingerprint"
+
+#: linux/src/hb-dialogs.c:169
+msgid ""
+"该主机不在 known_hosts 中。请通过电话 / 控制台等带外渠道核对指纹后再信任，防"
+"止中间人攻击。"
+msgstr ""
+"This host is not in known_hosts. Verify the fingerprint out-of-band (phone / "
+"console) before trusting it to prevent man-in-the-middle attacks."
+
+#: linux/src/hb-dialogs.c:194
+msgid ""
+"信任后写入 Known Hosts 并经 E2EE 同步。之后指纹若变更将红色告警并阻断连接。"
+msgstr ""
+"Once trusted it is written to Known Hosts and synced E2EE. A later "
+"fingerprint change raises a red alert and blocks the connection."
+
+#: linux/src/hb-dialogs.c:197
+msgid "信任并继续"
+msgstr "Trust & continue"
+
+#: linux/src/hb-dialogs.c:248
+msgid "警告：主机密钥已变更"
+msgstr "Warning: host key changed"
+
+#: linux/src/hb-dialogs.c:252
+msgid ""
+"远程主机发来的密钥与本地记录不一致。这可能是系统重装或配置变更，也可能是中间"
+"人攻击。除非你已带外核实，否则应立即断开。"
+msgstr ""
+"The key sent by the remote host does not match the local record. This may be "
+"a reinstall or a config change — or a man-in-the-middle attack. Disconnect "
+"now unless verified out-of-band."
+
+#: linux/src/hb-dialogs.c:282
+msgid "我了解风险"
+msgstr "I understand the risk"
+
+#: linux/src/hb-dialogs.c:291
+msgid "断开连接"
+msgstr "Disconnected"
+
+#: linux/src/hb-dialogs.c:374
+msgid "私钥密码"
+msgstr "Key password"
+
+#: linux/src/hb-dialogs.c:374
+msgid "身份验证"
+msgstr "Authenticate"
+
+#: linux/src/hb-dialogs.c:390
+msgid "记住（加密保存）"
+msgstr "Remember (saved encrypted)"
+
+#: linux/src/hb-dialogs.c:439 linux/src/hb-window.c:344
+msgid "撤销"
+msgstr "Undo"
+
+#: linux/src/hb-dialogs.c:613
+msgid "确定"
+msgstr "OK"
+
+#: linux/src/hb-find-bar.c:168
+msgid "在 scrollback 中搜索…"
+msgstr "Search in scrollback…"
+
+#: linux/src/hb-find-bar.c:187
+msgid "上一个 (Shift+Enter)"
+msgstr "Previous (Shift+Enter)"
+
+#: linux/src/hb-find-bar.c:189
+msgid "下一个 (Enter)"
+msgstr "Next (Enter)"
+
+#: linux/src/hb-find-bar.c:191
+msgid "关闭 (Esc)"
+msgstr "Close (Esc)"
+
+#: linux/src/hb-forward-form.c:177
+msgid "绑定地址必须是数字 IP（IPv4/IPv6）或 localhost"
+msgstr "Bind address must be a numeric IP (IPv4/IPv6) or localhost"
+
+#: linux/src/hb-forward-form.c:181
+msgid "端口必须在 1–65535"
+msgstr "Port must be 1–65535"
+
+#: linux/src/hb-forward-form.c:194
+#, c-format
+msgid "端口 %d 已被另一条转发规则占用（%s:%d）"
+msgstr "Port %d is used by another rule (%s:%d)"
+
+#: linux/src/hb-forward-form.c:205
+msgid "端口不可用"
+msgstr "Port unavailable"
+
+#: linux/src/hb-forward-form.c:257
+msgid ""
+"需要服务器 sshd_config 设置 GatewayPorts yes/clientspecified，否则仅绑定回环"
+msgstr ""
+"Needs sshd_config GatewayPorts yes/clientspecified on the server, otherwise "
+"it binds loopback only"
+
+#: linux/src/hb-forward-form.c:261
+msgid "将对局域网开放此端口"
+msgstr "This port will be open on the LAN"
+
+#: linux/src/hb-forward-form.c:263
+msgid "绑定 1024 以下端口需要 root 权限"
+msgstr "Binding ports below 1024 needs root"
+
+#: linux/src/hb-forward-form.c:282 linux/src/hb-forward-form.c:582
+msgid "目标地址"
+msgstr "Target address"
+
+#: linux/src/hb-forward-form.c:343
+msgid "本机 绑定地址:端口 → 经 SSH 服务器访问 目标地址:端口"
+msgstr ""
+"Local bind-address:port → target-address:port reached via the SSH server"
+
+#: linux/src/hb-forward-form.c:344
+msgid "服务器 绑定地址:端口 → 经本机访问 目标地址:端口（需要 sshd 允许）"
+msgstr ""
+"Server bind-address:port → target-address:port reached via this machine "
+"(sshd must allow it)"
+
+#: linux/src/hb-forward-form.c:345
+msgid "本机 SOCKS5 代理端口 → 目标由客户端逐连接指定"
+msgstr "Local SOCKS5 proxy port → target chosen per-connection by the client"
+
+#: linux/src/hb-forward-form.c:374
+msgid "绑定地址必须是数字 IP 或 localhost"
+msgstr "Bind address must be a numeric IP or localhost"
+
+#: linux/src/hb-forward-form.c:379
+msgid "绑定端口必须在 1–65535"
+msgstr "Bind port must be 1–65535"
+
+#: linux/src/hb-forward-form.c:386
+msgid "目标地址不能为空"
+msgstr "Target address cannot be empty"
+
+#: linux/src/hb-forward-form.c:392
+msgid "目标端口必须在 1–65535"
+msgstr "Target port must be 1–65535"
+
+#: linux/src/hb-forward-form.c:398
+msgid "请选择经由 SSH 主机"
+msgstr "Choose a via-SSH host"
+
+#. 深拷贝：编辑期间不受外部变更影响
+#: linux/src/hb-forward-form.c:529
+msgid "Edit forwarding"
+msgstr "Edit forwarding"
+
+#: linux/src/hb-forward-form.c:529 linux/src/hb-forward-view.c:755
+msgid "New forwarding"
+msgstr "New forwarding"
+
+#. 类型
+#: linux/src/hb-forward-form.c:533 linux/src/hb-forward-view.c:613
+#: linux/src/hb-host-form.c:1053 linux/src/hb-keychain-view.c:597
+#: linux/src/hb-keychain-view.c:1315 linux/src/hb-keychain-view.c:1599
+#: linux/src/hb-sftp-view.c:2848
+msgid "类型"
+msgstr "Type"
+
+#: linux/src/hb-forward-form.c:550
+msgid "绑定地址"
+msgstr "Bind address"
+
+#: linux/src/hb-forward-form.c:554 linux/src/hb-host-drawer.c:326
+#: linux/src/hb-host-form.c:1081 linux/src/hb-hosts-view.c:1947
+#: linux/src/hb-known-view.c:358
+msgid "端口"
+msgstr "Port"
+
+#: linux/src/hb-forward-form.c:587
+msgid "目标端口"
+msgstr "Target port"
+
+#. 经由 SSH 主机（proto=ssh）
+#: linux/src/hb-forward-form.c:598 linux/src/hb-forward-view.c:616
+msgid "经由 SSH 主机"
+msgstr "Via SSH host"
+
+#: linux/src/hb-forward-form.c:633
+msgid "随主机连接自动启动"
+msgstr "Auto-start with host connection"
+
+#: linux/src/hb-forward-form.c:638
+msgid "该 SSH 主机连上时自动拉起此规则"
+msgstr "Auto-start this rule when that SSH host connects"
+
+#. 等效命令（只读可选中）
+#: linux/src/hb-forward-form.c:653
+msgid "等效命令"
+msgstr "Equivalent command"
+
+#: linux/src/hb-forward-form.c:672 linux/src/hb-host-form.c:1252
+#: linux/src/hb-keychain-view.c:1433 linux/src/hb-snippets-view.c:303
+msgid "保存"
+msgstr "Save"
+
+#: linux/src/hb-forward-form.c:677
+msgid "保存并启动"
+msgstr "Save & start"
+
+#: linux/src/hb-forward-mgr.c:115 linux/src/hb-forward-view.c:389
+#, c-format
+msgid "服务器 %s → %s:%d"
+msgstr "Server %s → %s:%d"
+
+#: linux/src/hb-forward-mgr.c:240 linux/src/hb-forward-mgr.c:411
+#: linux/src/hb-forward-mgr.c:459
+msgid "经由主机不存在或已删除"
+msgstr "Via host does not exist or was deleted"
+
+#: linux/src/hb-forward-mgr.c:259
+#, c-format
+msgid "转发规则启动失败 · %s"
+msgstr "Forward rule failed to start · %s"
+
+#. AUTH / HOSTKEY_* / CANCELLED / FORWARD / code 0（绑定冲突、
+#. * 密钥被拒、跳板缺失…） → 永久失败
+#: linux/src/hb-forward-mgr.c:350 linux/src/hb-forward-view.c:189
+msgid "启动失败"
+msgstr "Start failed"
+
+#. 对话框无处挂 → 连接会无声挂死
+#: linux/src/hb-forward-mgr.c:405
+msgid "窗口未就绪"
+msgstr "Window not ready"
+
+#: linux/src/hb-forward-view.c:57
+msgid "Remote"
+msgstr "Remote"
+
+#: linux/src/hb-forward-view.c:59
+msgid "Dynamic"
+msgstr "Dynamic"
+
+#: linux/src/hb-forward-view.c:60 linux/src/hb-host-drawer.c:208
+#: linux/src/hb-host-form.c:1057 linux/src/hb-sftp-view.c:433
+#: linux/src/hb-sftp-view.c:585 linux/src/hb-sftp-view.c:885
+#: linux/src/hb-sftp-view.c:1628 linux/src/hb-sftp-view.c:1629
+#: linux/src/hb-snippets-view.c:639 linux/src/hb-snippets-view.c:780
+#: linux/src/hb-term-page.c:207 linux/src/hb-term-page.c:235
+#: linux/src/hb-term-page.c:637 linux/src/hb-watch-ui.c:1055
+#: linux/src/hb-window.c:626
+msgid "Local"
+msgstr "Local"
+
+#: linux/src/hb-forward-view.c:77
+#, c-format
+msgid "服务器 %s:%d"
+msgstr "Server %s:%d"
+
+#: linux/src/hb-forward-view.c:99
+msgid "（未设置）"
+msgstr "(not set)"
+
+#: linux/src/hb-forward-view.c:105
+msgid "（已删除）"
+msgstr "(deleted)"
+
+#: linux/src/hb-forward-view.c:120
+#, c-format
+msgid "↑ %s ↓ %s · %u 连接"
+msgid_plural "↑ %s ↓ %s · %u 连接"
+msgstr[0] "↑ %s ↓ %s · %u connection"
+msgstr[1] "↑ %s ↓ %s · %u connections"
+
+#: linux/src/hb-forward-view.c:170
+msgid "监听中"
+msgstr "Listening"
+
+#: linux/src/hb-forward-view.c:175
+msgid "连接中…"
+msgstr "Connecting…"
+
+#: linux/src/hb-forward-view.c:180 linux/src/hb-forward-view.c:219
+#, c-format
+msgid "断开 · %ds 后重连"
+msgstr "Disconnected · reconnect in %ds"
+
+#: linux/src/hb-forward-view.c:183
+msgid "连接断开，自动重连中"
+msgstr "Connection lost — auto-reconnecting"
+
+#: linux/src/hb-forward-view.c:187 linux/src/hb-logs-view.c:55
+#: linux/src/hb-watch-ui.c:282
+msgid "失败"
+msgstr "Failed"
+
+#. 状态 pill
+#: linux/src/hb-forward-view.c:193 linux/src/hb-forward-view.c:566
+msgid "已停止"
+msgstr "Stopped"
+
+#: linux/src/hb-forward-view.c:363
+#, c-format
+msgid "已删除规则 %s"
+msgstr "Deleted rule %s"
+
+#: linux/src/hb-forward-view.c:402
+#, c-format
+msgid "确定删除 <b>%s</b>？监听将立即停止。删除后 9 秒内可撤销。"
+msgstr "Delete <b>%s</b>? The listener stops at once. Undo available for 9 s."
+
+#: linux/src/hb-forward-view.c:404
+msgid "删除转发规则"
+msgstr "Delete forward rule"
+
+#: linux/src/hb-forward-view.c:404 linux/src/hb-host-actions.c:304
+#: linux/src/hb-hosts-view.c:521 linux/src/hb-hosts-view.c:977
+#: linux/src/hb-keychain-view.c:373 linux/src/hb-keychain-view.c:1420
+#: linux/src/hb-known-view.c:347 linux/src/hb-known-view.c:461
+#: linux/src/hb-sftp-view.c:2068 linux/src/hb-sftp-view.c:2091
+#: linux/src/hb-snippets-view.c:365 linux/src/hb-snippets-view.c:457
+#: linux/src/hb-snippets-view.c:742
+msgid "删除"
+msgstr "Delete"
+
+#: linux/src/hb-forward-view.c:457 linux/src/hb-hosts-view.c:1487
+#: linux/src/hb-known-view.c:120 linux/src/hb-logs-view.c:310
+#: linux/src/hb-palette.c:390 linux/src/hb-settings-view.c:1407
+#: linux/src/hb-snippets-view.c:579
+msgid "导出失败"
+msgstr "Export failed"
+
+#: linux/src/hb-forward-view.c:460
+msgid "转发规则已导出"
+msgstr "Forward rules exported"
+
+#: linux/src/hb-forward-view.c:472
+msgid "导出转发规则"
+msgstr "Export forward rules"
+
+#: linux/src/hb-forward-view.c:583 linux/src/hb-host-actions.c:206
+#: linux/src/hb-host-drawer.c:502 linux/src/hb-hosts-view.c:511
+#: linux/src/hb-hosts-view.c:971 linux/src/hb-snippets-view.c:448
+msgid "编辑"
+msgstr "Edit"
+
+#: linux/src/hb-forward-view.c:592
+msgid "删除规则"
+msgstr "Delete rule"
+
+#: linux/src/hb-forward-view.c:614
+msgid "监听"
+msgstr "Listen"
+
+#: linux/src/hb-forward-view.c:615
+msgid "目标"
+msgstr "Target"
+
+#: linux/src/hb-forward-view.c:617
+msgid "流量"
+msgstr "Traffic"
+
+#: linux/src/hb-forward-view.c:618
+msgid "状态"
+msgstr "Status"
+
+#: linux/src/hb-forward-view.c:764
+msgid "新建规则"
+msgstr "New rule"
+
+#: linux/src/hb-forward-view.c:765
+msgid "全部启动"
+msgstr "Start all"
+
+#: linux/src/hb-forward-view.c:766
+msgid "全部停止"
+msgstr "Stop all"
+
+#: linux/src/hb-forward-view.c:767
+msgid "导出规则 JSON"
+msgstr "Export rules JSON"
+
+#: linux/src/hb-forward-view.c:802
+msgid "搜索监听 / 目标 / 主机…"
+msgstr "Search listen / target / host…"
+
+#: linux/src/hb-forward-view.c:850
+msgid "还没有端口转发规则"
+msgstr "No forwarding rules yet"
+
+#: linux/src/hb-forward-view.c:853
+msgid "Local / Remote / Dynamic SOCKS5 三种隧道，一键建立、自动重连"
+msgstr ""
+"Local / Remote / Dynamic SOCKS5 tunnels — one click to start, auto-reconnect"
+
+#: linux/src/hb-forward-view.c:864
+msgid "无匹配规则"
+msgstr "No matching rules"
+
+#: linux/src/hb-forward-view.c:876
+msgid ""
+"VNC / RDP 主机勾选「SSH 隧道」后会自动创建临时 Local 规则：本机随机端口 → 服"
+"务器回环 127.0.0.1:3389/5901，桌面会话关闭即拆除（FR-07）。"
+msgstr ""
+"With \"SSH tunnel\" checked on a VNC / RDP host, a temporary Local rule is "
+"created automatically: local random port → server loopback "
+"127.0.0.1:3389/5901, torn down when the desktop session closes (FR-07)."
+
+#: linux/src/hb-host-actions.c:144
+#, c-format
+msgid "%s (副本)"
+msgstr "%s (copy)"
+
+#: linux/src/hb-host-actions.c:153
+#, c-format
+msgid "%s (副本 %d)"
+msgstr "%s (copy %d)"
+
+#: linux/src/hb-host-actions.c:205
+#, c-format
+msgid "已复制为「%s」"
+msgstr "Duplicated as \"%s\""
+
+#: linux/src/hb-host-actions.c:266
+#, c-format
+msgid "已删除主机「%s」"
+msgstr "Deleted host \"%s\""
+
+#: linux/src/hb-host-actions.c:286 linux/src/hb-host-actions.c:303
+#: linux/src/hb-known-view.c:357 linux/src/hb-snippets-view.c:228
+#: linux/src/hb-snippets-view.c:420
+msgid "主机"
+msgstr "Hosts"
+
+#: linux/src/hb-host-actions.c:288
+#, c-format
+msgid "确定删除 <b>%s</b>？已保存的密码会随主机一起删除。删除后 9 秒内可撤销。"
+msgstr ""
+"Delete <b>%s</b>? Saved passwords go with the host. Undo available for 9 s."
+
+#: linux/src/hb-host-actions.c:292
+#, c-format
+msgid ""
+"%s\n"
+"\n"
+"有 %d 台主机以它为跳板/隧道"
+msgid_plural ""
+"%s\n"
+"\n"
+"有 %d 台主机以它为跳板/隧道"
+msgstr[0] ""
+"%s\n"
+"\n"
+"%d hosts use it as jump/tunnel"
+msgstr[1] ""
+"%s\n"
+"\n"
+"%d hosts use it as jump/tunnel"
+
+#: linux/src/hb-host-actions.c:304
+msgid "删除主机"
+msgstr "Delete host"
+
+#: linux/src/hb-host-drawer.c:122
+#, c-format
+msgid "经 %s 隧道 → %s:%d"
+msgstr "Via %s tunnel → %s:%d"
+
+#: linux/src/hb-host-drawer.c:130 linux/src/hb-host-drawer.c:134
+msgid "直连"
+msgstr "Direct"
+
+#: linux/src/hb-host-drawer.c:133
+msgid " → 目标"
+msgstr " → target"
+
+#: linux/src/hb-host-drawer.c:144
+msgid "自动"
+msgstr "Auto"
+
+#: linux/src/hb-host-drawer.c:149
+msgid "密码（已保存）"
+msgstr "Password (saved)"
+
+#: linux/src/hb-host-drawer.c:159
+#, c-format
+msgid "密钥 · %s"
+msgstr "Key · %s"
+
+#: linux/src/hb-host-drawer.c:167
+#, c-format
+msgid "私钥文件 · %s"
+msgstr "Private key file · %s"
+
+#: linux/src/hb-host-drawer.c:171 linux/src/hb-host-form.c:28
+#: linux/src/hb-keychain-view.c:1269
+msgid "密钥"
+msgstr "Key"
+
+#: linux/src/hb-host-drawer.c:173
+msgid "Agent"
+msgstr "Agent"
+
+#: linux/src/hb-host-drawer.c:174 linux/src/hb-host-form.c:28
+#: linux/src/hb-host-form.c:130 linux/src/hb-host-form.c:484
+#: linux/src/hb-host-form.c:567
+msgid "无"
+msgstr "None"
+
+#: linux/src/hb-host-drawer.c:199
+msgid "尚未信任主机指纹"
+msgstr "Host fingerprint not yet trusted"
+
+#: linux/src/hb-host-drawer.c:252
+msgid "host"
+msgstr "host"
+
+#: linux/src/hb-host-drawer.c:258
+msgid "本地终端"
+msgstr "Local terminal"
+
+#: linux/src/hb-host-drawer.c:289 linux/src/hb-hosts-view.c:887
+msgid "本地"
+msgstr "Local"
+
+#: linux/src/hb-host-drawer.c:291 linux/src/hb-hosts-view.c:885
+#: linux/src/hb-hosts-view.c:1167
+msgid "SSH 隧道"
+msgstr "SSH tunnel"
+
+#: linux/src/hb-host-drawer.c:294
+#, c-format
+msgid "分组 · %s"
+msgstr "Group · %s"
+
+#: linux/src/hb-host-drawer.c:315 linux/src/hb-hosts-view.c:1947
+#: linux/src/hb-logs-view.c:224
+msgid "协议"
+msgstr "Protocol"
+
+#: linux/src/hb-host-drawer.c:322 linux/src/hb-host-form.c:1075
+msgid "地址"
+msgstr "Address"
+
+#. SSH 认证
+#: linux/src/hb-host-drawer.c:330 linux/src/hb-host-form.c:1103
+msgid "认证"
+msgstr "Auth"
+
+#: linux/src/hb-host-drawer.c:332
+#, c-format
+msgid "%d 秒%s"
+msgstr "%d s%s"
+
+#: linux/src/hb-host-drawer.c:336
+msgid "（关闭）"
+msgstr "(off)"
+
+#: linux/src/hb-host-drawer.c:337
+msgid "保活间隔"
+msgstr "Keepalive interval"
+
+#: linux/src/hb-host-drawer.c:341 linux/src/hb-host-drawer.c:342
+#: linux/src/hb-host-form.c:30
+msgid "自动检测"
+msgstr "Auto-detect"
+
+#: linux/src/hb-host-drawer.c:345 linux/src/hb-host-form.c:30
+msgid "通用"
+msgstr "Generic"
+
+#: linux/src/hb-host-drawer.c:348 linux/src/hb-host-form.c:1232
+msgid "操作系统"
+msgstr "OS"
+
+#. 分组
+#: linux/src/hb-host-drawer.c:350 linux/src/hb-host-form.c:1210
+#: linux/src/hb-hosts-view.c:1948 linux/src/hb-snippets-view.c:220
+msgid "分组"
+msgstr "Group"
+
+#: linux/src/hb-host-drawer.c:352
+msgid "跳板 / 隧道"
+msgstr "Jump / tunnel"
+
+#: linux/src/hb-host-drawer.c:374
+msgid "最近连接"
+msgstr "Recent"
+
+#: linux/src/hb-host-drawer.c:375
+msgid "尚未连接"
+msgstr "Not connected yet"
+
+#: linux/src/hb-host-drawer.c:380
+msgid "主机指纹"
+msgstr "Host fingerprint"
+
+#: linux/src/hb-host-form.c:27
+msgid "自动（agent → 密钥 → 密码）"
+msgstr "Auto (agent → key → password)"
+
+#: linux/src/hb-host-form.c:155 linux/src/hb-hosts-view.c:1863
+msgid "新建分组…"
+msgstr "New group…"
+
+#: linux/src/hb-host-form.c:195 linux/src/hb-hosts-view.c:624
+msgid "新建分组"
+msgstr "New group"
+
+#: linux/src/hb-host-form.c:195 linux/src/hb-hosts-view.c:624
+msgid "分组名称"
+msgstr "Group name"
+
+#: linux/src/hb-host-form.c:210
+msgid "+ 添加跳板"
+msgstr "+ Add jump host"
+
+#: linux/src/hb-host-form.c:384
+msgid "选择 SSH 主机…"
+msgstr "Choose SSH host…"
+
+#: linux/src/hb-host-form.c:417
+msgid "Keychain 中暂无密钥"
+msgstr "No keys in Keychain yet"
+
+#. 末位："生成新密钥…"（key_ids 里为 NULL 哨兵）
+#: linux/src/hb-host-form.c:432
+msgid "生成新密钥…"
+msgstr "Generate new key…"
+
+#: linux/src/hb-host-form.c:522
+msgid "选择私钥文件"
+msgstr "Choose private key file"
+
+#: linux/src/hb-host-form.c:702
+msgid "请先选择经由 SSH 主机"
+msgstr "Choose a via-SSH host first"
+
+#: linux/src/hb-host-form.c:709
+msgid "找不到空闲监听端口"
+msgstr "No free listen port found"
+
+#: linux/src/hb-host-form.c:730
+#, c-format
+msgid "已创建转发规则 127.0.0.1:%d → 127.0.0.1:%d（经 %s）"
+msgstr "Created forward rule 127.0.0.1:%d → 127.0.0.1:%d (via %s)"
+
+#: linux/src/hb-host-form.c:781
+msgid "地址不能为空"
+msgstr "Address cannot be empty"
+
+#: linux/src/hb-host-form.c:789
+msgid "跳板链存在循环：经该跳板最终会回到本机"
+msgstr "Jump chain has a loop: it eventually returns to this machine"
+
+#: linux/src/hb-host-form.c:922
+msgid "主机已保存"
+msgstr "Host saved"
+
+#: linux/src/hb-host-form.c:933 linux/src/hb-host-form.c:961
+msgid "保存后将清除已保存密码"
+msgstr "Saving will clear the saved password"
+
+#. 名称/地址/端口/用户
+#: linux/src/hb-host-form.c:1068
+msgid "基本信息"
+msgstr "Basics"
+
+#: linux/src/hb-host-form.c:1070
+msgid "别名（默认=地址）"
+msgstr "Alias (defaults to address)"
+
+#: linux/src/hb-host-form.c:1071
+msgid "别名"
+msgstr "Alias"
+
+#: linux/src/hb-host-form.c:1074
+msgid "hostname 或 IP"
+msgstr "hostname or IP"
+
+#: linux/src/hb-host-form.c:1116 linux/src/hb-host-form.c:1157
+msgid "清除已保存密码"
+msgstr "Clear saved password"
+
+#: linux/src/hb-host-form.c:1133
+msgid "私钥文件"
+msgstr "Private key file"
+
+#: linux/src/hb-host-form.c:1139
+msgid "浏览…"
+msgstr "Browse…"
+
+#. 桌面认证（rdp/vnc）：密码可存 vault secret；域仅 RDP 显示。
+#. * 用户名复用「基本信息」里的 user 字段。
+#: linux/src/hb-host-form.c:1149
+msgid "桌面认证"
+msgstr "Desktop auth"
+
+#: linux/src/hb-host-form.c:1163
+msgid "密码（可空，连接时询问）"
+msgstr "Password (optional — asked when connecting)"
+
+#: linux/src/hb-host-form.c:1167
+msgid "域（RDP）"
+msgstr "Domain (RDP)"
+
+#: linux/src/hb-host-form.c:1169
+msgid "留空 = 本机域"
+msgstr "Empty = local domain"
+
+#. SSH 跳板链
+#: linux/src/hb-host-form.c:1174
+msgid "跳板机（外 → 内）"
+msgstr "Jump hosts (outer → inner)"
+
+#. RDP/VNC 隧道
+#: linux/src/hb-host-form.c:1183
+msgid "隧道"
+msgstr "Tunnel"
+
+#: linux/src/hb-host-form.c:1186
+msgid "通过 SSH 隧道"
+msgstr "Via SSH tunnel"
+
+#: linux/src/hb-host-form.c:1200
+msgid "生成配套转发规则"
+msgstr "Create matching forward rules"
+
+#: linux/src/hb-host-form.c:1204
+msgid "创建本机端口 → 此主机端口的 Local 转发，经所选 SSH 主机"
+msgstr ""
+"Create a Local forward local-port → this host's port, via the chosen SSH host"
+
+#. 启动片段 + 保活
+#: linux/src/hb-host-form.c:1217
+msgid "启动片段"
+msgstr "Startup snippet"
+
+#: linux/src/hb-host-form.c:1220
+msgid "保活间隔（秒，0 = 关闭）"
+msgstr "Keepalive interval (seconds, 0 = off)"
+
+#. 颜色 / 标签 / OS
+#: linux/src/hb-host-form.c:1226
+msgid "颜色标签"
+msgstr "Color tag"
+
+#: linux/src/hb-host-form.c:1228
+msgid "标签（逗号分隔）"
+msgstr "Tags (comma-separated)"
+
+#: linux/src/hb-hosts-view.c:759
+#, c-format
+msgid "%s · 经由 %s 隧道"
+msgstr "%s · via %s tunnel"
+
+#: linux/src/hb-hosts-view.c:766
+#, c-format
+msgid "本机 shell · %s"
+msgstr "Local shell · %s"
+
+#: linux/src/hb-hosts-view.c:1088
+#, c-format
+msgid "已移到分组「%s」"
+msgstr "Moved to group \"%s\""
+
+#: linux/src/hb-hosts-view.c:1128
+msgid "全部"
+msgstr "All"
+
+#: linux/src/hb-hosts-view.c:1219
+#, c-format
+msgid "已导入 %u 台主机（新建跳板 %u 台，跳过 %u 台）"
+msgid_plural "已导入 %u 台主机（新建跳板 %u 台，跳过 %u 台）"
+msgstr[0] "Imported %u host (created %u jump host, skipped %u)"
+msgstr[1] "Imported %u hosts (created %u jump hosts, skipped %u)"
+
+#: linux/src/hb-hosts-view.c:1242
+msgid "导入失败"
+msgstr "Import failed"
+
+#. 警告含文件路径/主机名 —— 纯文本对话框，不解析 markup
+#: linux/src/hb-hosts-view.c:1251 linux/src/hb-hosts-view.c:1538
+#: linux/src/hb-known-view.c:55
+msgid "导入警告"
+msgstr "Import warnings"
+
+#: linux/src/hb-hosts-view.c:1281
+#, c-format
+msgid "发现 %u 个 Host（%u 个已存在，将跳过）"
+msgid_plural "发现 %u 个 Host（%u 个已存在，将跳过）"
+msgstr[0] "Found %u host (%u already exist, skipped)"
+msgstr[1] "Found %u hosts (%u already exist, skipped)"
+
+#: linux/src/hb-hosts-view.c:1305
+msgid "    跳板: "
+msgstr "    jump: "
+
+#: linux/src/hb-hosts-view.c:1318
+#, c-format
+msgid "    密钥: %s"
+msgstr "    key: %s"
+
+#: linux/src/hb-hosts-view.c:1332
+#, c-format
+msgid "警告（%u）"
+msgstr "Warnings (%u)"
+
+#: linux/src/hb-hosts-view.c:1352
+msgid "选择其它文件…"
+msgstr "Choose another file…"
+
+#: linux/src/hb-hosts-view.c:1368
+#, c-format
+msgid "导入 %u 台"
+msgid_plural "导入 %u 台"
+msgstr[0] "Import %u host"
+msgstr[1] "Import %u hosts"
+
+#: linux/src/hb-hosts-view.c:1394
+msgid "无法解析该 ssh_config 文件"
+msgstr "Cannot parse this ssh_config file"
+
+#: linux/src/hb-hosts-view.c:1438
+msgid "从 ssh_config 导入"
+msgstr "Import from ssh_config"
+
+#: linux/src/hb-hosts-view.c:1491
+#, c-format
+msgid "已导出 %u 台主机（不含密码与私钥）"
+msgid_plural "已导出 %u 台主机（不含密码与私钥）"
+msgstr[0] "Exported %u host (passwords and private keys excluded)"
+msgstr[1] "Exported %u hosts (passwords and private keys excluded)"
+
+#: linux/src/hb-hosts-view.c:1549 linux/src/hb-hosts-view.c:1599
+msgid "不是有效的 Harbor 主机文件"
+msgstr "Not a valid Harbor hosts file"
+
+#: linux/src/hb-hosts-view.c:1553
+#, c-format
+msgid "已导入 %u 台主机（跳过 %u 台）"
+msgid_plural "已导入 %u 台主机（跳过 %u 台）"
+msgstr[0] "Imported %u host (skipped %u)"
+msgstr[1] "Imported %u hosts (skipped %u)"
+
+#. 查看 → warnings dialog；结果对象随回调保留
+#: linux/src/hb-hosts-view.c:1560
+msgid "查看"
+msgstr "View"
+
+#: linux/src/hb-hosts-view.c:1572
+msgid "撤销导入？"
+msgstr "Undo import?"
+
+#: linux/src/hb-hosts-view.c:1817
+msgid "命令面板 (Ctrl+K)"
+msgstr "Command palette (Ctrl+K)"
+
+#: linux/src/hb-hosts-view.c:1818
+msgid "Ctrl K"
+msgstr "Ctrl K"
+
+#: linux/src/hb-hosts-view.c:1826
+msgid "Connect"
+msgstr "Connect"
+
+#: linux/src/hb-hosts-view.c:1847
+msgid "按名称"
+msgstr "By name"
+
+#: linux/src/hb-hosts-view.c:1847
+msgid "按最近连接"
+msgstr "By last connected"
+
+#: linux/src/hb-hosts-view.c:1847
+msgid "按协议"
+msgstr "By protocol"
+
+#: linux/src/hb-hosts-view.c:1855
+msgid "New host"
+msgstr "New host"
+
+#: linux/src/hb-hosts-view.c:1864
+msgid "从 ~/.ssh/config 导入…"
+msgstr "Import from ~/.ssh/config…"
+
+#: linux/src/hb-hosts-view.c:1865 linux/src/hb-snippets-view.c:918
+msgid "导入 JSON…"
+msgstr "Import JSON…"
+
+#: linux/src/hb-hosts-view.c:1866
+msgid "导出 JSON…"
+msgstr "Export JSON…"
+
+#: linux/src/hb-hosts-view.c:1880
+msgid "排序"
+msgstr "Sort"
+
+#: linux/src/hb-hosts-view.c:1894
+msgid "网格视图"
+msgstr "Grid view"
+
+#: linux/src/hb-hosts-view.c:1900
+msgid "列表视图"
+msgstr "List view"
+
+#: linux/src/hb-hosts-view.c:1914
+msgid "没有匹配的主机"
+msgstr "No matching hosts"
+
+#: linux/src/hb-hosts-view.c:1915 linux/src/hb-keychain-view.c:1642
+msgid "试试其他关键词，或清除筛选"
+msgstr "Try other keywords or clear the filter"
+
+#: linux/src/hb-hosts-view.c:1916
+msgid "清除筛选"
+msgstr "Clear filter"
+
+#. 名称
+#. 名称 / 注释 / 使用确认 —— 可编辑
+#: linux/src/hb-hosts-view.c:1946 linux/src/hb-keychain-view.c:588
+#: linux/src/hb-keychain-view.c:1014 linux/src/hb-keychain-view.c:1273
+#: linux/src/hb-keychain-view.c:1598 linux/src/hb-sftp-view.c:1981
+msgid "名称"
+msgstr "Name"
+
+#: linux/src/hb-hosts-view.c:1946
+msgid "用户"
+msgstr "User"
+
+#: linux/src/hb-keychain-view.c:109
+msgid "key"
+msgstr "key"
+
+#: linux/src/hb-keychain-view.c:123
+msgid "加密 · 首次使用后显示"
+msgstr "encrypted · shown after first use"
+
+#: linux/src/hb-keychain-view.c:131
+msgid "开"
+msgstr "On"
+
+#: linux/src/hb-keychain-view.c:131 linux/src/hb-watch-ui.c:382
+msgid "关"
+msgstr "Off"
+
+#: linux/src/hb-keychain-view.c:140
+#, c-format
+msgid "%d 台主机"
+msgid_plural "%d 台主机"
+msgstr[0] "%d host"
+msgstr[1] "%d hosts"
+
+#: linux/src/hb-keychain-view.c:154 linux/src/hb-keychain-view.c:498
+#: linux/src/hb-keychain-view.c:1362
+msgid "复制公钥"
+msgstr "Copy public key"
+
+#: linux/src/hb-keychain-view.c:155
+msgid "公钥未知（加密导入）"
+msgstr "Public key unknown (encrypted import)"
+
+#: linux/src/hb-keychain-view.c:165 linux/src/hb-keychain-view.c:373
+msgid "删除密钥"
+msgstr "Delete key"
+
+#: linux/src/hb-keychain-view.c:192 linux/src/hb-keychain-view.c:1190
+msgid "公钥已复制"
+msgstr "Public key copied"
+
+#: linux/src/hb-keychain-view.c:330
+msgid "删除密钥失败"
+msgstr "Failed to delete key"
+
+#: linux/src/hb-keychain-view.c:333
+#, c-format
+msgid "已删除密钥 %s"
+msgstr "Deleted key %s"
+
+#: linux/src/hb-keychain-view.c:358
+#, c-format
+msgid "确定删除 <b>%s</b>？"
+msgstr "Delete <b>%s</b>?"
+
+#: linux/src/hb-keychain-view.c:362
+#, c-format
+msgid "有 %d 台主机引用此密钥，删除后这些主机将改为自动认证。"
+msgstr ""
+"%d hosts reference this key; after deletion they fall back to auto auth."
+
+#: linux/src/hb-keychain-view.c:364
+msgid "删除后 9 秒内可撤销。"
+msgstr "Undo available for 9 s after deleting."
+
+#: linux/src/hb-keychain-view.c:466
+msgid "生成失败，请重试"
+msgstr "Generation failed, try again"
+
+#: linux/src/hb-keychain-view.c:490
+#, c-format
+msgid "已生成 %s"
+msgstr "Generated %s"
+
+#: linux/src/hb-keychain-view.c:585 linux/src/hb-keychain-view.c:1540
+msgid "New key"
+msgstr "New key"
+
+#. 注释
+#: linux/src/hb-keychain-view.c:611 linux/src/hb-keychain-view.c:1282
+msgid "注释"
+msgstr "Comment"
+
+#: linux/src/hb-keychain-view.c:626 linux/src/hb-keychain-view.c:1293
+msgid "使用前确认"
+msgstr "Confirm before use"
+
+#: linux/src/hb-keychain-view.c:627
+msgid "每次用此密钥签名前先弹确认框"
+msgstr "Ask for confirmation before each use of this key"
+
+#: linux/src/hb-keychain-view.c:667
+msgid "生成"
+msgstr "Generate"
+
+#: linux/src/hb-keychain-view.c:755
+msgid "口令错误"
+msgstr "Wrong passphrase"
+
+#: linux/src/hb-keychain-view.c:760 linux/src/hb-keychain-view.c:805
+msgid "PKCS#12 密码（必需）"
+msgstr "PKCS#12 password (required)"
+
+#: linux/src/hb-keychain-view.c:762
+msgid "已识别为加密私钥 —— 请输入口令"
+msgstr "Recognized as an encrypted private key — enter its passphrase"
+
+#: linux/src/hb-keychain-view.c:768
+msgid "不是受支持的私钥（OpenSSH / PEM / PKCS#8 / PKCS#12）"
+msgstr "Not a supported private key (OpenSSH / PEM / PKCS#8 / PKCS#12)"
+
+#: linux/src/hb-keychain-view.c:780 linux/src/hb-keychain-view.c:784
+msgid "（加密）"
+msgstr "(encrypted)"
+
+#: linux/src/hb-keychain-view.c:789
+#, c-format
+msgid ""
+"%s\n"
+"指纹 %s"
+msgstr ""
+"%s\n"
+"fingerprint %s"
+
+#: linux/src/hb-keychain-view.c:793
+#, c-format
+msgid ""
+"%s\n"
+"指纹首次使用后显示"
+msgstr ""
+"%s\n"
+"fingerprint shown after first use"
+
+#: linux/src/hb-keychain-view.c:806 linux/src/hb-keychain-view.c:1039
+msgid "可留空，首次连接时询问"
+msgstr "Optional; asked on first connect"
+
+#: linux/src/hb-keychain-view.c:816
+#, c-format
+msgid "该密钥已存在：%s"
+msgstr "Key already exists: %s"
+
+#: linux/src/hb-keychain-view.c:895 linux/src/hb-known-view.c:90
+msgid "无法读取该文件"
+msgstr "Cannot read this file"
+
+#: linux/src/hb-keychain-view.c:896
+msgid "仅支持普通文件，且不超过 1 MiB"
+msgstr "Regular files only, up to 1 MiB"
+
+#: linux/src/hb-keychain-view.c:954
+#, c-format
+msgid "已导入 %s"
+msgstr "Imported %s"
+
+#: linux/src/hb-keychain-view.c:986 linux/src/hb-keychain-view.c:1657
+msgid "导入私钥"
+msgstr "Import private key"
+
+#: linux/src/hb-keychain-view.c:991 linux/src/hb-known-view.c:552
+msgid "选择文件…"
+msgstr "Choose file…"
+
+#: linux/src/hb-keychain-view.c:995
+msgid "或粘贴私钥内容（PEM / OpenSSH）："
+msgstr "Or paste private key contents (PEM / OpenSSH):"
+
+#: linux/src/hb-keychain-view.c:1045
+msgid "记住口令（加密保存）"
+msgstr "Remember passphrase (saved encrypted)"
+
+#: linux/src/hb-keychain-view.c:1078 linux/src/hb-settings-view.c:1550
+#: linux/src/hb-settings-view.c:1843
+msgid "导入"
+msgstr "Import"
+
+#: linux/src/hb-keychain-view.c:1151
+msgid "已清除保存的口令"
+msgstr "Saved passphrase cleared"
+
+#: linux/src/hb-keychain-view.c:1168
+msgid "密钥已保存"
+msgstr "Key saved"
+
+#: linux/src/hb-keychain-view.c:1328
+msgid "创建时间"
+msgstr "Created"
+
+#: linux/src/hb-keychain-view.c:1333 linux/src/hb-keychain-view.c:1600
+#: linux/src/hb-known-view.c:360
+msgid "指纹"
+msgstr "Fingerprint"
+
+#: linux/src/hb-keychain-view.c:1333
+msgid "（加密 · 首次使用后显示）"
+msgstr "(encrypted · shown after first use)"
+
+#: linux/src/hb-keychain-view.c:1358
+msgid "公钥"
+msgstr "Public key"
+
+#: linux/src/hb-keychain-view.c:1368
+msgid "导出公钥…"
+msgstr "Export public key…"
+
+#: linux/src/hb-keychain-view.c:1381
+msgid "清除已保存口令"
+msgstr "Clear saved passphrase"
+
+#: linux/src/hb-keychain-view.c:1401
+msgid "、"
+msgstr ", "
+
+#: linux/src/hb-keychain-view.c:1407 linux/src/hb-keychain-view.c:1602
+msgid "被引用"
+msgstr "Referenced"
+
+#: linux/src/hb-keychain-view.c:1408
+msgid "（无主机使用）"
+msgstr "(unused by hosts)"
+
+#: linux/src/hb-keychain-view.c:1470
+#, c-format
+msgid "已导出 %d 个公钥（私钥不会导出）"
+msgid_plural "已导出 %d 个公钥（私钥不会导出）"
+msgstr[0] "Exported %d public key (private keys are never exported)"
+msgstr[1] "Exported %d public keys (private keys are never exported)"
+
+#: linux/src/hb-keychain-view.c:1549 linux/src/hb-keychain-view.c:1652
+msgid "生成新密钥"
+msgstr "Generate new key"
+
+#: linux/src/hb-keychain-view.c:1550
+msgid "导入私钥…"
+msgstr "Import private key…"
+
+#: linux/src/hb-keychain-view.c:1551
+msgid "导出全部公钥…"
+msgstr "Export all public keys…"
+
+#: linux/src/hb-keychain-view.c:1561
+msgid "Certificate"
+msgstr "Certificate"
+
+#: linux/src/hb-keychain-view.c:1561
+msgid "FIDO2"
+msgstr "FIDO2"
+
+#: linux/src/hb-keychain-view.c:1572
+msgid "后续版本提供"
+msgstr "In a later release"
+
+#: linux/src/hb-keychain-view.c:1583
+msgid "搜索密钥…"
+msgstr "Search keys…"
+
+#: linux/src/hb-keychain-view.c:1601
+msgid "使用确认"
+msgstr "Confirmation required"
+
+#: linux/src/hb-keychain-view.c:1639
+msgid "无匹配密钥"
+msgstr "No matching keys"
+
+#: linux/src/hb-keychain-view.c:1639
+msgid "Keychain 中还没有密钥"
+msgstr "No keys in Keychain yet"
+
+#: linux/src/hb-keychain-view.c:1643
+msgid "生成或导入一个私钥用于主机认证"
+msgstr "Generate or import a private key for host auth"
+
+#: linux/src/hb-keychain-view.c:1739
+msgid "未检测到系统密钥环，数据密钥保存在本机 0600 文件中"
+msgstr "No system keyring found — the data key is kept in a local 0600 file"
+
+#: linux/src/hb-keychain-view.c:1744
+msgid ""
+"私钥以 XChaCha20-Poly1305 加密存于本机 Vault，数据密钥由系统密钥环"
+"（libsecret）保护；明文仅在连接时进入锁定内存并随即擦除。"
+msgstr ""
+"Private keys are stored in the local Vault encrypted with XChaCha20-"
+"Poly1305; the data key is protected by the system keyring (libsecret). "
+"Plaintext only enters locked memory while connecting and is wiped right "
+"after."
+
+#: linux/src/hb-known-view.c:46
+#, c-format
+msgid "已导入 %zu 条，跳过 %zu 条"
+msgstr "Imported %zu entries, skipped %zu"
+
+#: linux/src/hb-known-view.c:65
+msgid "导入失败（无法读取文件）"
+msgstr "Import failed (cannot read file)"
+
+#: linux/src/hb-known-view.c:101
+msgid "选择 known_hosts 文件"
+msgstr "Choose a known_hosts file"
+
+#: linux/src/hb-known-view.c:123
+msgid "Known hosts 已导出"
+msgstr "Known hosts exported"
+
+#: linux/src/hb-known-view.c:135
+msgid "导出 known_hosts"
+msgstr "Export known_hosts"
+
+#: linux/src/hb-known-view.c:207
+msgid "无法创建 .ssh 目录"
+msgstr "Cannot create .ssh directory"
+
+#: linux/src/hb-known-view.c:226
+msgid "备份失败，已中止写入"
+msgstr "Backup failed — write aborted"
+
+#: linux/src/hb-known-view.c:249
+msgid "无新条目需要写入"
+msgstr "No new entries to write"
+
+#: linux/src/hb-known-view.c:263
+msgid "写入失败"
+msgstr "Write failed"
+
+#: linux/src/hb-known-view.c:270
+#, c-format
+msgid "已向 known_hosts 追加 %zu 条（备份 .harbor-bak）"
+msgid_plural "已向 known_hosts 追加 %zu 条（备份 .harbor-bak）"
+msgstr[0] "Appended %zu entry to known_hosts (backup .harbor-bak)"
+msgstr[1] "Appended %zu entries to known_hosts (backup .harbor-bak)"
+
+#: linux/src/hb-known-view.c:292
+msgid "写入 ~/.ssh/known_hosts"
+msgstr "Write to ~/.ssh/known_hosts"
+
+#: linux/src/hb-known-view.c:293
+msgid ""
+"将把 Vault 中尚未出现的指纹追加到 <tt>~/.ssh/known_hosts</tt>；原文件先备份"
+"为 <tt>known_hosts.harbor-bak</tt>。"
+msgstr ""
+"Fingerprints not yet in the Vault are appended to <tt>~/.ssh/known_hosts</"
+"tt>; the original file is first backed up as <tt>known_hosts.harbor-bak</tt>."
+
+#: linux/src/hb-known-view.c:296
+msgid "写入"
+msgstr "Write"
+
+#: linux/src/hb-known-view.c:324
+#, c-format
+msgid "已删除 %s 的指纹记录"
+msgstr "Deleted fingerprint record for %s"
+
+#: linux/src/hb-known-view.c:343
+#, c-format
+msgid "确定删除 <b>%s</b> 的指纹记录？删除后 9 秒内可撤销。"
+msgstr "Delete the fingerprint record for <b>%s</b>? Undo available for 9 s."
+
+#: linux/src/hb-known-view.c:346
+msgid "删除 known hosts 条目"
+msgstr "Delete known-hosts entry"
+
+#: linux/src/hb-known-view.c:359
+msgid "密钥类型"
+msgstr "Key type"
+
+#: linux/src/hb-known-view.c:361
+msgid "添加时间"
+msgstr "Added"
+
+#: linux/src/hb-known-view.c:382
+#, c-format
+msgid "（hashed）%s…"
+msgstr "(hashed) %s…"
+
+#: linux/src/hb-known-view.c:506
+msgid "无匹配条目"
+msgstr "No matching entries"
+
+#: linux/src/hb-known-view.c:506
+msgid "暂无 known hosts — 导入或首次连接时记录"
+msgstr "No known hosts yet — import, or recorded on first connect"
+
+#: linux/src/hb-known-view.c:540
+msgid "导入 known_hosts"
+msgstr "Import known_hosts"
+
+#: linux/src/hb-known-view.c:543
+msgid "默认 ~/.ssh/known_hosts"
+msgstr "Default ~/.ssh/known_hosts"
+
+#: linux/src/hb-known-view.c:573
+msgid "搜索主机 / 指纹…"
+msgstr "Search hosts / fingerprints…"
+
+#. 写入 ~/.ssh/known_hosts…
+#: linux/src/hb-known-view.c:587
+msgid "写入 ~/.ssh/known_hosts…"
+msgstr "Writing to ~/.ssh/known_hosts…"
+
+#. 导出
+#: linux/src/hb-known-view.c:594
+msgid "导出"
+msgstr "Export"
+
+#: linux/src/hb-known-view.c:626
+msgid ""
+"首次连接未知主机时会弹出指纹确认（TOFU）；指纹变更会红色告警并阻断连接，防中"
+"间人攻击。"
+msgstr ""
+"First connections to unknown hosts prompt a fingerprint check (TOFU); a "
+"changed fingerprint raises a red alert and blocks the connection — man-in-"
+"the-middle protection."
+
+#: linux/src/hb-logs-view.c:49 linux/src/hb-logs-view.c:75
+#: linux/src/hb-logs-view.c:98
+#, c-format
+msgid "进行中"
+msgstr "Running"
+
+#: linux/src/hb-logs-view.c:51
+msgid "成功"
+msgstr "Success"
+
+#: linux/src/hb-logs-view.c:65
+msgid "认证失败"
+msgstr "Authentication failed"
+
+#: linux/src/hb-logs-view.c:66 linux/src/hb-logs-view.c:67
+#: linux/src/hb-logs-view.c:68
+msgid "无法连接"
+msgstr "Cannot connect"
+
+#: linux/src/hb-logs-view.c:69
+msgid "主机密钥变更"
+msgstr "Host key changed"
+
+#: linux/src/hb-logs-view.c:70
+msgid "主机密钥被拒绝"
+msgstr "Host key rejected"
+
+#: linux/src/hb-logs-view.c:71
+msgid "超时"
+msgstr "Timed out"
+
+#: linux/src/hb-logs-view.c:203
+msgid "取消 Saved"
+msgstr "Unsave"
+
+#: linux/src/hb-logs-view.c:203
+msgid "标记 Saved"
+msgstr "Mark Saved"
+
+#: linux/src/hb-logs-view.c:221
+msgid "Date"
+msgstr "Date"
+
+#: linux/src/hb-logs-view.c:222
+msgid "User"
+msgstr "User"
+
+#: linux/src/hb-logs-view.c:223
+msgid "Host"
+msgstr "Host"
+
+#: linux/src/hb-logs-view.c:225
+msgid "结果"
+msgstr "Result"
+
+#: linux/src/hb-logs-view.c:226
+msgid "原因"
+msgstr "Reason"
+
+#: linux/src/hb-logs-view.c:227
+msgid "时长"
+msgstr "Duration"
+
+#: linux/src/hb-logs-view.c:228
+msgid "Saved"
+msgstr "Saved"
+
+#: linux/src/hb-logs-view.c:257
+msgid "无匹配记录"
+msgstr "No matching records"
+
+#: linux/src/hb-logs-view.c:314
+msgid "日志已导出 JSON"
+msgstr "Logs exported as JSON"
+
+#: linux/src/hb-logs-view.c:314
+msgid "日志已导出 CSV"
+msgstr "Logs exported as CSV"
+
+#: linux/src/hb-logs-view.c:330
+msgid "导出日志 JSON"
+msgstr "Export logs JSON"
+
+#: linux/src/hb-logs-view.c:330
+msgid "导出日志 CSV"
+msgstr "Export logs CSV"
+
+#: linux/src/hb-logs-view.c:348
+msgid "清空连接日志"
+msgstr "Clear connection logs"
+
+#: linux/src/hb-logs-view.c:349
+msgid "确定删除全部连接日志？此操作不可撤销。"
+msgstr "Delete all connection logs? This cannot be undone."
+
+#: linux/src/hb-logs-view.c:350 linux/src/hb-snippets-view.c:862
+#: linux/src/hb-window.c:564
+msgid "清空"
+msgstr "Clear"
+
+#: linux/src/hb-logs-view.c:402
+msgid "按主机 / 用户 / 结果筛选…"
+msgstr "Filter by host / user / result…"
+
+#. 仅看 Saved
+#: linux/src/hb-logs-view.c:410
+msgid "仅看 Saved"
+msgstr "Saved only"
+
+#. retention dropdown
+#: linux/src/hb-logs-view.c:425
+msgid "保留"
+msgstr "Keep"
+
+#: linux/src/hb-logs-view.c:430
+msgid "30 天"
+msgstr "30 days"
+
+#: linux/src/hb-logs-view.c:431
+msgid "90 天"
+msgstr "90 days"
+
+#: linux/src/hb-logs-view.c:432
+msgid "180 天"
+msgstr "180 days"
+
+#: linux/src/hb-logs-view.c:433
+msgid "365 天"
+msgstr "365 days"
+
+#: linux/src/hb-logs-view.c:434
+msgid "永久"
+msgstr "Forever"
+
+#: linux/src/hb-logs-view.c:459
+msgid "导出 CSV"
+msgstr "Export CSV"
+
+#: linux/src/hb-logs-view.c:464 linux/src/hb-snippets-view.c:919
+msgid "导出 JSON"
+msgstr "Export JSON"
+
+#: linux/src/hb-logs-view.c:470
+msgid "清空日志"
+msgstr "Clear logs"
+
+#: linux/src/hb-palette.c:95 linux/src/hb-vault-page.c:19
+msgid "Hosts"
+msgstr "Hosts"
+
+#: linux/src/hb-palette.c:96 linux/src/hb-vault-page.c:20
+msgid "Keychain"
+msgstr "Keychain"
+
+#: linux/src/hb-palette.c:97 linux/src/hb-vault-page.c:21
+msgid "Port Forwarding"
+msgstr "Port Forwarding"
+
+#: linux/src/hb-palette.c:101 linux/src/hb-share-dialog.c:373
+#: linux/src/hb-share-page.c:266 linux/src/hb-share-view.c:178
+#: linux/src/hb-vault-page.c:25
+msgid "共享会话"
+msgstr "Shared sessions"
+
+#: linux/src/hb-palette.c:102 linux/src/hb-palette.c:230
+#: linux/src/hb-vault-page.c:26
+msgid "外观与终端"
+msgstr "Appearance & terminal"
+
+#: linux/src/hb-palette.c:103 linux/src/hb-vault-page.c:27
+msgid "账号与同步"
+msgstr "Account & sync"
+
+#: linux/src/hb-palette.c:159
+#, c-format
+msgid "连接 · %s%s%s"
+msgstr "Connect · %s%s%s"
+
+#: linux/src/hb-palette.c:179
+msgid "Vault 页面"
+msgstr "Vault page"
+
+#: linux/src/hb-palette.c:216
+msgid "发送 Snippet"
+msgstr "Send snippet"
+
+#: linux/src/hb-palette.c:224 linux/src/hb-window.c:797
+msgid "Local 终端"
+msgstr "Local terminal"
+
+#: linux/src/hb-palette.c:224 linux/src/hb-palette.c:227
+#: linux/src/hb-palette.c:230 linux/src/hb-palette.c:233
+msgid "命令"
+msgstr "Command"
+
+#: linux/src/hb-palette.c:224
+msgid "Local 终端 local terminal"
+msgstr "Local terminal local terminal"
+
+#: linux/src/hb-palette.c:227 linux/src/hb-palette.c:404
+msgid "导出连接日志 CSV"
+msgstr "Export connection logs CSV"
+
+#: linux/src/hb-palette.c:227
+msgid "导出连接日志 CSV export logs csv"
+msgstr "Export connection logs CSV export logs csv"
+
+#: linux/src/hb-palette.c:230
+msgid "外观与终端 appearance settings theme"
+msgstr "Appearance & terminal appearance settings theme"
+
+#: linux/src/hb-palette.c:233
+msgid "Workspace 分屏"
+msgstr "Workspace split"
+
+#: linux/src/hb-palette.c:233
+msgid "Workspace 分屏 workspace split panes"
+msgstr "Workspace split workspace split panes"
+
+#: linux/src/hb-palette.c:337
+msgid "无匹配结果 — 试试主机名或「日志」"
+msgstr "No matches — try a hostname or \"Logs\""
+
+#: linux/src/hb-palette.c:393
+msgid "连接日志已导出"
+msgstr "Connection logs exported"
+
+#: linux/src/hb-palette.c:407
+msgid "CSV 文件"
+msgstr "CSV files"
+
+#: linux/src/hb-palette.c:617
+msgid "搜索主机、页面、Snippet 或命令…"
+msgstr "Search hosts, pages, snippets or commands…"
+
+#: linux/src/hb-settings-view.c:669 linux/src/hb-ssh-page.c:402
+#: linux/src/hb-term-page.c:144
+msgid "监控 开"
+msgstr "Monitor on"
+
+#: linux/src/hb-settings-view.c:691 linux/src/hb-ssh-page.c:509
+#: linux/src/hb-term-page.c:68 linux/src/hb-term-page.c:441
+msgid "● 已连接"
+msgstr "● Connected"
+
+#: linux/src/hb-settings-view.c:702
+msgid "scrollback 10,000 行"
+msgstr "scrollback 10,000 lines"
+
+#: linux/src/hb-settings-view.c:791
+msgid "无效的快捷键"
+msgstr "Invalid shortcut"
+
+#: linux/src/hb-settings-view.c:804
+#, c-format
+msgid "与「%s」冲突，已解绑对方"
+msgstr "Conflicts with \"%s\" — that binding was cleared"
+
+#: linux/src/hb-settings-view.c:813
+msgid "警告：Ctrl+字母在终端里常是 shell 控制键"
+msgstr "Warning: Ctrl+letter is often a shell control key in terminals"
+
+#: linux/src/hb-settings-view.c:850
+msgid "按下新的快捷键…（Esc 取消，Backspace 禁用）"
+msgstr "Press the new shortcut… (Esc cancels, Backspace disables)"
+
+#: linux/src/hb-settings-view.c:871
+msgid "快捷键"
+msgstr "Shortcuts"
+
+#: linux/src/hb-settings-view.c:872
+msgid "点击按键编辑；Backspace 禁用，↺ 恢复默认。Alt/Ctrl+1…9 家族固定。"
+msgstr ""
+"Click a key to edit; Backspace disables, ↺ resets. Alt/Ctrl+1…9 families are "
+"fixed."
+
+#: linux/src/hb-settings-view.c:917 linux/src/hb-settings-view.c:1147
+msgid "恢复默认"
+msgstr "Reset to default"
+
+#: linux/src/hb-settings-view.c:925
+msgid "全部恢复默认"
+msgstr "Reset all to defaults"
+
+#: linux/src/hb-settings-view.c:946
+msgid "写入自启动项失败"
+msgstr "Failed to write autostart entry"
+
+#: linux/src/hb-settings-view.c:995
+msgid "终端主题"
+msgstr "Terminal theme"
+
+#: linux/src/hb-settings-view.c:996
+msgid "实时应用到所有会话与分屏。"
+msgstr "Applied live to all sessions and panes."
+
+#: linux/src/hb-settings-view.c:1011
+msgid "字号"
+msgstr "Font size"
+
+#: linux/src/hb-settings-view.c:1014
+msgid "行距"
+msgstr "Line height"
+
+#: linux/src/hb-settings-view.c:1042
+msgid "字体"
+msgstr "Font"
+
+#: linux/src/hb-settings-view.c:1057
+msgid "1,000 行"
+msgstr "1,000 lines"
+
+#: linux/src/hb-settings-view.c:1057
+msgid "5,000 行"
+msgstr "5,000 lines"
+
+#: linux/src/hb-settings-view.c:1057
+msgid "10,000 行"
+msgstr "10,000 lines"
+
+#: linux/src/hb-settings-view.c:1058
+msgid "50,000 行"
+msgstr "50,000 lines"
+
+#: linux/src/hb-settings-view.c:1058
+msgid "100,000 行"
+msgstr "100,000 lines"
+
+#: linux/src/hb-settings-view.c:1068
+msgid "Scrollback"
+msgstr "Scrollback"
+
+#: linux/src/hb-settings-view.c:1072
+msgid "新会话生效"
+msgstr "Applies to new sessions"
+
+#: linux/src/hb-settings-view.c:1085
+msgid "光标闪烁"
+msgstr "Cursor blink"
+
+#: linux/src/hb-settings-view.c:1088
+msgid "允许远端写入剪贴板（OSC 52）"
+msgstr "Allow remote clipboard writes (OSC 52)"
+
+#: linux/src/hb-settings-view.c:1089
+msgid "远端程序可改写本机剪贴板，仅在信任的主机上开启"
+msgstr ""
+"Remote programs can overwrite the local clipboard — enable only on trusted "
+"hosts"
+
+#: linux/src/hb-settings-view.c:1096
+msgid "SFTP 并发传输数"
+msgstr "SFTP concurrent transfers"
+
+#: linux/src/hb-settings-view.c:1097
+msgid "同一主机同时进行的传输（1-8）"
+msgstr "Simultaneous transfers per host (1-8)"
+
+#: linux/src/hb-settings-view.c:1120
+msgid "Autocomplete"
+msgstr "Autocomplete"
+
+#: linux/src/hb-settings-view.c:1122 linux/src/hb-workspace.c:954
+msgid "即将推出"
+msgstr "Coming soon"
+
+#: linux/src/hb-settings-view.c:1160
+msgid "实时预览"
+msgstr "Live preview"
+
+#: linux/src/hb-settings-view.c:1161
+msgid "拖动左侧滑杆 / 切换主题，立即生效。"
+msgstr "Drag the sliders or switch theme — changes apply instantly."
+
+#: linux/src/hb-settings-view.c:1174
+msgid "设置保存在本机 Vault；账号同步上线后随 E2EE 同步到其它设备。"
+msgstr ""
+"Settings live in the local Vault and sync E2EE to other devices via the "
+"account."
+
+#: linux/src/hb-settings-view.c:1188
+msgid "外观"
+msgstr "Appearance"
+
+#: linux/src/hb-settings-view.c:1189
+msgid "界面配色主题；终端配色在上方预览区单独选择。"
+msgstr "Chrome color scheme; terminal colors are picked in the preview above."
+
+#: linux/src/hb-settings-view.c:1193
+msgid "界面主题"
+msgstr "UI theme"
+
+#: linux/src/hb-settings-view.c:1200
+msgid "浅色"
+msgstr "Light"
+
+#: linux/src/hb-settings-view.c:1200
+msgid "深色"
+msgstr "Dark"
+
+#: linux/src/hb-settings-view.c:1200 linux/src/hb-settings-view.c:1220
+msgid "跟随系统"
+msgstr "System"
+
+#: linux/src/hb-settings-view.c:1213
+msgid "语言"
+msgstr "Language"
+
+#: linux/src/hb-settings-view.c:1235
+msgid "重启 Harbor 后生效"
+msgstr "Restart Harbor to apply"
+
+#: linux/src/hb-settings-view.c:1236
+msgid "重启"
+msgstr "Restart"
+
+#: linux/src/hb-settings-view.c:1258
+msgid "系统托盘与启动"
+msgstr "Tray & startup"
+
+#: linux/src/hb-settings-view.c:1259
+msgid "关闭窗口时驻留托盘、登录时自动启动。"
+msgstr "Stay in the tray when the window closes, and start at login."
+
+#: linux/src/hb-settings-view.c:1261
+msgid "关闭时驻留系统托盘"
+msgstr "Keep running in the tray on close"
+
+#: linux/src/hb-settings-view.c:1266
+msgid "当前桌面未提供系统托盘"
+msgstr "This desktop provides no system tray"
+
+#: linux/src/hb-settings-view.c:1272
+msgid "登录时自动启动"
+msgstr "Start at login"
+
+#: linux/src/hb-settings-view.c:1273
+msgid "图形会话启动时以 --background 后台运行"
+msgstr "Run with --background when the graphical session starts"
+
+#: linux/src/hb-settings-view.c:1352
+msgid "强度：强"
+msgstr "Strength: strong"
+
+#: linux/src/hb-settings-view.c:1353
+msgid "强度：中（建议 12+ 位混合字符）"
+msgstr "Strength: fair (use 12+ mixed characters)"
+
+#: linux/src/hb-settings-view.c:1354
+msgid "强度：弱（至少 8 位）"
+msgstr "Strength: weak (at least 8 characters)"
+
+#: linux/src/hb-settings-view.c:1368
+msgid "　·　两次输入不一致"
+msgstr " · entries do not match"
+
+#: linux/src/hb-settings-view.c:1405
+msgid "加密备份已导出"
+msgstr "Encrypted backup exported"
+
+#: linux/src/hb-settings-view.c:1452 linux/src/hb-settings-view.c:1572
+msgid "请输入备份密码"
+msgstr "Enter the backup password"
+
+#: linux/src/hb-settings-view.c:1456
+msgid "两次输入不一致"
+msgstr "Entries do not match"
+
+#: linux/src/hb-settings-view.c:1460
+msgid "密码少于 8 位，仍继续导出"
+msgstr "Password under 8 chars — export anyway"
+
+#: linux/src/hb-settings-view.c:1477
+msgid "保存加密备份"
+msgstr "Save encrypted backup"
+
+#: linux/src/hb-settings-view.c:1510
+#, c-format
+msgid "已导入 %zu 个对象：新建 %zu · 覆盖 %zu"
+msgid_plural "已导入 %zu 个对象：新建 %zu · 覆盖 %zu"
+msgstr[0] "Imported %zu object: %zu new · %zu overwritten"
+msgstr[1] "Imported %zu objects: %zu new · %zu overwritten"
+
+#: linux/src/hb-settings-view.c:1516 linux/src/hb-settings-view.c:1535
+msgid "口令错误或文件已损坏"
+msgstr "Wrong passphrase or corrupt file"
+
+#: linux/src/hb-settings-view.c:1543
+#, c-format
+msgid ""
+"备份文件校验通过，包含 <b>%zu</b> 个对象（含密钥与密文）。导入将按对象覆盖同"
+"名数据。"
+msgid_plural ""
+"备份文件校验通过，包含 <b>%zu</b> 个对象（含密钥与密文）。导入将按对象覆盖同"
+"名数据。"
+msgstr[0] ""
+"Backup verified: <b>%zu</b> object (incl. keys and secrets). Importing "
+"overwrites same-id data."
+msgstr[1] ""
+"Backup verified: <b>%zu</b> objects (incl. keys and secrets). Importing "
+"overwrites same-id data."
+
+#: linux/src/hb-settings-view.c:1549 linux/src/hb-settings-view.c:1597
+#: linux/src/hb-settings-view.c:1695
+msgid "导入加密备份"
+msgstr "Import encrypted backup"
+
+#: linux/src/hb-settings-view.c:1600
+msgid "输入该备份的导出密码："
+msgstr "Enter this backup's export password:"
+
+#: linux/src/hb-settings-view.c:1611
+msgid "下一步"
+msgstr "Next"
+
+#: linux/src/hb-settings-view.c:1634 linux/src/hb-settings-view.c:1857
+msgid "无法读取备份文件"
+msgstr "Cannot read backup file"
+
+#: linux/src/hb-settings-view.c:1654
+msgid "导出加密备份"
+msgstr "Export encrypted backup"
+
+#: linux/src/hb-settings-view.c:1656
+msgid "备份包含全部主机、密钥与密文；密码用于 Argon2id 加密，遗失无法恢复。"
+msgstr ""
+"The backup covers all hosts, keys and secrets; the password feeds Argon2id — "
+"lose it and it cannot be recovered."
+
+#: linux/src/hb-settings-view.c:1676
+msgid "导出…"
+msgstr "Export…"
+
+#: linux/src/hb-settings-view.c:1717
+msgid "数据"
+msgstr "Data"
+
+#: linux/src/hb-settings-view.c:1718
+msgid "加密备份包含主机、密钥、密文与设置（.harbor-backup）。"
+msgstr ""
+"Encrypted backup covers hosts, keys, secrets and settings (.harbor-backup)."
+
+#: linux/src/hb-settings-view.c:1720
+msgid "导出加密备份…"
+msgstr "Export encrypted backup…"
+
+#: linux/src/hb-settings-view.c:1721
+msgid "导入备份…"
+msgstr "Import backup…"
+
+#: linux/src/hb-sftp-view.c:557
+msgid "左栏"
+msgstr "Left pane"
+
+#: linux/src/hb-sftp-view.c:557
+msgid "右栏"
+msgstr "Right pane"
+
+#: linux/src/hb-sftp-view.c:599
+msgid "过滤主机…"
+msgstr "Filter hosts…"
+
+#: linux/src/hb-sftp-view.c:618
+msgid "选择两端后可双栏互传（远端↔远端 / 远端↔本地）· 双击文件即开始传输"
+msgstr ""
+"Pick both sides to transfer between panes (remote↔remote / remote↔local) · "
+"double-click a file to transfer"
+
+#: linux/src/hb-sftp-view.c:812
+#, c-format
+msgid "读取目录失败: %s"
+msgstr "Failed to read directory: %s"
+
+#: linux/src/hb-sftp-view.c:813 linux/src/hb-sftp-view.c:1098
+msgid "未知错误"
+msgstr "Unknown error"
+
+#: linux/src/hb-sftp-view.c:1077
+msgid " · 上传"
+msgstr " · upload"
+
+#: linux/src/hb-sftp-view.c:1078
+msgid " · 下载"
+msgstr " · download"
+
+#: linux/src/hb-sftp-view.c:1088
+#, c-format
+msgid "已完成 · %s/s"
+msgstr "Done · %s/s"
+
+#: linux/src/hb-sftp-view.c:1092 linux/src/hb-watch-ui.c:282
+msgid "已完成"
+msgstr "Done"
+
+#: linux/src/hb-sftp-view.c:1094
+msgid "已跳过"
+msgstr "Skipped"
+
+#: linux/src/hb-sftp-view.c:1097
+#, c-format
+msgid "失败: %s"
+msgstr "Failed: %s"
+
+#: linux/src/hb-sftp-view.c:1118
+#, c-format
+msgid "传输队列 · %d 进行中"
+msgid_plural "传输队列 · %d 进行中"
+msgstr[0] "Transfer queue · %d active"
+msgstr[1] "Transfer queue · %d active"
+
+#: linux/src/hb-sftp-view.c:1157
+msgid "传输完成"
+msgstr "Transfer complete"
+
+#: linux/src/hb-sftp-view.c:1158
+msgid "传输已取消"
+msgstr "Transfer cancelled"
+
+#: linux/src/hb-sftp-view.c:1158 linux/src/hb-sftp-view.c:1258
+msgid "传输失败"
+msgstr "Transfer failed"
+
+#: linux/src/hb-sftp-view.c:1333
+msgid "无法生成重命名目标"
+msgstr "Cannot build rename target"
+
+#: linux/src/hb-sftp-view.c:1338
+msgid "目标是目录"
+msgstr "Target is a directory"
+
+#: linux/src/hb-sftp-view.c:1421 linux/src/hb-sftp-view.c:1487
+msgid "无法解析目标路径"
+msgstr "Cannot resolve target path"
+
+#: linux/src/hb-sftp-view.c:1718
+msgid "无法创建临时目录"
+msgstr "Cannot create temp directory"
+
+#: linux/src/hb-sftp-view.c:1800
+#, c-format
+msgid "「%s」已存在 — 将合并目录，按所选方式处理同名文件"
+msgstr ""
+"\"%s\" exists — the folders will merge and同名 files follow the chosen rule"
+
+#: linux/src/hb-sftp-view.c:1803
+#, c-format
+msgid "「%s」在对侧目录已存在。选择处理方式："
+msgstr "\"%s\" already exists on the other side. Choose how to handle it:"
+
+#: linux/src/hb-sftp-view.c:1809
+msgid "取消传输"
+msgstr "Cancel transfer"
+
+#: linux/src/hb-sftp-view.c:1810
+msgid "跳过"
+msgstr "Skip"
+
+#: linux/src/hb-sftp-view.c:1812 linux/src/hb-sftp-view.c:2694
+msgid "重命名"
+msgstr "Rename"
+
+#: linux/src/hb-sftp-view.c:1813
+msgid "覆盖"
+msgstr "Overwrite"
+
+#: linux/src/hb-sftp-view.c:1819
+msgid "对本次其余项目都适用"
+msgstr "Apply to the rest"
+
+#: linux/src/hb-sftp-view.c:1874 linux/src/hb-sftp-view.c:2235
+msgid "请先在对侧栏选择主机"
+msgstr "Pick a host in the other pane first"
+
+#: linux/src/hb-sftp-view.c:1949
+#, c-format
+msgid "操作失败: %s"
+msgstr "Operation failed: %s"
+
+#: linux/src/hb-sftp-view.c:1981
+msgid "新建文件夹"
+msgstr "New folder"
+
+#: linux/src/hb-sftp-view.c:2042
+#, c-format
+msgid "已删除 %u 个项目"
+msgid_plural "已删除 %u 个项目"
+msgstr[0] "Deleted %u item"
+msgstr[1] "Deleted %u items"
+
+#: linux/src/hb-sftp-view.c:2063
+#, c-format
+msgid "将递归删除 %u 个项目（含 %u 个目录）。删除后 9 秒内可撤销。"
+msgstr ""
+"Recursively delete %u items (incl. %u folders). Undo available for 9 s."
+
+#: linux/src/hb-sftp-view.c:2068
+msgid "删除项目"
+msgstr "Delete items"
+
+#: linux/src/hb-sftp-view.c:2088
+msgid "打开"
+msgstr "Open"
+
+#: linux/src/hb-sftp-view.c:2089
+msgid "复制到对侧栏"
+msgstr "Copy to other pane"
+
+#: linux/src/hb-sftp-view.c:2090
+msgid "重命名…"
+msgstr "Rename…"
+
+#: linux/src/hb-sftp-view.c:2092
+msgid "新建文件夹…"
+msgstr "New folder…"
+
+#: linux/src/hb-sftp-view.c:2093
+msgid "修改权限…"
+msgstr "Change permissions…"
+
+#: linux/src/hb-sftp-view.c:2094
+msgid "刷新"
+msgstr "Refresh"
+
+#: linux/src/hb-sftp-view.c:2095 linux/src/hb-terminal.c:1880
+msgid "全选"
+msgstr "Select all"
+
+#: linux/src/hb-sftp-view.c:2096
+msgid "显示隐藏文件"
+msgstr "Show hidden files"
+
+#: linux/src/hb-sftp-view.c:2459
+msgid "所有者"
+msgstr "Owner"
+
+#: linux/src/hb-sftp-view.c:2459
+msgid "组"
+msgstr "Group"
+
+#: linux/src/hb-sftp-view.c:2459
+msgid "其他"
+msgstr "Other"
+
+#: linux/src/hb-sftp-view.c:2477
+msgid "修改权限"
+msgstr "Permissions"
+
+#: linux/src/hb-sftp-view.c:2509
+msgid "八进制，如 755"
+msgstr "Octal, e.g. 755"
+
+#: linux/src/hb-sftp-view.c:2524
+msgid "应用"
+msgstr "Apply"
+
+#: linux/src/hb-sftp-view.c:2586
+#, c-format
+msgid "已修改 %s · 上传回远端"
+msgstr "Modified %s · upload back to remote"
+
+#: linux/src/hb-sftp-view.c:2594
+msgid "上传"
+msgstr "Upload"
+
+#: linux/src/hb-sftp-view.c:2613
+#, c-format
+msgid "下载失败: %s"
+msgstr "Download failed: %s"
+
+#: linux/src/hb-sftp-view.c:2664
+msgid "无法创建缓存目录"
+msgstr "Cannot create cache directory"
+
+#: linux/src/hb-sftp-view.c:2694
+msgid "新文件名"
+msgstr "New name"
+
+#: linux/src/hb-sftp-view.c:2748
+msgid "Filter"
+msgstr "Filter"
+
+#: linux/src/hb-sftp-view.c:2771
+msgid "过滤文件名…"
+msgstr "Filter file names…"
+
+#: linux/src/hb-sftp-view.c:2798
+msgid "上级目录"
+msgstr "Parent folder"
+
+#: linux/src/hb-sftp-view.c:2845
+msgid "Name"
+msgstr "Name"
+
+#: linux/src/hb-sftp-view.c:2846
+msgid "修改时间"
+msgstr "Modified"
+
+#: linux/src/hb-sftp-view.c:2847
+msgid "大小"
+msgstr "Size"
+
+#: linux/src/hb-sftp-view.c:2849
+msgid "权限"
+msgstr "Permissions"
+
+#: linux/src/hb-sftp-view.c:3078
+msgid "传输队列 · 0 进行中"
+msgstr "Transfer queue · 0 active"
+
+#: linux/src/hb-sftp-view.c:3086
+msgid "清空已完成"
+msgstr "Clear finished"
+
+#: linux/src/hb-share.c:363
+msgid "创建共享失败（服务器拒绝）"
+msgstr "Failed to create share (server refused)"
+
+#: linux/src/hb-share.c:394
+msgid "未登录：请先在账号页登录"
+msgstr "Not signed in — sign in on the account page first"
+
+#: linux/src/hb-share.c:400 linux/src/hb-share.c:875
+msgid "账号密钥不可用"
+msgstr "Account key unavailable"
+
+#: linux/src/hb-share.c:422
+msgid "引擎创建失败"
+msgstr "Failed to create engine"
+
+#: linux/src/hb-share.c:648
+msgid "获取共享列表失败"
+msgstr "Failed to list shares"
+
+#: linux/src/hb-share.c:683 linux/src/hb-sync.c:884 linux/src/hb-sync.c:908
+#: linux/src/hb-sync.c:1598 linux/src/hb-vault-page.c:190
+msgid "未登录"
+msgstr "Not signed in"
+
+#: linux/src/hb-share.c:869
+msgid "未登录或参数缺失"
+msgstr "Not signed in or missing parameter"
+
+#: linux/src/hb-share.c:890
+msgid "加入失败：无法解密共享信息"
+msgstr "Join failed: cannot decrypt share info"
+
+#: linux/src/hb-share.c:905
+msgid "需要链接和配对码"
+msgstr "Link and pairing code required"
+
+#: linux/src/hb-share.c:915
+msgid "链接或配对码无效"
+msgstr "Invalid link or pairing code"
+
+#: linux/src/hb-share-dialog.c:103
+msgid "可输入"
+msgstr "Can type"
+
+#: linux/src/hb-share-dialog.c:108
+msgid "移除"
+msgstr "Remove"
+
+#: linux/src/hb-share-dialog.c:368 linux/src/hb-share-view.c:121
+#: linux/src/hb-share-view.c:175
+msgid "仅观看"
+msgstr "Watch only"
+
+#: linux/src/hb-share-dialog.c:368 linux/src/hb-share-view.c:121
+#: linux/src/hb-share-view.c:175
+msgid "可协作输入"
+msgstr "Input allowed"
+
+#: linux/src/hb-share-dialog.c:386
+msgid "共享需要登录 Harbor 账号"
+msgstr "Sharing requires a Harbor account"
+
+#: linux/src/hb-share-dialog.c:387 linux/src/hb-share-view.c:375
+msgid "前往账号登录"
+msgstr "Go to account sign-in"
+
+#: linux/src/hb-share-dialog.c:397
+msgid "开启云端共享"
+msgstr "Enable cloud sharing"
+
+#: linux/src/hb-share-dialog.c:410
+msgid "参与权限"
+msgstr "Permissions"
+
+#: linux/src/hb-share-dialog.c:425
+msgid "共享链接"
+msgstr "Share link"
+
+#: linux/src/hb-share-dialog.c:445
+msgid "配对码"
+msgstr "Pairing code"
+
+#: linux/src/hb-share-dialog.c:450
+msgid "30 分钟内有效"
+msgstr "Valid for 30 minutes"
+
+#: linux/src/hb-share-dialog.c:452
+msgid "重新生成"
+msgstr "Regenerate"
+
+#: linux/src/hb-share-dialog.c:462
+msgid "参与者"
+msgstr "Participants"
+
+#: linux/src/hb-share-dialog.c:463
+msgid "还没有人加入"
+msgstr "Nobody has joined yet"
+
+#: linux/src/hb-share-dialog.c:468
+msgid "共享期间对方可以看到终端内容；可随时停止。端到端加密。"
+msgstr ""
+"The peer can see the terminal while sharing; stop anytime. End-to-end "
+"encrypted."
+
+#: linux/src/hb-share-dialog.c:473
+msgid "停止共享"
+msgstr "Stop sharing"
+
+#: linux/src/hb-share-owner.c:26 linux/src/hb-share-view.c:122
+msgid "共享中"
+msgstr "Sharing"
+
+#: linux/src/hb-share-owner.c:26 linux/src/hb-share-page.c:195
+#: linux/src/hb-share-view.c:122 linux/src/hb-ssh-page.c:789
+#: linux/src/hb-term-page.c:393
+msgid "共享"
+msgstr "Share"
+
+#: linux/src/hb-share-owner.c:62
+#, c-format
+msgid "%s 加入共享"
+msgstr "%s joined the share"
+
+#: linux/src/hb-share-owner.c:65
+#, c-format
+msgid "正在%s"
+msgstr "%s"
+
+#: linux/src/hb-share-owner.c:67
+msgid "协作"
+msgstr "Collaborate"
+
+#: linux/src/hb-share-owner.c:67
+msgid "观看"
+msgstr "Watch"
+
+#: linux/src/hb-share-owner.c:72
+#, c-format
+msgid "%s 离开"
+msgstr "%s left"
+
+#: linux/src/hb-share-page.c:52
+msgid "可协作"
+msgstr "Collaborative"
+
+#: linux/src/hb-share-page.c:87
+msgid "所有者已停止共享"
+msgstr "Owner stopped sharing"
+
+#: linux/src/hb-share-page.c:88
+msgid "已被移除"
+msgstr "Removed"
+
+#: linux/src/hb-share-page.c:89
+msgid "所有者已离线"
+msgstr "Owner went offline"
+
+#: linux/src/hb-share-page.c:90
+msgid "共享已过期"
+msgstr "Share expired"
+
+#: linux/src/hb-share-page.c:91 linux/src/hb-share-page.c:353
+msgid "共享已结束"
+msgstr "Share ended"
+
+#: linux/src/hb-share-page.c:131 linux/src/hb-share-page.c:134
+msgid "尝试次数过多，请让所有者重新生成配对码"
+msgstr "Too many attempts — ask the owner to regenerate the pairing code"
+
+#: linux/src/hb-share-page.c:137
+msgid "共享出错"
+msgstr "Share error"
+
+#: linux/src/hb-share-page.c:265
+#, c-format
+msgid "正在观看 %s"
+msgstr "Watching %s"
+
+#: linux/src/hb-share-page.c:276
+msgid "端到端加密"
+msgstr "End-to-end encrypted"
+
+#: linux/src/hb-share-page.c:282
+msgid "离开"
+msgstr "Leave"
+
+#: linux/src/hb-share-view.c:166
+#, c-format
+msgid "%ld 分钟前"
+msgid_plural "%ld 分钟前"
+msgstr[0] "%ld minute ago"
+msgstr[1] "%ld minutes ago"
+
+#: linux/src/hb-share-view.c:178 linux/src/hb-share-view.c:296
+msgid "加入"
+msgstr "Join"
+
+#: linux/src/hb-share-view.c:275 linux/src/hb-share-view.c:335
+msgid "通过配对码加入"
+msgstr "Join with pairing code"
+
+#: linux/src/hb-share-view.c:284
+msgid "粘贴共享链接："
+msgstr "Paste share link:"
+
+#: linux/src/hb-share-view.c:290
+msgid "6 位配对码："
+msgstr "6-digit pairing code:"
+
+#: linux/src/hb-share-view.c:351
+msgid "本机正在共享的会话"
+msgstr "Sessions shared from this device"
+
+#: linux/src/hb-share-view.c:356
+msgid "来自其它设备的共享（同账号自动发现）"
+msgstr "Shares from your other devices (auto-discovered on the same account)"
+
+#: linux/src/hb-share-view.c:357
+msgid "暂无可用共享"
+msgstr "No shares available"
+
+#: linux/src/hb-share-view.c:374
+msgid "登录 Harbor 账号后可共享会话或加入共享"
+msgstr "Sign in to share sessions or join a share"
+
+#: linux/src/hb-shortcuts.c:21
+msgid "命令面板"
+msgstr "Command palette"
+
+#: linux/src/hb-shortcuts.c:22
+msgid "命令面板（终端外）"
+msgstr "Command palette (outside terminals)"
+
+#: linux/src/hb-shortcuts.c:23
+msgid "在 scrollback 中搜索"
+msgstr "Search in scrollback"
+
+#: linux/src/hb-shortcuts.c:24
+msgid "搜索（终端外）"
+msgstr "Search (outside terminals)"
+
+#: linux/src/hb-shortcuts.c:25
+msgid "新建本地终端"
+msgstr "New local terminal"
+
+#: linux/src/hb-shortcuts.c:26 linux/src/hb-shortcuts.c:27
+msgid "关闭当前标签"
+msgstr "Close current tab"
+
+#: linux/src/hb-shortcuts.c:28 linux/src/hb-shortcuts.c:30
+msgid "下一个标签"
+msgstr "Next tab"
+
+#: linux/src/hb-shortcuts.c:29 linux/src/hb-shortcuts.c:31
+msgid "上一个标签"
+msgstr "Previous tab"
+
+#: linux/src/hb-shortcuts.c:32
+msgid "向右分屏"
+msgstr "Split right"
+
+#: linux/src/hb-shortcuts.c:33
+msgid "向下分屏"
+msgstr "Split down"
+
+#: linux/src/hb-shortcuts.c:34
+msgid "Focus 模式"
+msgstr "Focus mode"
+
+#: linux/src/hb-shortcuts.c:35
+msgid "焦点移到左侧 pane"
+msgstr "Focus pane left"
+
+#: linux/src/hb-shortcuts.c:36
+msgid "焦点移到右侧 pane"
+msgstr "Focus pane right"
+
+#: linux/src/hb-shortcuts.c:37
+msgid "焦点移到上方 pane"
+msgstr "Focus pane above"
+
+#: linux/src/hb-shortcuts.c:38
+msgid "焦点移到下方 pane"
+msgstr "Focus pane below"
+
+#: linux/src/hb-shortcuts.c:39 linux/src/hb-shortcuts.c:40
+msgid "跳到标签 N（1=Vault）"
+msgstr "Jump to tab N (1=Vault)"
+
+#: linux/src/hb-shortcuts.c:86
+msgid "已禁用"
+msgstr "Disabled"
+
+#: linux/src/hb-snippet-send.c:20 linux/src/hb-snippets-view.c:218
+#: linux/src/hb-snippets-view.c:419
+msgid "全局"
+msgstr "Global"
+
+#: linux/src/hb-snippet-send.c:92
+#, c-format
+msgid "将发送到 %u 个分屏"
+msgid_plural "将发送到 %u 个分屏"
+msgstr[0] "Will send to %u pane"
+msgstr[1] "Will send to %u panes"
+
+#: linux/src/hb-snippet-send.c:93
+msgid "Broadcast 已开启"
+msgstr "Broadcast on"
+
+#: linux/src/hb-snippet-send.c:93 linux/src/hb-snippet-send.c:192
+msgid "发送"
+msgstr "Send"
+
+#: linux/src/hb-snippet-send.c:162
+msgid "填写变量"
+msgstr "Fill variables"
+
+#: linux/src/hb-snippet-send.c:234
+msgid "Snippet 不存在"
+msgstr "Snippet does not exist"
+
+#: linux/src/hb-snippet-send.c:239 linux/src/hb-snippet-send.c:284
+msgid "没有活动终端"
+msgstr "No active terminal"
+
+#: linux/src/hb-snippets-view.c:130 linux/src/hb-snippets-view.c:412
+msgid "未命名"
+msgstr "Untitled"
+
+#: linux/src/hb-snippets-view.c:168
+msgid "编辑 Snippet"
+msgstr "Edit snippet"
+
+#: linux/src/hb-snippets-view.c:168 linux/src/hb-snippets-view.c:917
+msgid "新建 Snippet"
+msgstr "New snippet"
+
+#. 标题
+#: linux/src/hb-snippets-view.c:174
+msgid "标题"
+msgstr "Title"
+
+#: linux/src/hb-snippets-view.c:179
+msgid "重启服务"
+msgstr "Restart service"
+
+#. 正文
+#: linux/src/hb-snippets-view.c:186
+msgid "命令（支持 {{变量}} 占位）"
+msgstr "Command (supports {{variable}} placeholders)"
+
+#. 作用范围
+#: linux/src/hb-snippets-view.c:213
+msgid "作用范围"
+msgstr "Scope"
+
+#: linux/src/hb-snippets-view.c:219
+msgid "指定主机"
+msgstr "Chosen host"
+
+#: linux/src/hb-snippets-view.c:259
+msgid "分组名"
+msgstr "Group name"
+
+#: linux/src/hb-snippets-view.c:275
+msgid "执行（追加回车）"
+msgstr "Run (append Enter)"
+
+#: linux/src/hb-snippets-view.c:279
+msgid "发送后自动回车执行命令"
+msgstr "Press Enter after sending to run the command"
+
+#: linux/src/hb-snippets-view.c:343
+#, c-format
+msgid "已删除 Snippet「%s」"
+msgstr "Deleted snippet \"%s\""
+
+#: linux/src/hb-snippets-view.c:363
+#, c-format
+msgid "确定删除 <b>%s</b>？删除后 9 秒内可撤销。"
+msgstr "Delete <b>%s</b>? Undo available for 9 s."
+
+#: linux/src/hb-snippets-view.c:365
+msgid "删除 Snippet"
+msgstr "Delete snippet"
+
+#: linux/src/hb-snippets-view.c:482
+msgid "点击发送到当前终端"
+msgstr "Click to send to the current terminal"
+
+#: linux/src/hb-snippets-view.c:518
+msgid "无匹配 Snippet"
+msgstr "No matching snippets"
+
+#: linux/src/hb-snippets-view.c:518
+msgid "暂无 Snippet — 新建一个开始"
+msgstr "No snippets yet — create one to start"
+
+#: linux/src/hb-snippets-view.c:544
+msgid "读取文件失败"
+msgstr "Failed to read file"
+
+#: linux/src/hb-snippets-view.c:549
+#, c-format
+msgid "已导入 %zu 条 Snippet"
+msgstr "Imported %zu snippets"
+
+#: linux/src/hb-snippets-view.c:562
+msgid "导入 Snippets JSON"
+msgstr "Import snippets JSON"
+
+#: linux/src/hb-snippets-view.c:582
+msgid "Snippets 已导出"
+msgstr "Snippets exported"
+
+#: linux/src/hb-snippets-view.c:594
+msgid "导出 Snippets"
+msgstr "Export snippets"
+
+#: linux/src/hb-snippets-view.c:606
+msgid "刚刚"
+msgstr "just now"
+
+#: linux/src/hb-snippets-view.c:607
+#, c-format
+msgid "%d 分钟前"
+msgid_plural "%d 分钟前"
+msgstr[0] "%d minute ago"
+msgstr[1] "%d minutes ago"
+
+#: linux/src/hb-snippets-view.c:608
+#, c-format
+msgid "%d 小时前"
+msgid_plural "%d 小时前"
+msgstr[0] "%d hour ago"
+msgstr[1] "%d hours ago"
+
+#: linux/src/hb-snippets-view.c:610
+#, c-format
+msgid "%d 天前"
+msgid_plural "%d 天前"
+msgstr[0] "%d day ago"
+msgstr[1] "%d days ago"
+
+#: linux/src/hb-snippets-view.c:724
+msgid "转为 Snippet"
+msgstr "Turn into snippet"
+
+#. 全部
+#. Local
+#: linux/src/hb-snippets-view.c:779
+msgid "全部主机"
+msgstr "All hosts"
+
+#: linux/src/hb-snippets-view.c:826
+msgid "暂无命令历史"
+msgstr "No command history"
+
+#: linux/src/hb-snippets-view.c:860
+msgid "清空命令历史"
+msgstr "Clear command history"
+
+#: linux/src/hb-snippets-view.c:861
+msgid "确定删除全部 Shell History？此操作不可撤销。"
+msgstr "Delete all Shell History? This cannot be undone."
+
+#: linux/src/hb-snippets-view.c:906
+msgid "New snippet"
+msgstr "New snippet"
+
+#: linux/src/hb-snippets-view.c:954
+msgid "Shell History"
+msgstr "Shell History"
+
+#: linux/src/hb-snippets-view.c:965
+msgid "搜索 Snippets…"
+msgstr "Search snippets…"
+
+#: linux/src/hb-snippets-view.c:1007
+msgid "记录命令历史"
+msgstr "Record command history"
+
+#: linux/src/hb-snippets-view.c:1026
+msgid "同步"
+msgstr "Sync"
+
+#: linux/src/hb-snippets-view.c:1032 linux/src/hb-snippets-view.c:1034
+msgid "同步上线后可选"
+msgstr "Available once sync is live"
+
+#: linux/src/hb-snippets-view.c:1051
+msgid "搜索命令…"
+msgstr "Search commands…"
+
+#: linux/src/hb-snippets-view.c:1064
+msgid "清空历史"
+msgstr "Clear history"
+
+#: linux/src/hb-ssh-page.c:231 linux/src/hb-ssh-page.c:249
+#, c-format
+msgid "连接已断开 · %d 秒后重连（第 %d 次）"
+msgstr "Disconnected · reconnect in %d s (attempt %d)"
+
+#: linux/src/hb-ssh-page.c:253
+msgid "● 连接已断开"
+msgstr "● Disconnected"
+
+#: linux/src/hb-ssh-page.c:273 linux/src/hb-ssh-page.c:324
+#: linux/src/hb-term-page.c:68
+msgid "● 会话已结束"
+msgstr "● Session ended"
+
+#: linux/src/hb-ssh-page.c:306
+msgid "[重新连接…]"
+msgstr "[Reconnecting…]"
+
+#: linux/src/hb-ssh-page.c:380
+#, c-format
+msgid "终端通知 · %s"
+msgstr "Terminal notification · %s"
+
+#: linux/src/hb-ssh-page.c:381
+#, c-format
+msgid "%s 上的任务有新通知"
+msgstr "Task on %s has a new notification"
+
+#: linux/src/hb-ssh-page.c:402 linux/src/hb-term-page.c:151
+msgid "监控 关"
+msgstr "Monitor off"
+
+#: linux/src/hb-ssh-page.c:413 linux/src/hb-ssh-page.c:914
+#: linux/src/hb-term-page.c:157 linux/src/hb-term-page.c:453
+msgid "监控: 关"
+msgstr "Monitor: off"
+
+#: linux/src/hb-ssh-page.c:528
+msgid "[重新连接成功]"
+msgstr "[Reconnected]"
+
+#: linux/src/hb-ssh-page.c:530
+msgid "提示: 远端会话已丢失，建议在 tmux 内工作以便 attach 恢复"
+msgstr "note: remote session lost — work inside tmux so you can re-attach"
+
+#. 监控状态随（重）连重挂
+#: linux/src/hb-ssh-page.c:608 linux/src/hb-ssh-page.c:902
+msgid "● 连接中…"
+msgstr "● Connecting…"
+
+#: linux/src/hb-ssh-page.c:716 linux/src/hb-term-page.c:337
+#, c-format
+msgid "scrollback %s 行"
+msgstr "scrollback %s lines"
+
+#: linux/src/hb-ssh-page.c:778 linux/src/hb-term-page.c:381
+#: linux/src/hb-workspace.c:1043
+msgid "在 scrollback 中搜索 (Ctrl+Shift+F)"
+msgstr "Search in scrollback (Ctrl+Shift+F)"
+
+#: linux/src/hb-ssh-page.c:792 linux/src/hb-term-page.c:396
+msgid "共享会话（端到端加密）"
+msgstr "Shared sessions (end-to-end encrypted)"
+
+#: linux/src/hb-ssh-page.c:801
+msgid "重连"
+msgstr "Reconnect"
+
+#: linux/src/hb-ssh-page.c:816 linux/src/hb-ssh-page.c:820
+#: linux/src/hb-term-page.c:409 linux/src/hb-term-page.c:413
+msgid "分屏"
+msgstr "Split"
+
+#: linux/src/hb-ssh-page.c:823 linux/src/hb-term-page.c:416
+msgid "向右分屏  Ctrl+Shift+D"
+msgstr "Split right  Ctrl+Shift+D"
+
+#: linux/src/hb-ssh-page.c:828 linux/src/hb-term-page.c:421
+msgid "向下分屏  Ctrl+Shift+E"
+msgstr "Split down  Ctrl+Shift+E"
+
+#: linux/src/hb-ssh-page.c:880
+msgid "[连接已关闭]"
+msgstr "[connection closed]"
+
+#. 缓冲输入提示
+#: linux/src/hb-ssh-page.c:892
+msgid "输入将在重连后发送"
+msgstr "Input will be sent after reconnect"
+
+#: linux/src/hb-sync.c:305 linux/src/hb-sync.c:1270
+msgid "此设备已被吊销"
+msgstr "This device has been revoked"
+
+#: linux/src/hb-sync.c:306 linux/src/hb-sync.c:1271
+msgid "账号已退出，本地数据已擦除"
+msgstr "Signed out — local data wiped"
+
+#: linux/src/hb-sync.c:306 linux/src/hb-sync.c:1271
+msgid "账号已退出"
+msgstr "Signed out"
+
+#: linux/src/hb-sync.c:314
+msgid "登录已失效，请重新登录"
+msgstr "Session expired — sign in again"
+
+#: linux/src/hb-sync.c:580 linux/src/hb-sync.c:971
+msgid "无法连接服务器"
+msgstr "Cannot connect to server"
+
+#: linux/src/hb-sync.c:587
+msgid "请求过于频繁，请稍后再试"
+msgstr "Too many requests — try again later"
+
+#: linux/src/hb-sync.c:596
+msgid "两步验证码错误"
+msgstr "Incorrect two-factor code"
+
+#: linux/src/hb-sync.c:600
+msgid "邮箱、密码或恢复码错误"
+msgstr "Wrong email, password or recovery code"
+
+#: linux/src/hb-sync.c:605
+msgid "该邮箱已注册"
+msgstr "This email is already registered"
+
+#: linux/src/hb-sync.c:609 linux/src/hb-sync.c:1171 linux/src/hb-sync.c:1208
+msgid "服务器错误"
+msgstr "Server error"
+
+#: linux/src/hb-sync.c:634 linux/src/hb-sync.c:702 linux/src/hb-sync.c:745
+#: linux/src/hb-sync.c:777
+msgid "服务器响应异常"
+msgstr "Unexpected server response"
+
+#: linux/src/hb-sync.c:644 linux/src/hb-sync.c:679 linux/src/hb-sync.c:711
+#: linux/src/hb-sync.c:754 linux/src/hb-sync.c:823 linux/src/hb-sync.c:834
+#: linux/src/hb-sync.c:862 linux/src/hb-sync.c:1179
+msgid "内部错误"
+msgstr "Internal error"
+
+#: linux/src/hb-sync.c:796
+msgid "恢复码无效"
+msgstr "Invalid recovery code"
+
+#: linux/src/hb-sync.c:1122
+msgid "同步超时"
+msgstr "Sync timed out"
+
+#: linux/src/hb-sync.c:1134 linux/src/hb-sync.c:1600
+msgid "离线 · 重试中"
+msgstr "Offline · retrying"
+
+#: linux/src/hb-sync.c:1169 linux/src/hb-sync.c:1207
+msgid "网络错误"
+msgstr "Network error"
+
+#: linux/src/hb-sync.c:1238 linux/src/hb-sync.c:1599
+msgid "同步中…"
+msgstr "Syncing…"
+
+#: linux/src/hb-sync.c:1601
+msgid "错误"
+msgstr "Error"
+
+#: linux/src/hb-terminal.c:1879
+msgid "粘贴"
+msgstr "Paste"
+
+#: linux/src/hb-terminal.c:1881
+msgid "清除回滚"
+msgstr "Clear rollback"
+
+#: linux/src/hb-term-page.c:126
+msgid "终端通知 · Local"
+msgstr "Terminal notification · Local"
+
+#: linux/src/hb-term-page.c:127
+msgid "Local 上的任务有新通知"
+msgstr "New notification for a task on Local"
+
+#: linux/src/hb-term-page.c:532
+msgid "[进程已退出 · 按 Enter 重新启动]"
+msgstr "[process exited · press Enter to restart]"
+
+#: linux/src/hb-tray.c:118
+msgid "显示 Harbor"
+msgstr "Show Harbor"
+
+#: linux/src/hb-tray.c:120
+#, c-format
+msgid "%d 个会话在线"
+msgid_plural "%d 个会话在线"
+msgstr[0] "%d session online"
+msgstr[1] "%d sessions online"
+
+#: linux/src/hb-tray.c:122
+msgid "全部断开"
+msgstr "Disconnect all"
+
+#: linux/src/hb-tray.c:413
+#, c-format
+msgid "Harbor · %d 个会话在线"
+msgid_plural "Harbor · %d 个会话在线"
+msgstr[0] "Harbor · %d session online"
+msgstr[1] "Harbor · %d sessions online"
+
+#: linux/src/hb-vault-page.c:24
+msgid "Logs"
+msgstr "Logs"
+
+#: linux/src/hb-vault-page.c:75
+#, c-format
+msgid "%s · 该功能将在后续迭代中实现"
+msgstr "%s · coming in a later release"
+
+#: linux/src/hb-vault-page.c:194
+msgid "点击登录"
+msgstr "Click to sign in"
+
+#: linux/src/hb-watch-ui.c:219
+#, c-format
+msgid "耗时 %.1fs"
+msgstr "took %.1fs"
+
+#: linux/src/hb-watch-ui.c:220
+#, c-format
+msgid "耗时 %dm%02ds"
+msgstr "took %dm%02ds"
+
+#: linux/src/hb-watch-ui.c:279 linux/src/hb-watch-ui.c:285
+msgid "终端通知"
+msgstr "Terminal notifications"
+
+#: linux/src/hb-watch-ui.c:280 linux/src/hb-watch-ui.c:291
+msgid "会话任务完成"
+msgstr "Session task finished"
+
+#: linux/src/hb-watch-ui.c:280 linux/src/hb-watch-ui.c:291
+msgid "任务失败"
+msgstr "Task failed"
+
+#: linux/src/hb-watch-ui.c:281
+#, c-format
+msgid "%s 上的任务%s"
+msgstr "Task on %s%s"
+
+#: linux/src/hb-watch-ui.c:282
+msgid "有新通知"
+msgstr "New notifications"
+
+#: linux/src/hb-watch-ui.c:299
+msgid " — 可以进行下一步了"
+msgstr " — ready for the next step"
+
+#: linux/src/hb-watch-ui.c:365
+msgid "监控: "
+msgstr "Monitor: "
+
+#: linux/src/hb-watch-ui.c:370
+msgid "AI 预设"
+msgstr "AI presets"
+
+#: linux/src/hb-watch-ui.c:371
+msgid "空闲"
+msgstr "Idle"
+
+#: linux/src/hb-watch-ui.c:372
+msgid "通知"
+msgstr "Notifications"
+
+#: linux/src/hb-watch-ui.c:514
+#, c-format
+msgid "第 %d 行不是合法的 \"名称: 正则\"，或正则无法编译 —— 未保存"
+msgstr ""
+"Line %d is not a valid \"name: regex\" or the regex failed to compile — not "
+"saved"
+
+#: linux/src/hb-watch-ui.c:604
+#, c-format
+msgid "命中：%s (%s) — %s"
+msgstr "Hit: %s (%s) — %s"
+
+#: linux/src/hb-watch-ui.c:612
+msgid "未命中"
+msgstr "No hit"
+
+#: linux/src/hb-watch-ui.c:626 linux/src/hb-watch-ui.c:1185
+msgid "规则测试器"
+msgstr "Rule tester"
+
+#: linux/src/hb-watch-ui.c:632
+msgid "粘贴一段终端输出样例，用当前信号与规则跑一遍引擎。"
+msgstr ""
+"Paste a sample of terminal output to run the engine with current signals and "
+"rules."
+
+#: linux/src/hb-watch-ui.c:649
+msgid "样例不足 2 行，可能不具代表性"
+msgstr "Sample has under 2 lines — may not be representative"
+
+#: linux/src/hb-watch-ui.c:664
+msgid "测试"
+msgstr "Test"
+
+#: linux/src/hb-watch-ui.c:767
+#, c-format
+msgid ""
+"远端将执行：\n"
+"%s"
+msgstr ""
+"Will run on the remote:\n"
+"%s"
+
+#: linux/src/hb-watch-ui.c:774
+#, c-format
+msgid ""
+"将写入 %s 并向 %s 追加：\n"
+"%s"
+msgstr ""
+"Will write %s and append to %s:\n"
+"%s"
+
+#: linux/src/hb-watch-ui.c:805
+#, c-format
+msgid "无法创建 %s"
+msgstr "Cannot create %s"
+
+#: linux/src/hb-watch-ui.c:811 linux/src/hb-watch-ui.c:825
+#: linux/src/hb-watch-ui.c:842
+#, c-format
+msgid "无法写入 %s"
+msgstr "Cannot write %s"
+
+#: linux/src/hb-watch-ui.c:881
+msgid "会话不可用，无法写入远端"
+msgstr "Session unavailable — cannot write to remote"
+
+#: linux/src/hb-watch-ui.c:889
+msgid "已发送到远端 · 重新打开 shell 后生效"
+msgstr "Sent to remote — takes effect in a new shell"
+
+#: linux/src/hb-watch-ui.c:908
+#, c-format
+msgid ""
+"将在远端执行以下命令，请确认远端处于 shell 提示符：\n"
+"\n"
+"<tt>%s</tt>"
+msgstr ""
+"The following command will run on the remote — confirm it is at a shell "
+"prompt:\n"
+"\n"
+"<tt>%s</tt>"
+
+#: linux/src/hb-watch-ui.c:911 linux/src/hb-watch-ui.c:959
+msgid "安装 shell 集成"
+msgstr "Install shell integration"
+
+#: linux/src/hb-watch-ui.c:912
+msgid "执行"
+msgstr "Run"
+
+#: linux/src/hb-watch-ui.c:920
+msgid "已安装 · 重新打开 shell 后生效"
+msgstr "Installed — takes effect in a new shell"
+
+#: linux/src/hb-watch-ui.c:922
+msgid "安装失败"
+msgstr "Install failed"
+
+#: linux/src/hb-watch-ui.c:963
+msgid ""
+"OSC 133 标记让监控拿到精确的命令边界与退出码。将在远端 shell rc 中注入集成脚"
+"本（需确认远端在提示符下）。"
+msgstr ""
+"OSC 133 marks give the monitor exact command boundaries and exit codes. An "
+"integration script will be injected into the remote shell rc (confirm the "
+"remote is at a prompt)."
+
+#: linux/src/hb-watch-ui.c:965
+msgid ""
+"OSC 133 标记让监控拿到精确的命令边界与退出码。脚本写入 ~/.config/harbor/"
+"shell 并在 rc 中追加一行加载。"
+msgstr ""
+"OSC 133 marks give the monitor exact command boundaries and exit codes. The "
+"script is written to ~/.config/harbor/shell and one load line is appended to "
+"rc."
+
+#: linux/src/hb-watch-ui.c:1001
+msgid "安装"
+msgstr "Install"
+
+#: linux/src/hb-watch-ui.c:1027
+msgid "会话/进程结束（EOF）"
+msgstr "Session/process ended (EOF)"
+
+#: linux/src/hb-watch-ui.c:1027
+msgid "最强信号"
+msgstr "Strongest signal"
+
+#: linux/src/hb-watch-ui.c:1028
+msgid "OSC 133 shell 集成"
+msgstr "OSC 133 shell integration"
+
+#: linux/src/hb-watch-ui.c:1029
+msgid "含退出码，可区分成败"
+msgstr "Includes exit code — tells success from failure"
+
+#: linux/src/hb-watch-ui.c:1030
+msgid "AI CLI 输出预设"
+msgstr "AI CLI output presets"
+
+#: linux/src/hb-watch-ui.c:1031
+msgid "aider / 编译 / pytest / 下载等"
+msgstr "aider / builds / pytest / downloads etc."
+
+#: linux/src/hb-watch-ui.c:1032
+msgid "空闲启发式（输出≥10s 后静默≥5s）"
+msgstr "Idle heuristic (silent ≥5 s after ≥10 s of output)"
+
+#: linux/src/hb-watch-ui.c:1033
+msgid "兜底信号，置信度低"
+msgstr "Fallback signal, low confidence"
+
+#: linux/src/hb-watch-ui.c:1034
+msgid "终端通知（BEL · OSC 9/777）"
+msgstr "Terminal notifications (BEL · OSC 9/777)"
+
+#: linux/src/hb-watch-ui.c:1035
+msgid "应用主动请求的通知"
+msgstr "App-requested notifications"
+
+#: linux/src/hb-watch-ui.c:1054
+#, c-format
+msgid "会话监控 · %s"
+msgstr "Session monitor · %s"
+
+#: linux/src/hb-watch-ui.c:1066
+msgid "命中完成信号 → Tab 角标 + 通知中心 + 系统通知"
+msgstr ""
+"On completion signal → tab badge + notification center + system notification"
+
+#: linux/src/hb-watch-ui.c:1068
+msgid "<b>启用完成监控</b>"
+msgstr "<b>Enable completion monitoring</b>"
+
+#: linux/src/hb-watch-ui.c:1088
+msgid "完成信号（任一命中即提醒）"
+msgstr "Completion signals (notify on any hit)"
+
+#: linux/src/hb-watch-ui.c:1108
+msgid "自定义规则（正则，命中后需安静片刻确认）"
+msgstr "Custom rules (regex; a quiet moment confirms a hit)"
+
+#: linux/src/hb-watch-ui.c:1112
+msgid "每行一条：name: 正则 = 成功 · !name: 正则 = 失败 · # 开头为注释"
+msgstr ""
+"One per line: name: regex = success · !name: regex = failure · # = comment"
+
+#: linux/src/hb-watch-ui.c:1168
+msgid "聚焦本 Tab 时免打扰"
+msgstr "Do not disturb while this tab is focused"
+
+#: linux/src/hb-watch-ui.c:1169
+msgid "仅更新角标，不弹系统通知"
+msgstr "Badge only, no system notification"
+
+#: linux/src/hb-watch-ui.c:1174
+msgid "通知正文仅显示主机名"
+msgstr "Notification body shows only the hostname"
+
+#: linux/src/hb-watch-ui.c:1175
+msgid "隐藏命令与输出内容，防敏感外显"
+msgstr "Hide commands and output to avoid leaking sensitive content"
+
+#: linux/src/hb-watch-ui.c:1189
+msgid "安装 shell 集成…"
+msgstr "Installing shell integration…"
+
+#: linux/src/hb-watch-ui.c:1196
+msgid "完成"
+msgstr "Done"
+
+#: linux/src/hb-window.c:509
+msgid "暂无通知"
+msgstr "No notifications"
+
+#: linux/src/hb-window.c:510
+msgid "连接、任务与同步提醒会出现在这里"
+msgstr "Connection, task and sync alerts show up here"
+
+#: linux/src/hb-window.c:562
+msgid "通知中心"
+msgstr "Notification center"
+
+#: linux/src/hb-window.c:563
+msgid "全部已读"
+msgstr "Mark all read"
+
+#: linux/src/hb-window.c:650
+msgid "最多 6 个分屏"
+msgstr "At most 6 panes"
+
+#. 不会失败：<6
+#: linux/src/hb-window.c:672 linux/src/hb-window.c:764
+#: linux/src/hb-workspace.c:1033
+msgid "Workspace"
+msgstr "Workspace"
+
+#: linux/src/hb-window.c:792
+msgid "新建标签页"
+msgstr "New tab"
+
+#: linux/src/hb-window.c:812
+msgid "Workspace 分屏…"
+msgstr "Workspace split…"
+
+#: linux/src/hb-window.c:927
+msgid "切换侧栏"
+msgstr "Toggle sidebar"
+
+#: linux/src/hb-workspace.c:96
+#, c-format
+msgid "Workspace · %d 分屏"
+msgid_plural "Workspace · %d 分屏"
+msgstr[0] "Workspace · %d pane"
+msgstr[1] "Workspace · %d panes"
+
+#: linux/src/hb-workspace.c:212
+msgid "监控设置"
+msgstr "Monitor settings"
+
+#: linux/src/hb-workspace.c:219
+msgid "重新连接"
+msgstr "Reconnect"
+
+#: linux/src/hb-workspace.c:228
+msgid "关闭分屏 (Ctrl+Shift+W)"
+msgstr "Close pane (Ctrl+Shift+W)"
+
+#: linux/src/hb-workspace.c:768
+msgid "Broadcast 开"
+msgstr "Broadcast on"
+
+#: linux/src/hb-workspace.c:771 linux/src/hb-workspace.c:1048
+msgid "Broadcast"
+msgstr "Broadcast"
+
+#: linux/src/hb-workspace.c:870
+msgid "snippet"
+msgstr "snippet"
+
+#: linux/src/hb-workspace.c:888
+msgid "暂无匹配 Snippet"
+msgstr "No matching snippets"
+
+#: linux/src/hb-workspace.c:949
+msgid "主题"
+msgstr "Theme"
+
+#: linux/src/hb-workspace.c:964
+msgid "自动补全"
+msgstr "Autocomplete"
+
+#: linux/src/hb-workspace.c:1051
+msgid "向所有 pane 广播输入（各 pane 按自己的终端模式编码）"
+msgstr "Broadcast input to all panes (each encodes per its own terminal mode)"
+
+#: linux/src/hb-workspace.c:1055
+msgid "助手栏"
+msgstr "Assistant bar"
+
+#: linux/src/hb-workspace.c:1064
+msgid "Focus 模式：只看焦点 pane (Ctrl+Shift+M)"
+msgstr "Focus mode: only the focused pane (Ctrl+Shift+M)"
+
+#: linux/src/hb-workspace.c:1068
+msgid "Focus"
+msgstr "Focus"
+
+#: linux/src/hb-workspace.c:1231
+msgid "新建 Workspace"
+msgstr "New Workspace"
+
+#: linux/src/hb-workspace.c:1234
+msgid "选择 2–4 个分屏目标（并排一行）"
+msgstr "Pick 2–4 split targets (side by side)"
+
+#: linux/src/hb-workspace.c:1244
+msgid "Local · 本地终端"
+msgstr "Local · local terminal"
+
+#: linux/src/hb-workspace.c:1276
+msgid "创建 Workspace"
+msgstr "New Workspace"
+
+#~ msgid ""
+#~ "\r\n"
+#~ "e[2m[重新连接…]e[0m\r\n"
+#~ msgstr ""
+#~ "\r\n"
+#~ "e[2m[reconnecting…]e[0m\r\n"

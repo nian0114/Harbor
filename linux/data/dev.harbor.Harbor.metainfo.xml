@@ -3,6 +3,7 @@
   <id>dev.harbor.Harbor</id>
   <name>Harbor</name>
   <summary>SSH client and remote workspace</summary>
+  <summary xml:lang="zh_CN">SSH 客户端与远程工作台</summary>
   <!-- no LICENSE file in the repo → upstream license is proprietary;
        the metainfo file itself is FSFAP per AppStream convention -->
   <metadata_license>FSFAP</metadata_license>
@@ -14,6 +15,11 @@
       credentials and hosts, SSH and local terminals, SFTP file
       management, port forwarding, shared console sessions, remote
       desktop, and encrypted sync between devices.
+    </p>
+    <p xml:lang="zh_CN">
+      Harbor 是以终端为核心的远程工作台：保存凭据与主机的 Vault、
+      SSH 与本地终端、SFTP 文件管理、端口转发、共享控制台会话、
+      远程桌面，以及设备间的加密同步。
     </p>
   </description>
   <launchable type="desktop-id">dev.harbor.Harbor.desktop</launchable>
