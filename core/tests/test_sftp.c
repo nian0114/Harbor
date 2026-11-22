@@ -290,6 +290,24 @@ static void kill_session_child(void)
     pclose(f);
 }
 
+/* 同上但收集 pid 而非杀死 —— 供 SIGSTOP/SIGCONT 用 */
+static int session_child_pids(pid_t *out, int max)
+{
+    char cmd[256], pid_s[32];
+    FILE *f;
+    int n = 0;
+    snprintf(cmd, sizeof cmd,
+             "for p in $(pgrep -P %d); do pgrep -P $p; echo $p; done",
+             (int)fx.pid);
+    f = popen(cmd, "r");
+    if (!f)
+        return 0;
+    while (fscanf(f, "%31s", pid_s) == 1 && n < max)
+        out[n++] = (pid_t)atoi(pid_s);
+    pclose(f);
+    return n;
+}
+
 /* ------------------------------ 测试 ------------------------------ */
 
 /* T1+T2+T3+T5+T6+T7+T9：一个会话顺串 */
@@ -821,6 +839,49 @@ static void test_atomicity(void)
     sdrv_free(&d);
 }
 
+/* T12：服务器停摆不死线 —— SIGSTOP 会话子进程后传输必须在
+ * HB_SFTP_STALL_MS 量级内报 CONN 且会话可正常释放
+ *（libssh2 packet 等待无超时的兜底，上游 libssh2#690）。 */
+static void test_stall_bound(void)
+{
+    sdrv d;
+    hb_session *s;
+    hb_ssh_opts o = base_opts();
+    hb_sftp_result *r;
+    uint32_t q;
+    char big[PATH_MAX], rp[PATH_MAX];
+    pid_t kids[8];
+    int nk = 0, i;
+    int64_t t0;
+
+    sdrv_init(&d);
+    s = sftp_conn(&d, &o);
+    CHECK(s != NULL);
+    if (!s)
+        return;
+    joinp(big, sizeof big, LD, "big");
+    joinp(rp, sizeof rp, RD, "stall");
+    q = hb_sftp_upload(s, big, rp, HB_SFTP_OVERWRITE);
+    CHECK(q > 0);
+    usleep(400000);                     /* 让流水线跑起来 */
+
+    nk = session_child_pids(kids, 8);
+    for (i = 0; i < nk; i++)
+        kill(kids[i], SIGSTOP);         /* 服务器从此不应答 */
+
+    t0 = now_ms();
+    r = wait_done(s, &d, q, 60000);
+    CHECK(r && r->status == HB_SFTP_ERR_CONN);
+    CHECK(now_ms() - t0 < 40000);       /* STALL+ZCLEAN ≈23s；40s 内有界 */
+
+    /* 会话线程必须能 join —— hb_session_free 本身就是断言；
+     * teardown 不等停摆的服务器回包 */
+    hb_session_free(s);
+    for (i = 0; i < nk; i++)
+        kill(kids[i], SIGCONT);
+    sdrv_free(&d);
+}
+
 /* T8: 两级 ProxyJump SFTP */
 static void test_proxyjump(void)
 {
@@ -1028,6 +1089,7 @@ int main(void)
     test_safenames();
     test_main_ops();
     test_atomicity();
+    test_stall_bound();
     test_links();
     test_proxyjump();
 

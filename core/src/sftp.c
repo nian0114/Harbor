@@ -42,6 +42,12 @@
 #define CHUNK      (4 * 1024 * 1024) /* 传输块：libssh2 ≥1.10 内部按块
                                       大小做请求流水，大块吞吐高 */
 #define PROG_MS    100            /* 进度事件最小间隔 */
+#define HB_SFTP_ZCLEAN_MS 8000    /* 取消/出错清理的远端回包总死线：
+                                    通道停摆（服务器不再应答）时兜底，
+                                    柄与 channel 由拆除路径释放 */
+#define HB_SFTP_STALL_MS 15000    /* 单个在飞 op 零进展死线：libssh2 的
+                                    packet 等待无超时（上游 libssh2#690），
+                                    服务器静默时 EAGAIN 会永远续打 */
 #define DEF_CONC   3
 #define MAX_CONC   8
 
@@ -107,6 +113,7 @@ typedef struct xfr {                 /* 传输运行态 */
     LIBSSH2_SFTP_HANDLE *rh;
     uint8_t   buf[CHUNK];
     size_t    blen, boff;
+    int64_t   io0;                   /* 直调 EAGAIN 首堵时刻（停摆检测） */
     char     *part;                  /* 临时路径（远端或本地） */
     char     *fin;                   /* 当前探测中的最终目标 */
     char     *base;                  /* 期望目标（RENAME 变体基） */
@@ -143,6 +150,9 @@ struct sfreq {
     unsigned      nskip_link;        /* 跳过的符号链接（递归传输不跟随） */
     xfr          *x;
     /* 终态暂存 */
+    int64_t       z_dl;              /* 远端清理（关柄/shutdown）死线；
+                                        超时不等 —— 停摆通道上的句柄由
+                                        通道拆除兜底释放 */
     hb_sftp_status dst;
     char         *dmsg;              /* owned；NULL → status_msg(dst) */
     char         *dpath;             /* owned */
@@ -162,6 +172,7 @@ typedef struct {                     /* ctl 槽：一次一个在飞 */
     char     nbuf[8192];
     char     lbuf[2048];
     int      rc;
+    int64_t  t0;                     /* EAGAIN 首堵时刻（停摆检测） */
 } ctlop;
 
 typedef struct {
@@ -561,6 +572,7 @@ static int req_done(eng *e, sfreq *r, hb_sftp_status st, const char *msg)
                   : (st == HB_SFTP_OK ? NULL : strdup(status_msg(st)));
     if (st != HB_SFTP_OK)
         entry_clear(r->ents, r->nents), r->ents = NULL, r->nents = 0;
+    r->z_dl = hb_now_ms() + HB_SFTP_ZCLEAN_MS;
     r->st = ST_ZOM;
     return ST_WORK;
 }
@@ -584,6 +596,31 @@ static void io_rel(eng *e, sfreq *r)
 {
     if (e->io_owner == r)
         e->io_owner = NULL;
+}
+
+/* ctl op 在飞且回 EAGAIN：记首堵时刻。libssh2 的 packet 等待无超时
+ * （上游 libssh2#690），服务器静默时 ST_BLK 会永远持续 —— 超
+ * HB_SFTP_STALL_MS 放弃本 op：meta channel 停摆 = 会话判死
+ * （conn_dead → 会话层重建）；传输 channel 停摆则交给请求状态机
+ * 收尾（非清理态 → 立即按连接失败走清理；清理态内由 z_dl 兜底）。 */
+static int ctl_blk(eng *e)
+{
+    ctlop *c = &e->ctl;
+    sfreq *r = c->owner;
+    if (!c->t0) {
+        c->t0 = hb_now_ms();
+        return ST_BLK;
+    }
+    if (hb_now_ms() - c->t0 <= HB_SFTP_STALL_MS)
+        return ST_BLK;
+    ctl_drop(e, r);
+    if (c->sf == e->sf) {
+        e->conn_dead = true;
+        return ST_BLK;
+    }
+    if (r->is_xfer && r->st < X_Z_CLOSE)
+        return xfer_fail(e, r, HB_SFTP_ERR_CONN, NULL);
+    return ST_BLK;
 }
 
 static int ctl_pump(eng *e)
@@ -635,7 +672,7 @@ static int ctl_pump(eng *e)
                                     0, 0, LIBSSH2_SFTP_OPENDIR);
         if (!c->h && libssh2_session_last_errno(e->hp->sess)
                     == LIBSSH2_ERROR_EAGAIN)
-            return ST_BLK;          /* open 返回指针：NULL 也可能是 EAGAIN */
+            return ctl_blk(e);      /* open 返回指针：NULL 也可能是 EAGAIN */
         rc = c->h ? 0 : -1;
         break;
     case CTL_CLOSE:
@@ -651,7 +688,7 @@ static int ctl_pump(eng *e)
                                     LIBSSH2_SFTP_OPENFILE);
         if (!c->h && libssh2_session_last_errno(e->hp->sess)
                     == LIBSSH2_ERROR_EAGAIN)
-            return ST_BLK;
+            return ctl_blk(e);
         rc = c->h ? 0 : -1;
         break;
     case CTL_OPEN_W:
@@ -661,7 +698,7 @@ static int ctl_pump(eng *e)
                                     c->flags, LIBSSH2_SFTP_OPENFILE);
         if (!c->h && libssh2_session_last_errno(e->hp->sess)
                     == LIBSSH2_ERROR_EAGAIN)
-            return ST_BLK;
+            return ctl_blk(e);
         rc = c->h ? 0 : -1;
         break;
     case CTL_REALPATH:
@@ -679,7 +716,7 @@ static int ctl_pump(eng *e)
         break;
     }
     if (rc == LIBSSH2_ERROR_EAGAIN)
-        return ST_BLK;              /* 槽主不变 → 下次同参续打 */
+        return ctl_blk(e);          /* 槽主不变 → 下次同参续打 */
     c->rc = rc;
     c->owner = NULL;
     return ST_DONE;
@@ -798,11 +835,18 @@ static void req_free(sfreq *r)
 static int step_zombie(eng *e, sfreq *r)
 {
     if (r->stk && !e->conn_dead) {
-        if (ctl_do(e, r, CTL_CLOSE, NULL, NULL, 0, r->stk->dh, NULL)
-            == ST_BLK)
-            return ST_BLK;
-        stk_pop(r);
-        return ST_WORK;
+        if (hb_now_ms() > r->z_dl) {
+            /* 超时：不再等服务器回包，柄随通道拆除释放 */
+            ctl_drop(e, r);
+            while (r->stk)
+                stk_pop(r);
+        } else {
+            if (ctl_do(e, r, CTL_CLOSE, NULL, NULL, 0, r->stk->dh,
+                       NULL) == ST_BLK)
+                return ST_BLK;
+            stk_pop(r);
+            return ST_WORK;
+        }
     }
     emit_res(e, r, HB_SFTP_R_DONE, r->dst, r->dmsg);
     return ST_DONE;
@@ -1214,6 +1258,7 @@ static int xfer_fail(eng *e, sfreq *r, hb_sftp_status st, const char *msg)
     }
     if (st == HB_SFTP_ERR_CONN)
         e->conn_dead = true;
+    r->z_dl = hb_now_ms() + HB_SFTP_ZCLEAN_MS;
     r->st = X_Z_CLOSE;
     return ST_WORK;
 }
@@ -1280,6 +1325,19 @@ static size_t xfer_wcall_cap(eng *e)
     return 256 * 1024;
 }
 
+/* 传输 channel 停摆检测：libssh2 的 packet 等待无超时，服务器静默
+ * 时 EAGAIN 会永久续打。HB_SFTP_STALL_MS 零进展按连接死处理；
+ * io0 在每次实际进展（非 EAGAIN 返回）时清零。 */
+static bool xfer_stalled(sfreq *r)
+{
+    xfr *x = r->x;
+    if (!x->io0) {
+        x->io0 = hb_now_ms();
+        return false;
+    }
+    return hb_now_ms() - x->io0 > HB_SFTP_STALL_MS;
+}
+
 static int xfer_step(eng *e, sfreq *r)
 {
     xfr *x = r->x;
@@ -1297,11 +1355,14 @@ static int xfer_step(eng *e, sfreq *r)
         if (!x->sf) {
             if (libssh2_session_last_errno(e->hp->sess)
                 == LIBSSH2_ERROR_EAGAIN) {
+                if (xfer_stalled(r))
+                    return xfer_fail(e, r, HB_SFTP_ERR_CONN, NULL);
                 io_take(e, r);
                 return ST_BLK;
             }
             return xfer_fail(e, r, last_err(e, e->sf), NULL);
         }
+        x->io0 = 0;
         io_rel(e, r);
         r->st = X_LSTAT_SRC;
         return ST_WORK;
@@ -1731,10 +1792,14 @@ static int xfer_step(eng *e, sfreq *r)
                                    x->blen - x->boff > cap
                                        ? cap : x->blen - x->boff);
             }
-            if (n == LIBSSH2_ERROR_EAGAIN)
+            if (n == LIBSSH2_ERROR_EAGAIN) {
+                if (xfer_stalled(r))
+                    return xfer_fail(e, r, HB_SFTP_ERR_CONN, NULL);
                 return ST_BLK;
+            }
             if (n < 0)
                 return xfer_fail(e, r, last_err(e, x->sf), NULL);
+            x->io0 = 0;
             x->boff += (size_t)n;
             x->done += (uint64_t)n;
             e->h->ka_last_in = hb_now_ms();
@@ -1743,10 +1808,14 @@ static int xfer_step(eng *e, sfreq *r)
         }
         n = libssh2_sftp_read(x->rh, (char *)x->buf,
                               xfer_call_cap(e));
-        if (n == LIBSSH2_ERROR_EAGAIN)
+        if (n == LIBSSH2_ERROR_EAGAIN) {
+            if (xfer_stalled(r))
+                return xfer_fail(e, r, HB_SFTP_ERR_CONN, NULL);
             return ST_BLK;
+        }
         if (n < 0)
             return xfer_fail(e, r, last_err(e, x->sf), NULL);
+        x->io0 = 0;
         if (n == 0) {
             r->st = X_CLOSE_R;
             return ST_WORK;
@@ -1898,8 +1967,9 @@ ren_ok:
     case X_Z_SFTP:
         /* 拆本传输的 sftp channel；含 channel_close → 独占。channel
          * close 是传输层控制消息，不依赖 SFTP 字节流完整性（上面的
-         * 柄是故意不 FXP_CLOSE 的）。 */
-        if (x->sf && !e->conn_dead) {
+         * 柄是故意不 FXP_CLOSE 的）。清理死线已过 → 不再等：
+         * channel 对象由 req_free 的尽力而为 shutdown 兜底。 */
+        if (x->sf && !e->conn_dead && hb_now_ms() <= r->z_dl) {
             if (e->io_owner && e->io_owner != r)
                 return ST_BLK;
             if (libssh2_sftp_shutdown(x->sf) == LIBSSH2_ERROR_EAGAIN) {
@@ -1947,6 +2017,7 @@ static void req_cancel(eng *e, sfreq *r)
         r->dst = HB_SFTP_ERR_CANCELLED;
         free(r->dmsg);
         r->dmsg = strdup(status_msg(HB_SFTP_ERR_CANCELLED));
+        r->z_dl = hb_now_ms() + HB_SFTP_ZCLEAN_MS;
         r->st = X_Z_CLOSE;
     } else {
         req_done(e, r, HB_SFTP_ERR_CANCELLED, NULL);
