@@ -198,7 +198,7 @@ static void menu_call(GDBusConnection *c, const gchar *sender,
         GVariantIter *it;
         GVariantBuilder out;
         gint id;
-        g_variant_get(params, "(^ai^as)", &it, NULL);
+        g_variant_get(params, "(aias)", &it, NULL);
         g_variant_builder_init(&out, G_VARIANT_TYPE("a(ia{sv})"));
         while (g_variant_iter_next(it, "i", &id)) {
             if (id >= 0 && id <= M_QUIT)
