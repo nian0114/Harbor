@@ -40,6 +40,14 @@ static const char *SCHEMA =
     "CREATE TABLE IF NOT EXISTS recovery("
     " hash TEXT PRIMARY KEY, account_id TEXT NOT NULL,"
     " expires INTEGER NOT NULL);"
+    "CREATE TABLE IF NOT EXISTS shares("
+    " share_id TEXT PRIMARY KEY,"
+    " account_id TEXT NOT NULL, owner_device TEXT NOT NULL,"
+    " meta BLOB NOT NULL, created INTEGER NOT NULL,"
+    " guest_expires INTEGER NOT NULL,"
+    " ended INTEGER NOT NULL DEFAULT 0, ended_reason TEXT,"
+    " pake_fails INTEGER NOT NULL DEFAULT 0,"
+    " locked INTEGER NOT NULL DEFAULT 0);"
     "PRAGMA user_version=1;";
 
 sqlite3 *hbd_open(const char *dir, GError **err)
@@ -527,4 +535,178 @@ int hbd_object_put(sqlite3 *db, const char *acct, const char *id,
     rc = sqlite3_step(st);
     sqlite3_finalize(st);
     return rc == SQLITE_DONE ? 0 : -1;
+}
+
+/* ============================ shares ============================ */
+
+void hbd_share_free(HbShare *s)
+{
+    if (!s) return;
+    g_free(s->share_id); g_free(s->account_id); g_free(s->owner_device);
+    g_free(s->meta); g_free(s->ended_reason);
+    memset(s, 0, sizeof *s);
+}
+
+int hbd_share_insert(sqlite3 *db, const HbShare *s)
+{
+    sqlite3_stmt *st = prep(
+        db, "INSERT INTO shares(share_id,account_id,owner_device,meta,"
+            "created,guest_expires) VALUES(?,?,?,?,?,?)");
+    int rc;
+    sqlite3_bind_text(st, 1, s->share_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, s->account_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, s->owner_device, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_blob(st, 4, s->meta, (int)s->meta_n, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 5, s->created);
+    sqlite3_bind_int64(st, 6, s->guest_expires);
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    if (rc == SQLITE_DONE) return 0;
+    if (rc == SQLITE_CONSTRAINT) return 2;
+    return -1;
+}
+
+static void share_row(sqlite3_stmt *st, HbShare *out)
+{
+    memset(out, 0, sizeof *out);
+    out->share_id = g_strdup((const char *)sqlite3_column_text(st, 0));
+    out->account_id = g_strdup((const char *)sqlite3_column_text(st, 1));
+    out->owner_device = g_strdup((const char *)sqlite3_column_text(st, 2));
+    out->meta_n = (size_t)sqlite3_column_bytes(st, 3);
+    out->meta = g_memdup2(sqlite3_column_blob(st, 3), out->meta_n);
+    out->created = sqlite3_column_int64(st, 4);
+    out->guest_expires = sqlite3_column_int64(st, 5);
+    out->ended = sqlite3_column_int(st, 6);
+    out->ended_reason =
+        g_strdup((const char *)sqlite3_column_text(st, 7));
+    out->pake_fails = sqlite3_column_int(st, 8);
+    out->locked = sqlite3_column_int(st, 9);
+}
+
+#define SHARE_COLS \
+    "share_id,account_id,owner_device,meta,created,guest_expires," \
+    "ended,ended_reason,pake_fails,locked"
+
+int hbd_share_get(sqlite3 *db, const char *id, HbShare *out)
+{
+    sqlite3_stmt *st = prep(db, "SELECT " SHARE_COLS
+                              " FROM shares WHERE share_id=?");
+    sqlite3_bind_text(st, 1, id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) != SQLITE_ROW) {
+        sqlite3_finalize(st);
+        return HB_SRV_NOT_FOUND;
+    }
+    share_row(st, out);
+    sqlite3_finalize(st);
+    return 0;
+}
+
+GArray *hbd_share_list(sqlite3 *db, const char *acct)
+{
+    sqlite3_stmt *st = prep(db, "SELECT " SHARE_COLS " FROM shares"
+                              " WHERE account_id=? AND ended=0"
+                              " ORDER BY created");
+    GArray *a = g_array_new(FALSE, TRUE, sizeof(HbShare));
+    sqlite3_bind_text(st, 1, acct, -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        HbShare s;
+        share_row(st, &s);
+        g_array_append_val(a, s);
+    }
+    sqlite3_finalize(st);
+    return a;
+}
+
+void hbd_shares_free(GArray *arr)
+{
+    guint i;
+    if (!arr) return;
+    for (i = 0; i < arr->len; i++)
+        hbd_share_free(&g_array_index(arr, HbShare, i));
+    g_array_free(arr, TRUE);
+}
+
+int hbd_share_set_meta(sqlite3 *db, const char *id,
+                       const uint8_t *meta, size_t n)
+{
+    sqlite3_stmt *st = prep(db, "UPDATE shares SET meta=?"
+                              " WHERE share_id=?");
+    int rc;
+    sqlite3_bind_blob(st, 1, meta, (int)n, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, id, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? 0 : -1;
+}
+
+int hbd_share_end(sqlite3 *db, const char *id, const char *reason)
+{
+    sqlite3_stmt *st = prep(db, "UPDATE shares SET ended=1,ended_reason=?"
+                              " WHERE share_id=? AND ended=0");
+    int rc;
+    sqlite3_bind_text(st, 1, reason, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, id, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? 0 : -1;
+}
+
+int hbd_share_guest_reset(sqlite3 *db, const char *id, int64_t exp)
+{
+    sqlite3_stmt *st = prep(db, "UPDATE shares SET guest_expires=?,"
+                              " pake_fails=0,locked=0 WHERE share_id=?");
+    int rc;
+    sqlite3_bind_int64(st, 1, exp);
+    sqlite3_bind_text(st, 2, id, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE ? 0 : -1;
+}
+
+int hbd_share_pake_fail(sqlite3 *db, const char *id, int *locked_out)
+{
+    sqlite3_stmt *st;
+    int fails = -1, locked = 0;
+    st = prep(db, "UPDATE shares SET pake_fails=pake_fails+1"
+                " WHERE share_id=?");
+    sqlite3_bind_text(st, 1, id, -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    st = prep(db, "SELECT pake_fails,locked FROM shares WHERE share_id=?");
+    sqlite3_bind_text(st, 1, id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        fails = sqlite3_column_int(st, 0);
+        locked = sqlite3_column_int(st, 1);
+    }
+    sqlite3_finalize(st);
+    if (fails >= 5 && !locked) {
+        locked = 1;
+        st = prep(db, "UPDATE shares SET locked=1 WHERE share_id=?");
+        sqlite3_bind_text(st, 1, id, -1, SQLITE_TRANSIENT);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+    }
+    if (locked_out) *locked_out = locked;
+    return fails;
+}
+
+int hbd_share_end_all(sqlite3 *db)
+{
+    return sqlite3_exec(db,
+        "UPDATE shares SET ended=1,ended_reason='owner_gone' WHERE ended=0",
+        NULL, NULL, NULL) == SQLITE_OK
+               ? 0
+               : -1;
+}
+
+char *hbd_device_name(sqlite3 *db, const char *id)
+{
+    sqlite3_stmt *st = prep(db, "SELECT name FROM devices WHERE id=?");
+    char *out = NULL;
+    sqlite3_bind_text(st, 1, id, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW)
+        out = g_strdup((const char *)sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+    if (!out) out = g_strdup("");
+    return out;
 }

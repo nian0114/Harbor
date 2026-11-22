@@ -13,3 +13,10 @@ test_server_e2e = executable('test_server_e2e', 'test_server_e2e.c',
                    glib_dep],
 )
 test('server-e2e', test_server_e2e, timeout: 120)
+
+test_server_share = executable('test_server_share', 'test_server_share.c',
+    c_args: server_bin,
+    dependencies: [harbor_core_dep, soup_dep, jsonglib_dep, gio_dep,
+                   glib_dep, srv_sqlite_dep, srv_sodium_dep],
+)
+test('share-relay', test_server_share, timeout: 300)

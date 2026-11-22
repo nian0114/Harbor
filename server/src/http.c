@@ -1411,6 +1411,17 @@ static gboolean ws_delayed_close(gpointer p)
     return G_SOURCE_REMOVE;
 }
 
+void hb_ws_notify_shares(hb_srv *srv, const char *account)
+{
+    guint i;
+    for (i = 0; i < srv->sockets->len; i++) {
+        WsClient *c = g_ptr_array_index(srv->sockets, i);
+        if (!strcmp(c->account_id, account))
+            soup_websocket_connection_send_text(c->conn,
+                                                "{\"t\":\"shares\"}");
+    }
+}
+
 void hb_ws_notify_revoked(hb_srv *srv, const char *device_id, bool wipe)
 {
     guint i;
@@ -1500,6 +1511,7 @@ void http_attach(hb_srv *srv)
         { "/v1/devices", h_devices },
         { "/v1/totp", h_totp },
         { "/v1/objects", h_objects },
+        { "/v1/shares", h_shares },
     };
     static RouteDef defs[G_N_ELEMENTS(routes)];
     size_t i;
@@ -1519,5 +1531,6 @@ void http_attach(hb_srv *srv)
                                   NULL);
     soup_server_add_websocket_handler(srv->soup, "/v1/ws", NULL, NULL,
                                       ws_connected, srv, NULL);
+    relay_attach(srv);
 }
 

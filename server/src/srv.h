@@ -142,6 +142,39 @@ int     hbd_object_put(sqlite3 *db, const char *acct, const char *id,
                        const char *type, int64_t seq, const uint8_t *blob,
                        size_t bn, int64_t updated_at);
 
+/* ---- share 登记与 relay（docs/api/share-protocol.md §2/§4/§6） ---- */
+
+typedef struct {
+    char    *share_id, *account_id, *owner_device;
+    uint8_t *meta;
+    size_t   meta_n;
+    int64_t  created, guest_expires;
+    int      ended;
+    char    *ended_reason;
+    int      pake_fails;
+    int      locked;
+} HbShare;
+
+/* 插入：0 成功 / 2 share_id 已存在 / -1 其它错误。 */
+int      hbd_share_insert(sqlite3 *db, const HbShare *s);
+/* 0 + out（hbd_share_free）/ NOT_FOUND。 */
+int      hbd_share_get(sqlite3 *db, const char *id, HbShare *out);
+/* 本账号 ended=0 的共享（GArray of HbShare，hbd_shares_free）。 */
+GArray  *hbd_share_list(sqlite3 *db, const char *acct);
+void     hbd_shares_free(GArray *arr);
+void     hbd_share_free(HbShare *s);
+int      hbd_share_set_meta(sqlite3 *db, const char *id,
+                            const uint8_t *meta, size_t n);
+int      hbd_share_end(sqlite3 *db, const char *id, const char *reason);
+/* guest 解锁：guest_expires=exp、pake_fails=0、locked=0。 */
+int      hbd_share_guest_reset(sqlite3 *db, const char *id, int64_t exp);
+/* pake_fails+1 并返回新值；≥5 时落 locked=1（*locked_out 可 NULL）。 */
+int      hbd_share_pake_fail(sqlite3 *db, const char *id, int *locked_out);
+/* 启动清扫：所有未结束共享标记 ended(owner_gone)。 */
+int      hbd_share_end_all(sqlite3 *db);
+/* member joined 消息的 device 名称。malloc'd，不存在 → ""。 */
+char    *hbd_device_name(sqlite3 *db, const char *id);
+
 /* ---- server context ---- */
 
 struct hb_srv {
@@ -157,6 +190,7 @@ struct hb_srv {
     int         hash_queue;     /* 排队+运行中任务上限（--hash-queue） */
     gint        hash_pending;   /* 原子计数 */
     GPtrArray  *sockets;        /* WsClient* */
+    GHashTable *sh_rooms;       /* share_id → ShareRoom（relay.c） */
     SoupServer *soup;
     GMainLoop  *loop;
     guint       log_level;      /* 0 err 1 warn 2 info 3 debug */
@@ -193,7 +227,13 @@ bool hb_rate_limited(hb_srv *srv, SoupServerMessage *msg);
 /* WebSocket 注册/通知（main loop）。 */
 void hb_ws_notify_changed(hb_srv *srv, const char *account, int64_t seq);
 void hb_ws_notify_revoked(hb_srv *srv, const char *device_id, bool wipe);
+void hb_ws_notify_shares(hb_srv *srv, const char *account);
 void hb_ws_client_free(WsClient *c);
 void http_attach(hb_srv *srv);
+/* relay.c：/v1/shares REST + /v1/share/<id>/ws Relay。 */
+void h_shares(hb_srv *srv, SoupServerMessage *msg, const char *path,
+              GHashTable *query);
+void relay_attach(hb_srv *srv);
+void relay_end_share(hb_srv *srv, const char *share_id, const char *reason);
 
 #endif

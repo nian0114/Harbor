@@ -135,6 +135,8 @@ int main(int argc, char **argv)
         g_printerr("%s\n", err->message);
         return 1;
     }
+    /* 重启后无 owner 连接：全部进行中共享标记结束（§4）。 */
+    hbd_share_end_all(srv->db);
     /* 未知邮箱登录按 dummy hash 等时校验（防账号探测） */
     if (crypto_pwhash_str(srv->dummy_hash, "harbor-dummy", 12,
                           crypto_pwhash_OPSLIMIT_INTERACTIVE,
