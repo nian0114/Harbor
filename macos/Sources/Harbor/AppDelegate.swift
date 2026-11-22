@@ -8,6 +8,16 @@ final class App: NSObject, NSApplicationDelegate {
     #if DEBUG
     var dev: DevServer?
     #endif
+    func applicationWillFinishLaunching(_ n: Notification) {
+        // 自己的 tab 模型；关掉系统窗口恢复（崩溃历史弹窗会阻塞无头测试）。
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
+        #if DEBUG
+        // 在 didFinish（系统恢复弹窗会阻塞它）之前先起 dev.sock。
+        if ProcessInfo.processInfo.environment["HARBOR_DEV_ACTIONS"] == "1" {
+            dev = DevServer(win: nil)
+        }
+        #endif
+    }
     func applicationDidFinishLaunching(_ n: Notification) {
         buildMenus()
         win = MainWindow()
@@ -15,9 +25,11 @@ final class App: NSObject, NSApplicationDelegate {
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         #if DEBUG
-        if ProcessInfo.processInfo.environment["HARBOR_DEV_ACTIONS"] == "1" {
+        if dev == nil,
+           ProcessInfo.processInfo.environment["HARBOR_DEV_ACTIONS"] == "1" {
             dev = DevServer(win: win)
         }
+        dev?.win = win
         #endif
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ a: NSApplication)

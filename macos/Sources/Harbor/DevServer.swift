@@ -9,10 +9,10 @@ import HarborKit
 final class DevServer {
     private var fd: Int32 = -1
     private var src: DispatchSourceRead?
-    private weak var win: MainWindow?
+    weak var win: MainWindow?
     let path: String
 
-    init?(win: MainWindow) {
+    init?(win: MainWindow?) {
         self.win = win
         path = Vault.shared.dataDir.appendingPathComponent("dev.sock").path
         unlink(path)
@@ -60,10 +60,24 @@ final class DevServer {
                     while let eol = buf.firstIndex(of: "\n") {
                         let line = String(buf[..<eol])
                         buf.removeSubrange(...eol)
-                        let resp = self?.handle(line) ?? "ERR"
-                        resp.withCString { _ = Darwin.write(cfd, $0,
-                                                            strlen($0)) }
-                        _ = Darwin.write(cfd, "\n", 1)
+                        let resp = (self?.handle(line) ?? "ERR") + "\n"
+                        resp.withCString { ptr in
+                            var off = 0, n = strlen(ptr)
+                            while off < n {
+                                let w = Darwin.write(cfd, ptr + off,
+                                                     n - off)
+                                if w > 0 { off += w; continue }
+                                // cfd 非阻塞：EAGAIN 时等可写
+                                if w < 0 && errno == EAGAIN {
+                                    var p = pollfd(fd: cfd,
+                                                   events: Int16(POLLOUT),
+                                                   revents: 0)
+                                    _ = poll(&p, 1, 5000)
+                                    continue
+                                }
+                                break
+                            }
+                        }
                     }
                 }
                 s.setCancelHandler { }
@@ -102,6 +116,30 @@ final class DevServer {
         case "set":    return cmdSet(arg)
         case "state":  return cmdState()
         case "gridinfo": return cmdGridInfo()
+        case "dialogs": return DialogRegistry.shared.json
+        case "dialog-fill":
+            let kv = arg.split(separator: " ", maxSplits: 1)
+            guard kv.count == 2,
+                  let d = Data(base64Encoded: String(kv[1])),
+                  let txt = String(data: d, encoding: .utf8) else {
+                return "ERR usage: dialog-fill <field> <base64>" }
+            return DialogRegistry.shared.fill(field: String(kv[0]),
+                                              text: txt) ? "OK" : "ERR no field"
+        case "dialog-press":
+            return DialogRegistry.shared.press(arg) ? "OK" : "ERR no button"
+        case "click":    return cmdClick(arg)
+        case "dismiss-modal": return cmdDismissModal()
+        case "hosts":    return cmdHosts()
+        case "import-sshcfg": return cmdImportCfg(arg)
+        case "connect":  return cmdConnect(arg)
+        case "search":   return cmdSearch(arg)
+        case "host-set": return cmdHostSet(arg)
+        case "kc-gen":   return cmdKcGen(arg)
+        case "kc-import": return cmdKcImport(arg)
+        case "kc-list":  return cmdKcList()
+        case "kc-del":   return cmdKcDel(arg)
+        case "kc-sel":   return cmdKcSel(arg)
+        case "host-sel": return cmdHostSel(arg)
         default: return "ERR unknown"
         }
     }
@@ -118,7 +156,20 @@ final class DevServer {
         else { return "ERR png" }
         do { try png.write(to: URL(fileURLWithPath: path)) }
         catch { return "ERR write" }
-        return "OK \(path)"
+        // 有 sheet/alert 也渲染出来（<path>.sheet.png）
+        var extra = ""
+        if let sh = win?.attachedSheet, let cv = sh.contentView {
+            if let r2 = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) {
+                cv.cacheDisplay(in: cv.bounds, to: r2)
+                if let p2 = r2.representation(using: .png,
+                                              properties: [:]) {
+                    try? p2.write(to: URL(fileURLWithPath:
+                                          path + ".sheet.png"))
+                    extra = " +sheet"
+                }
+            }
+        }
+        return "OK \(path)\(extra)"
     }
     private func cmdAction(_ arg: String) -> String {
         // 按 identifier 查找并触发菜单项/已注册动作
@@ -269,6 +320,230 @@ final class DevServer {
         ]
         let d = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data()
         return "OK " + (String(data: d, encoding: .utf8) ?? "{}")
+    }
+
+    /// 点击任意带 accessibilityIdentifier 的控件（含对话框按钮）。
+    private func cmdClick(_ arg: String) -> String {
+        if DialogRegistry.shared.press(arg) { return "OK" }
+        guard let w = win else { return "ERR no window" }
+        if clickIn(w.contentView, arg) { return "OK" }
+        return "ERR no such control"
+    }
+    private func clickIn(_ v: NSView?, _ id: String) -> Bool {
+        guard let v else { return false }
+        for s in v.subviews {
+            if let c = s as? NSControl, c.accessibilityIdentifier() == id {
+                if let b = c as? NSButton { b.performClick(nil) }
+                else { c.sendAction(c.action, to: c.target) }
+                return true
+            }
+            if clickIn(s, id) { return true }
+        }
+        return false
+    }
+
+    /// vault 中全部主机 → JSON
+    private func cmdHosts() -> String {
+        var arr: [[String: Any]] = []
+        for o in Vault.shared.list("host") {
+            var tags: [String] = []
+            var sv: UnsafeMutablePointer<UnsafePointer<CChar>?>?
+            let nt = hb_obj_get_strv(o, "tags", &sv)
+            for i in 0..<nt { if let t = sv?[i] { tags.append(t.str) } }
+            free(sv)
+            var jumps: [String] = []
+            let nj = hb_obj_get_strv(o, "jump", &sv)
+            for i in 0..<nj { if let j = sv?[i] { jumps.append(j.str) } }
+            free(sv)
+            arr.append(["id": hb_obj_id(o).str,
+                        "name": hb_obj_get_str(o, "name").str,
+                        "address": hb_obj_get_str(o, "address").str,
+                        "port": hb_obj_get_int(o, "port", 22),
+                        "user": hb_obj_get_str(o, "user").str,
+                        "group": hb_obj_get_str(o, "group").str,
+                        "os": hb_obj_get_str(o, "os").str,
+                        "auth": hb_obj_get_str(o, "auth").str,
+                        "key_id": hb_obj_get_str(o, "key_id").str,
+                        "identity_file": hb_obj_get_str(o, "identity_file").str,
+                        "tags": tags, "jump": jumps])
+            hb_obj_free(o)
+        }
+        let d = try? JSONSerialization.data(withJSONObject: arr)
+        return "OK " + (d.flatMap { String(data: $0, encoding: .utf8) } ?? "[]")
+    }
+
+    /// 导入指定路径的 ssh config（测试用，非 ~/.ssh/config）。
+    private func cmdImportCfg(_ arg: String) -> String {
+        guard let hp = win?.contentView?.findPage(HostsPage.self) else {
+            // 未在主机页 → 直接走 core
+            var cfg = hb_sshcfg()
+            guard hb_sshcfg_parse_file(arg, &cfg) == HB_OK,
+                  let vv = Vault.shared.vault else { return "ERR parse" }
+            var r = hb_import_result()
+            let e = hb_hosts_import_sshcfg(vv, &cfg, &r)
+            let n = Int(r.created) + Int(r.jumps_created)
+            hb_import_result_free(&r); hb_sshcfg_free(&cfg)
+            return e == HB_OK ? "OK \(n)" : "ERR import"
+        }
+        hp.importSSHConfig(path: arg)
+        return "OK"
+    }
+
+    /// dev 连接：`connect <host-id|user@host:port>` → 新 SSH tab。
+    private func cmdConnect(_ arg: String) -> String {
+        guard let w = win else { return "ERR no window" }
+        let isId = !arg.contains("@") && !arg.contains(":")
+            && Vault.shared.get(arg) != nil
+        if isId {
+            let h = Vault.shared.get(arg)!
+            let title = hb_obj_get_str(h, "name").str
+            hb_obj_free(h)
+            w.openSSH(hostId: arg, quickTarget: nil,
+                      title: title.isEmpty ? arg : title)
+        } else {
+            w.openSSH(hostId: nil, quickTarget: arg, title: arg)
+        }
+        return "OK"
+    }
+
+    /// 关闭任意系统/应用 modal（如崩溃恢复提示）：按默认按钮。
+    private func page<T: NSView>(_ t: T.Type) -> T? {
+        win?.contentView?.findPage(t)
+    }
+    /// `search <q>` → 过滤耗时(ms)
+    private func cmdSearch(_ arg: String) -> String {
+        guard let p = page(HostsPage.self) else { return "ERR no page" }
+        let t0 = CFAbsoluteTimeGetCurrent()
+        p.devSearch(arg)
+        let ms = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+        return String(format: "OK %.1fms", ms)
+    }
+    /// `host-set <id> <field> <value>` — 直接写 host 字段（测试用）
+    private func cmdHostSet(_ arg: String) -> String {
+        let kv = arg.split(separator: " ", maxSplits: 2)
+        guard kv.count == 3, let o = Vault.shared.get(String(kv[0]))
+        else { return "ERR" }
+        if ["keepalive", "port"].contains(kv[1]),
+           let i = Int64(kv[2]) {
+            hb_obj_set_int(o, String(kv[1]), i)
+        } else {
+            hb_obj_set_str(o, String(kv[1]), String(kv[2]))
+        }
+        Vault.shared.put(o); hb_obj_free(o)
+        page(HostsPage.self)?.reload()
+        return "OK"
+    }
+    /// `kc-gen <type> <name> [pass-b64]`：生成密钥入 vault（同 KeychainPage 路径）
+    private func cmdKcGen(_ arg: String) -> String {
+        let kv = arg.split(separator: " ")
+        guard kv.count >= 2 else { return "ERR usage" }
+        let t: hb_key_type; var bits: Int32 = 0
+        switch kv[0] {
+        case "rsa": t = HB_KEY_RSA; bits = 3072
+        case "ecdsa": t = HB_KEY_ECDSA_P256
+        default: t = HB_KEY_ED25519
+        }
+        var k = hb_key_info()
+        let e = String(kv[1]).withCString {
+            hb_key_generate(t, bits, $0, &k) }
+        guard e == HB_OK else { return "ERR gen" }
+        defer { hb_key_info_clear(&k) }
+        let o = hb_obj_new("key")!
+        let kid = hb_obj_id(o).str
+        hb_obj_set_str(o, "name", String(kv[1]))
+        hb_obj_set_str(o, "keytype", k.kind.str)
+        hb_obj_set_int(o, "bits", Int64(k.bits))
+        hb_obj_set_str(o, "fingerprint", k.fingerprint)
+        hb_obj_set_str(o, "public", k.public_line)
+        hb_obj_set_str(o, "created",
+                       "\(Int64(Date().timeIntervalSince1970))")
+        Vault.shared.put(o)
+        if let p = k.private_text {
+            Vault.shared.setSecret(kid, "private", p.str) }
+        // 导入口令不落库：首次使用时询问，由“记住”保存（与 Linux 一致）
+        page(KeychainPage.self)?.reload()
+        return "OK \(kid)"
+    }
+    /// `kc-import <path> [pass-b64]`
+    private func cmdKcImport(_ arg: String) -> String {
+        let kv = arg.split(separator: " ")
+        guard !kv.isEmpty else { return "ERR" }
+        var pass = ""
+        if kv.count > 1, let d = Data(base64Encoded: String(kv[1])) {
+            pass = String(data: d, encoding: .utf8) ?? ""
+        }
+        var k = hb_key_info()
+        let e = pass.withCString {
+            hb_key_inspect_file(String(kv[0]),
+                                pass.isEmpty ? nil : $0, &k) }
+        guard e == HB_OK else { return "ERR \(e.rawValue)" }
+        defer { hb_key_info_clear(&k) }
+        let o = hb_obj_new("key")!
+        let kid = hb_obj_id(o).str
+        let base = URL(fileURLWithPath: String(kv[0]))
+            .deletingPathExtension().lastPathComponent
+        hb_obj_set_str(o, "name", k.comment.str.isEmpty
+                       ? base : k.comment.str)
+        hb_obj_set_str(o, "keytype", k.kind.str)
+        hb_obj_set_int(o, "bits", Int64(k.bits))
+        hb_obj_set_str(o, "fingerprint", k.fingerprint)
+        hb_obj_set_str(o, "public", k.public_line)
+        hb_obj_set_bool(o, "encrypted", k.encrypted)
+        Vault.shared.put(o)
+        if let p = k.private_text {
+            Vault.shared.setSecret(kid, "private", p.str) }
+        // 导入口令不落库：首次使用时询问，由“记住”保存（与 Linux 一致）
+        page(KeychainPage.self)?.reload()
+        return "OK \(kid)"
+    }
+    private func cmdKcList() -> String {
+        var arr: [[String: Any]] = []
+        for o in Vault.shared.list("key") {
+            arr.append(["id": hb_obj_id(o).str,
+                        "name": hb_obj_get_str(o, "name").str,
+                        "type": hb_obj_get_str(o, "keytype").str,
+                        "bits": hb_obj_get_int(o, "bits", 0),
+                        "fp": hb_obj_get_str(o, "fingerprint").str,
+                        "public": hb_obj_get_str(o, "public").str])
+            hb_obj_free(o)
+        }
+        let d = try? JSONSerialization.data(withJSONObject: arr)
+        return "OK " + (d.flatMap { String(data: $0, encoding: .utf8) }
+                        ?? "[]")
+    }
+    /// `kc-del <id>`：走级联删除核心 API（无对话框）
+    private func cmdKcDel(_ arg: String) -> String {
+        guard let vv = Vault.shared.vault else { return "ERR" }
+        var refs: UnsafeMutablePointer<hb_key_ref>?
+        var n = 0
+        let e = arg.withCString {
+            hb_vault_delete_key_cascade(vv, $0, &refs, &n) }
+        if let refs { hb_key_refs_free(refs, n) }
+        page(KeychainPage.self)?.reload()
+        page(HostsPage.self)?.reload()
+        return e == HB_OK ? "OK refs=\(n)" : "ERR \(e.rawValue)"
+    }
+    /// `kc-sel <id>`：选中凭据行（供 kc-delete 按钮用）
+    private func cmdKcSel(_ arg: String) -> String {
+        guard let p = page(KeychainPage.self)
+        else { return "ERR no page" }
+        return p.devSelect(id: arg) ? "OK" : "ERR no item"
+    }
+    /// `host-sel <id>`：选中主机行（供双击/菜单用）
+    private func cmdHostSel(_ arg: String) -> String {
+        guard let p = page(HostsPage.self)
+        else { return "ERR no page" }
+        return p.devSelect(id: arg) ? "OK" : "ERR no host"
+    }
+    private func cmdDismissModal() -> String {
+        for w in NSApp.windows where w !== win && w.isVisible {
+            if let cell = w.defaultButtonCell {
+                cell.performClick(nil)
+                return "OK clicked"
+            }
+        }
+        NSApp.stopModal()
+        return "OK"
     }
 }
 #endif

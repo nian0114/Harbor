@@ -21,6 +21,12 @@ LINK=$(tr '\n' ' ' < "$LINKTXT" | tr -d '\\' | tr ' ' '\n' | grep -v '^-pthread$
 
 # 2. swift build
 cd "$PKG"
+if [ "${1:-}" = "--test" ]; then
+    # swift test 也要链接 core：复用同一 link line。
+    LINKF=$(for t in $LINK; do printf -- "-Xlinker %s " "$t"; done)
+    swift test $LINKF
+    exit $?
+fi
 if [ "${1:-}" = "--release" ]; then
     swift build -c release --arch x86_64 --arch arm64 \
         $(for t in $LINK; do printf -- "-Xlinker %s " "$t"; done)
