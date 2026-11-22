@@ -73,3 +73,22 @@ final class DEKPlanTests: XCTestCase {
         XCTAssertTrue(DEKPlan.describe(42).contains("42"))
     }
 }
+
+final class HostModelTests: XCTestCase {
+    func testFuzzy() {
+        XCTAssertTrue(HostRec.fuzzy("hw", "Hello World"))
+        XCTAssertTrue(HostRec.fuzzy("", "anything"))
+        XCTAssertFalse(HostRec.fuzzy("hx", "Hello"))
+        XCTAssertTrue(HostRec.fuzzy("zx", "zhostx"))
+    }
+    func testMatch() {
+        var h = HostRec(id: "1")
+        h.name = "web-01"; h.address = "10.0.0.5"; h.group = "prod"
+        h.tags = ["nginx", "edge"]
+        XCTAssertTrue(h.match("web"))
+        XCTAssertTrue(h.match("10.0"))
+        XCTAssertTrue(h.match("nginx"))
+        XCTAssertTrue(h.match("prod"))
+        XCTAssertFalse(h.match("db"))
+    }
+}
