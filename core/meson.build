@@ -12,6 +12,12 @@ crypto_dep = dependency('libcrypto')
 thread_dep = dependency('threads')
 util_dep = cc.find_library('util', required: false)
 
+# NLS：dgettext 在 glibc/libintl 可用时启用 HB_TR() 翻译（msgid 是中文）。
+core_c_args = []
+if cc.has_function('dgettext', prefix: '#include <libintl.h>')
+    core_c_args += '-DENABLE_NLS'
+endif
+
 # FR-07 远程桌面后端（第三方头按 system include，头内 deprecated 成员不算我们告警）
 vncclient_dep = dependency('libvncclient', include_type: 'system')
 freerdp_deps = [dependency('freerdp-client3', include_type: 'system'),
@@ -48,6 +54,7 @@ harbor_core_lib = static_library('harbor-core',
     'src/share.c',
     'src/bip39_words.c',
     include_directories: [core_inc, cjson_inc, core_priv_inc],
+    c_args: core_c_args,
     link_whole: cjson_lib,
     dependencies: [sqlite3_dep, sodium_dep, vterm_dep, ssh2_dep, crypto_dep,
                    thread_dep, util_dep, vncclient_dep] + freerdp_deps,

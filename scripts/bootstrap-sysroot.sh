@@ -21,6 +21,7 @@ SEEDS=(
     freerdp3-dev libwinpr3-dev
     libjson-glib-dev libsoup-3.0-dev libsecret-1-dev
     libglib2.0-dev libglib2.0-dev-bin
+    gettext
     xvfb xauth xfonts-base
     zsh fish
 )

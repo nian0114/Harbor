@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "harbor/backup.h"
+#include <glib/gi18n.h>
 
 #define SAVE_DEBOUNCE_MS 150
 
@@ -56,6 +57,9 @@ struct _HbSettingsView {
     GtkWidget   *blink_sw, *osc52_sw;
     GtkWidget   *tray_sw, *login_sw;
     GtkWidget   *ui_dd;         /* 外观：浅色/深色/跟随系统 */
+    GtkWidget   *lang_dd;       /* 语言：跟随系统/中文/English */
+    GtkWidget   *lang_restart;  /* 语言变更后的重启提示行 */
+    char        *lang_applied;  /* 本次会话实际生效的语言 */
     GPtrArray   *sc_rows;       /* ScRow*，快捷键编辑行 */
     GtkWidget   *sftp_spin;
     GtkWidget   *pv_view;       /* .hb-term-view.theme-* 容器 */
@@ -162,6 +166,7 @@ static void apply_preview(HbSettingsView *v)
 }
 
 static const char *cur_ui_theme(const HbSettingsView *v);
+static const char *cur_lang(const HbSettingsView *v);
 static void sc_refresh_all(HbSettingsView *v);
 
 static gboolean save_cb(gpointer ud)
@@ -190,6 +195,7 @@ static gboolean save_cb(gpointer ud)
         hb_obj_set_bool(o, "start_at_login",
             gtk_switch_get_active(GTK_SWITCH(v->login_sw)));
         hb_obj_set_str(o, "ui_theme", cur_ui_theme(v));
+        hb_obj_set_str(o, "language", cur_lang(v));
         hb_vault_put(hb_store_vault(v->store), o);
         hb_obj_free(o);
     }
@@ -218,6 +224,79 @@ static void on_ui_dd(GtkDropDown *dd, GParamSpec *ps, gpointer ud)
     (void)dd; (void)ps;
     save_cb(v);                      /* 先落库，apply_theme 读得到新值 */
     hb_application_apply_theme();
+}
+
+/* FR-15 语言：settings.language（device-local）。gettext/LANGUAGE 在
+ * 启动时装配，运行中切换不热生效 → 显示重启提示行。 */
+static const char *const LANG_IDS[] = { "system", "zh_CN", "en" };
+
+static const char *cur_lang(const HbSettingsView *v)
+{
+    guint s = gtk_drop_down_get_selected(GTK_DROP_DOWN(v->lang_dd));
+    return s < G_N_ELEMENTS(LANG_IDS) ? LANG_IDS[s] : "system";
+}
+
+static void on_restart_clicked(GtkButton *b, gpointer ud)
+{
+    HbSettingsView *v = ud;
+    char *exe = g_file_read_link("/proc/self/exe", NULL);
+    (void)b;
+    if (exe) {
+        char *argv[] = { exe, NULL };
+        GError *err = NULL;
+        if (g_spawn_async(NULL, argv, NULL, G_SPAWN_DEFAULT,
+                          NULL, NULL, NULL, &err)) {
+            g_application_quit(g_application_get_default());
+        } else {
+            hb_toast(GTK_WIDGET(v), err->message);
+            g_clear_error(&err);
+        }
+        g_free(exe);
+    }
+}
+
+static void on_lang_dd(GtkDropDown *dd, GParamSpec *ps, gpointer ud)
+{
+    HbSettingsView *v = ud;
+    (void)dd; (void)ps;
+    if (v->updating)
+        return;
+    save_cb(v);
+    gtk_widget_set_visible(v->lang_restart,
+        g_strcmp0(cur_lang(v), v->lang_applied) != 0);
+}
+
+void hb_settings_view_lang_dev(HbSettingsView *v, const char *id)
+{
+    size_t i;
+    for (i = 0; i < G_N_ELEMENTS(LANG_IDS); i++)
+        if (!strcmp(LANG_IDS[i], id))
+            gtk_drop_down_set_selected(GTK_DROP_DOWN(v->lang_dd),
+                                     (guint)i);
+}
+
+void hb_settings_view_lang_restart_dev(HbSettingsView *v)
+{
+    on_restart_clicked(NULL, v);
+}
+
+gboolean hb_settings_view_lang_restart_visible(HbSettingsView *v)
+{
+    return gtk_widget_get_visible(v->lang_restart);
+}
+
+void hb_settings_view_scroll_frac_dev(HbSettingsView *v, double frac)
+{
+    GtkWidget *c;
+    for (c = gtk_widget_get_first_child(GTK_WIDGET(v)); c;
+         c = gtk_widget_get_next_sibling(c))
+        if (GTK_IS_SCROLLED_WINDOW(c)) {
+            GtkAdjustment *a =
+                gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(c));
+            gtk_adjustment_set_value(a,
+                gtk_adjustment_get_upper(a) * frac);
+            return;
+        }
 }
 
 /* ------------------------------------------------------------------ */
@@ -339,6 +418,7 @@ static void refresh(HbSettingsView *v)
     int sb = 10000;
     gboolean blink = TRUE, osc52 = FALSE;
     gboolean ctt = TRUE, sal = FALSE;
+    const char *lang = NULL;
     size_t i;
 
     if (hb_vault_settings(hb_store_vault(v->store), &o) == HB_OK && o) {
@@ -352,8 +432,10 @@ static void refresh(HbSettingsView *v)
         ctt = hb_obj_get_bool(o, "close_to_tray", true);
         sal = hb_obj_get_bool(o, "start_at_login", false);
         uit = hb_obj_get_str(o, "ui_theme");
+        lang = hb_obj_get_str(o, "language");
     }
     if (!uit || !*uit) uit = "light";
+    if (!lang || !*lang) lang = "system";
     if (!theme || !*theme) theme = "harbor";
     if (!family || !*family) family = "Monospace";
 
@@ -408,6 +490,14 @@ static void refresh(HbSettingsView *v)
         for (i = 0; i < G_N_ELEMENTS(UI_THEME_IDS); i++)
             if (!strcmp(UI_THEME_IDS[i], uit)) sel = (guint)i;
         gtk_drop_down_set_selected(GTK_DROP_DOWN(v->ui_dd), sel);
+    }
+    {
+        guint sel = 0;
+        for (i = 0; i < G_N_ELEMENTS(LANG_IDS); i++)
+            if (!strcmp(LANG_IDS[i], lang)) sel = (guint)i;
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(v->lang_dd), sel);
+        if (!v->lang_applied)
+            v->lang_applied = g_strdup(lang);
     }
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(v->sftp_spin),
         CLAMP((double)hb_obj_get_int(o, "sftp_concurrency", 3), 1, 8));
@@ -1131,6 +1221,45 @@ static void hb_settings_view_init(HbSettingsView *v)
         gtk_box_append(GTK_BOX(grp), row);
         g_signal_connect(v->ui_dd, "notify::selected",
                          G_CALLBACK(on_ui_dd), v);
+
+        row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        t = gtk_label_new(_("语言"));
+        gtk_label_set_xalign(GTK_LABEL(t), 0);
+        gtk_widget_add_css_class(t, "sl-title");
+        gtk_box_append(GTK_BOX(col), t);
+        gtk_widget_set_hexpand(col, TRUE);
+        gtk_box_append(GTK_BOX(row), col);
+        {
+            const char *lbls[] = { _("跟随系统"), "中文", "English", NULL };
+            v->lang_dd = gtk_drop_down_new_from_strings(
+                (const char * const *)lbls);
+        }
+        gtk_widget_set_valign(v->lang_dd, GTK_ALIGN_CENTER);
+        gtk_box_append(GTK_BOX(row), v->lang_dd);
+        gtk_widget_add_css_class(row, "check-row");
+        gtk_box_append(GTK_BOX(grp), row);
+        g_signal_connect(v->lang_dd, "notify::selected",
+                         G_CALLBACK(on_lang_dd), v);
+
+        v->lang_restart = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        gtk_widget_set_visible(v->lang_restart, FALSE);
+        gtk_widget_add_css_class(v->lang_restart, "check-row");
+        {
+            GtkWidget *msg = gtk_label_new(_("重启 Harbor 后生效"));
+            GtkWidget *btn = gtk_button_new_with_label(_("重启"));
+            gtk_label_set_xalign(GTK_LABEL(msg), 0);
+            gtk_widget_add_css_class(msg, "hb-dim");
+            gtk_widget_set_hexpand(msg, TRUE);
+            gtk_widget_set_valign(msg, GTK_ALIGN_CENTER);
+            gtk_widget_set_valign(btn, GTK_ALIGN_CENTER);
+            gtk_widget_add_css_class(btn, "suggested-action");
+            gtk_box_append(GTK_BOX(v->lang_restart), msg);
+            gtk_box_append(GTK_BOX(v->lang_restart), btn);
+            g_signal_connect(btn, "clicked",
+                             G_CALLBACK(on_restart_clicked), v);
+        }
+        gtk_box_append(GTK_BOX(grp), v->lang_restart);
     }
 
     /* ===== 底部：系统托盘与启动 ===== */
@@ -1630,6 +1759,7 @@ static void hb_settings_view_finalize(GObject *o)
 {
     HbSettingsView *v = HB_SETTINGS_VIEW(o);
     g_free(v->pv_theme_id);
+    g_free(v->lang_applied);
     g_clear_pointer(&v->sc_rows, g_ptr_array_unref);
     G_OBJECT_CLASS(hb_settings_view_parent_class)->finalize(o);
 }

@@ -26,3 +26,9 @@ void hb_settings_view_import_backup_dev(HbSettingsView *v,
                                         const char *path);
 gboolean hb_settings_view_sc_dev(HbSettingsView *v, size_t idx,
                                  const char *accel);
+
+/* 语言行的程序化入口（dev-ui / 测试）。 */
+void hb_settings_view_lang_dev(HbSettingsView *v, const char *id);
+void hb_settings_view_lang_restart_dev(HbSettingsView *v);
+gboolean hb_settings_view_lang_restart_visible(HbSettingsView *v);
+void hb_settings_view_scroll_frac_dev(HbSettingsView *v, double frac);

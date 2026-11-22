@@ -1,4 +1,6 @@
 #include <adwaita.h>
+#include <libintl.h>
+#include <locale.h>
 #include "hb-application.h"
 
 /* dev/截图选项（hb-application.c 读取） */
@@ -49,6 +51,11 @@ int main(int argc, char **argv)
     };
     GOptionContext *ctx;
     GError *err = NULL;
+
+    setlocale(LC_ALL, "");
+    bindtextdomain("harbor", HB_LOCALEDIR);
+    bind_textdomain_codeset("harbor", "UTF-8");
+    textdomain("harbor");
 
     adw_init();
 

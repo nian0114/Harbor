@@ -146,7 +146,7 @@ mkdeb() {
 mkdeb harbor harbor \
     "SSH client and remote workspace (GTK4/libadwaita).
  Terminal, SFTP, port forwarding, remote desktop, shared consoles." \
-    "usr/share/applications usr/share/metainfo usr/share/icons"
+    "usr/share/applications usr/share/metainfo usr/share/icons usr/share/locale"
 
 # harbor-server 包：服务器二进制 + systemd 用户单元示例
 mkdeb harbor-server harbor-server \

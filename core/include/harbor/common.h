@@ -23,6 +23,20 @@ typedef enum {
 
 const char *hb_strerror(hb_err e);
 
+/* 用户可见文案翻译：msgid 即中文原文，en 目录提供英文。
+ * 构建带 NLS（libintl/dgettext 可用）时经 domain "harbor" 查表，
+ * 否则原样返回中文。core 不调用 setlocale —— 由进程入口（如
+ * linux/src/main.c）负责 locale 与 bindtextdomain。
+ * 只包裹 UI 展示文案；落库/协议/比较用的数据串保持原样（HB_N_ 仅为
+ * xgettext 提取标记，语义同 N_()）。 */
+#ifdef ENABLE_NLS
+const char *hb__tr(const char *s);
+# define HB_TR(s)  hb__tr(s)
+#else
+# define HB_TR(s)  (s)
+#endif
+#define HB_N_(s)   (s)
+
 /* idempotent；初始化 libsodium 等全局状态。所有会用到随机数/加密的入口都会自动调用。 */
 int hb_core_init(void);
 

@@ -6,6 +6,7 @@ soup_dep = dependency('libsoup-3.0')
 jsonglib_dep = dependency('json-glib-1.0')
 
 gnome = import('gnome')
+hb_localedir = get_option('prefix') / get_option('localedir')
 hb_res = gnome.compile_resources('hb-resources',
     'data/harbor.gresource.xml',
     source_dir: 'data',
@@ -59,6 +60,10 @@ harbor_exe = executable('harbor',
     'src/hb-forward-view.c',
     hb_res,
     include_directories: 'src',
+    c_args: [
+        '-DGETTEXT_PACKAGE="harbor"',
+        '-DHB_LOCALEDIR="' + hb_localedir + '"',
+    ],
     dependencies: [gtk4_dep, adw_dep, secret_dep, soup_dep,
                    jsonglib_dep, m_dep, harbor_core_dep],
     install: true,

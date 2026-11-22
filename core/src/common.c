@@ -8,6 +8,14 @@
 #include <libssh2.h>
 #include <sodium.h>
 
+#ifdef ENABLE_NLS
+# include <libintl.h>
+const char *hb__tr(const char *s)
+{
+    return dgettext("harbor", s);
+}
+#endif
+
 const char *hb_strerror(hb_err e)
 {
     switch (e) {

@@ -35,6 +35,8 @@
 
 #include <harbor/ssh.h>
 #include <string.h>
+#include <locale.h>
+#include <glib/gi18n.h>
 
 struct _HbApplication {
     AdwApplication parent;
@@ -869,6 +871,48 @@ static gboolean want_close_to_tray(void)
     return v;
 }
 
+/* settings.language（device-local）→ gettext 语言选择。
+ * en：走 en 目录翻译；zh_CN：强制回中文（msgid 即中文，英文系统下
+ * 也回落到原文）；system：不动环境。
+ * 注意：glibc 只在 LC_MESSAGES 为真实 locale（非 C/POSIX，C.UTF-8
+ * 也算 C 家族，已实测）时才查 .mo 目录；LANGUAGE=en 在 C 家族下
+ * 被整体忽略。所以显式 en 遇到 C locale 时要先切到一个真实英文
+ * locale——en_US.UTF-8 不存在则依次尝试常见英文 locale。 */
+static void apply_language_setting(void)
+{
+    static const char *const EN_LOCALES[] = {
+        "en_US.UTF-8", "en_US.utf8", "en_GB.UTF-8", "en_GB.utf8",
+        "en_AU.UTF-8", "en_CA.UTF-8", "en_IE.UTF-8", "en_NZ.UTF-8",
+        "en_SG.UTF-8", "en_US", "en_GB",
+    };
+    hb_obj *o = NULL;
+    char lang[16] = "system";
+    const char *cur;
+    size_t i;
+
+    if (hb_vault_settings(hb_store_vault(hb_store_default()),
+                          &o) == HB_OK && o) {
+        const char *l = hb_obj_get_str(o, "language");
+        if (l && *l)
+            g_strlcpy(lang, l, sizeof lang);
+        hb_obj_free(o);
+    }
+    if (!strcmp(lang, "en")) {
+        cur = setlocale(LC_MESSAGES, NULL);
+        if (!cur || !strcmp(cur, "C") || !strcmp(cur, "POSIX")
+                || !strncmp(cur, "C.", 2) || !strncmp(cur, "C_", 2)) {
+            for (i = 0; i < G_N_ELEMENTS(EN_LOCALES); i++)
+                if (setlocale(LC_MESSAGES, EN_LOCALES[i]))
+                    break;
+            if (i == G_N_ELEMENTS(EN_LOCALES))
+                setlocale(LC_MESSAGES, "C.UTF-8");
+        }
+        g_setenv("LANGUAGE", "en", TRUE);
+    } else if (!strcmp(lang, "zh_CN")) {
+        g_setenv("LANGUAGE", "zh_CN", TRUE);
+    }
+}
+
 /* 关窗 → 托盘可用时隐窗保活，一次性通知提示。返回 TRUE 吞掉关闭。 */
 static gboolean on_close_request(GtkWindow *win, gpointer ud)
 {
@@ -973,7 +1017,8 @@ void hb_application_apply_theme(void)
 /* app.dev-ui "cmd|arg"：调试构建的 UI 驱动钩子（截图/无头验证）。
  * cmd: section|name  drawer|hid  hostform[|hid]  palette  notif
  *      toast|text  sftp|hid  key|accel  scheme|light|dark|system
- *      listmode|0|1  bkexport  bkimport  drawerclose  closetop */
+ *      listmode|0|1  bkexport  bkimport  drawerclose  closetop
+ *      lang|system|zh_CN|en  lang   （空 id = 点重启） */
 static void on_dev_ui(GSimpleAction *a, GVariant *param, gpointer ud)
 {
     GtkWindow *win;
@@ -1040,6 +1085,29 @@ static void on_dev_ui(GSimpleAction *a, GVariant *param, gpointer ud)
         hb_settings_view_bk_dev_press();
     } else if (!strcmp(f[0], "bkconfirm")) {
         hb_settings_view_bk_dev_confirm(!f[1] || strcmp(f[1], "0"));
+    } else if (!strcmp(f[0], "lang")) {
+        GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
+        GtkWidget *sv = vp ? hb_vault_page_settings_view(
+                                HB_VAULT_PAGE(vp)) : NULL;
+        if (sv) {
+            if (f[1] && *f[1]) {
+                hb_settings_view_lang_dev(HB_SETTINGS_VIEW(sv), f[1]);
+                g_printerr("DEVUI-LANG restart_visible=%d\n",
+                    hb_settings_view_lang_restart_visible(
+                        HB_SETTINGS_VIEW(sv)));
+                fflush(stderr);
+            } else {
+                hb_settings_view_lang_restart_dev(
+                    HB_SETTINGS_VIEW(sv));
+            }
+        }
+    } else if (!strcmp(f[0], "scroll")) {
+        GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
+        GtkWidget *sv = vp ? hb_vault_page_settings_view(
+                                HB_VAULT_PAGE(vp)) : NULL;
+        if (sv)
+            hb_settings_view_scroll_frac_dev(HB_SETTINGS_VIEW(sv),
+                f[1] ? g_strtod(f[1], NULL) : 1.0);
     } else if ((!strcmp(f[0], "scedit") || !strcmp(f[0], "sckey"))
                && f[1]) {
         GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
@@ -1091,6 +1159,7 @@ static void hb_application_startup(GApplication *app)
     G_APPLICATION_CLASS(hb_application_parent_class)->startup(app);
 
     hb_store_default();          /* vault 打开 + 首次播种 */
+    apply_language_setting();    /* 必须在首个 UI 字符串渲染之前 */
     hb_notify_default();
 
     /* FR-10：启动时按 log_retention_days（默认 90；<=0 = 永久）清理日志 */
