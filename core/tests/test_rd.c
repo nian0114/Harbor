@@ -808,7 +808,8 @@ static void t_vnc_tunnel(void)
                 ev.pf->kind == HB_PF_EV_LISTENING)
                 live = 1;
             if (ev.type == HB_SESS_EV_ERROR)
-                fprintf(stderr, "  sess err: %s\n", ev.text);
+                fprintf(stderr, "  sess err: %s detail=%s\n", ev.text,
+                        ev.text2 ? ev.text2 : "");
             hb_sess_event_clear(&ev);
         }
     }

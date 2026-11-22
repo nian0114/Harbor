@@ -59,7 +59,7 @@ test_sftp = executable('test_sftp', 'test_sftp.c', 'sshd_fixture.c',
     include_directories: include_directories('../src'),
     dependencies: harbor_core_dep,
 )
-test('sftp', test_sftp, timeout: 120)
+test('sftp', test_sftp, timeout: 240)  # macOS VM 并行负载下大文件传输较慢
 
 test_pf = executable('test_pf', 'test_pf.c', 'sshd_fixture.c',
     include_directories: include_directories('../src'),

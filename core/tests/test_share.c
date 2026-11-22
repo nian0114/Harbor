@@ -1016,12 +1016,20 @@ static void t_e2e(void)
         CHECK(wait_for(o, &r, sess, peer_screen_synced, &cg, 8000));
     }
 
-    /* top -b 风格输出（无 alt 屏的批处理输出，验证大量 DELTA） */
-    hb_share_peer_input(m, "top -b -n 1 | head -8\n", strlen("top -b -n 1 | head -8\n"));
+    /* top -b 风格输出（无 alt 屏的批处理输出，验证大量 DELTA）。
+     * macOS 的 BSD top 用 -l 采样模式，输出 "Load Avg" 而非 load average。 */
+#ifdef __APPLE__
+#define SHARE_TOP_CMD "top -l 1 | head -8\n"
+#define SHARE_TOP_MARK "Load Avg"
+#else
+#define SHARE_TOP_CMD "top -b -n 1 | head -8\n"
+#define SHARE_TOP_MARK "load average"
+#endif
+    hb_share_peer_input(m, SHARE_TOP_CMD, strlen(SHARE_TOP_CMD));
     {
         hb_vt *ov = hb_session_vt(sess);
         hc.v = ov;
-        hc.s = "load average";
+        hc.s = SHARE_TOP_MARK;
         CHECK(wait_for(o, &r, sess, has_str, &hc, 10000));
     }
     /* 全屏/alt 屏：显式发 ?1049h + 内容（本机 top 用 H/2J 不进 alt） */
@@ -1154,8 +1162,8 @@ static void t_e2e(void)
     CHECK(r.tap_len > 0);
     CHECK(memmem(r.tap, r.tap_len, "ZZZPINGZZZ", 10) == NULL);
     CHECK(memmem(r.tap, r.tap_len, "GAPMARKER", 9) == NULL);
-    CHECK(memmem(r.tap, r.tap_len, "load average", 12) == NULL);
-    CHECK(memmem(r.tap, r.tap_len, "top -b", 6) == NULL);
+    CHECK(memmem(r.tap, r.tap_len, SHARE_TOP_MARK, strlen(SHARE_TOP_MARK)) == NULL);
+    CHECK(memmem(r.tap, r.tap_len, SHARE_TOP_CMD, strlen(SHARE_TOP_CMD) - 1) == NULL);
 
     free(meta);
     free(link);

@@ -12,6 +12,7 @@
 
 #include "harbor/pf.h"
 #include "harbor/ssh.h"
+#include "sockutil.h"
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -30,6 +31,9 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 
 static hb_sshd fx;
 
@@ -201,7 +205,8 @@ static int tcp_conn(int port)
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (fd < 0)
         return -1;
-    if (connect(fd, (void *)&a, sizeof a) != 0) {
+    if (hb__sock_no_sigpipe(fd) < 0 ||
+        connect(fd, (void *)&a, sizeof a) != 0) {
         close(fd);
         return -1;
     }
@@ -1005,28 +1010,56 @@ out:
     srv_stop(&es);
 }
 
-/* 9. 断线：杀掉 sshd 及其子进程 → HB_SSH_ERR_DISCONNECTED + 端口释放 */
-static void kill_tree_sig(pid_t root, int sig)
+/* 找 lvl 中任一进程的孩子 → nxt（≤cap 个），返回个数。
+ * Linux 走 /proc/<pid>/stat；macOS 无 /proc，用
+ * sysctl(KERN_PROC_ALL) 全量枚举按 ppid 匹配。 */
+static int find_children(const pid_t *lvl, int nl, pid_t *nxt, int cap)
 {
-    pid_t lvl[256], nxt[256], dead[512];
-    int nl = 0, n_dead = 0, i, j;
-    DIR *dd;
-    struct dirent *de;
-
-    lvl[nl++] = root;
-    /* 先按层收集整棵树，再统一 SIGKILL —— 边杀边扫会让孙辈在下一轮
-     * /proc 扫描前被 reparent 到 init，从而漏杀（sshd 的 privsep 网络
-     * 子进程正是这种孙辈）。 */
-    for (i = 0; i < 6 && nl; i++) {   /* BFS 6 层足够 */
-        int nn = 0;
+    int nn = 0, j;
+#ifdef __APPLE__
+    {
+        int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
+        size_t sz = 0;
+        struct kinfo_proc *kp;
+        int i, k, cnt;
+        if (sysctl(mib, 4, NULL, &sz, NULL, 0) < 0)
+            return 0;
+        kp = malloc(sz);
+        if (!kp)
+            return 0;
+        if (sysctl(mib, 4, kp, &sz, NULL, 0) < 0) {
+            free(kp);
+            return 0;
+        }
+        cnt = (int)(sz / sizeof *kp);
+        for (i = 0; i < cnt && nn < cap; i++) {
+            pid_t ppid = kp[i].kp_eproc.e_ppid;
+            for (j = 0; j < nl; j++)
+                if (ppid == lvl[j])
+                    break;
+            if (j < nl) {
+                pid_t p = kp[i].kp_proc.p_pid;
+                for (k = 0; k < nn; k++)
+                    if (nxt[k] == p)
+                        break;
+                if (k == nn)
+                    nxt[nn++] = p;
+            }
+        }
+        free(kp);
+    }
+#else
+    {
+        DIR *dd;
+        struct dirent *de;
         dd = opendir("/proc");
         if (!dd)
-            break;
-        while ((de = readdir(dd))) {
+            return 0;
+        while ((de = readdir(dd)) && nn < cap) {
             char pth[64], buf[512];
             pid_t p = (pid_t)atoi(de->d_name), ppid = 0;
             char *rp;
-            int fd2;
+            int fd2, k;
             ssize_t nr;
             if (p <= 0)
                 continue;
@@ -1047,8 +1080,7 @@ static void kill_tree_sig(pid_t root, int sig)
             for (j = 0; j < nl; j++)
                 if (ppid == lvl[j])
                     break;
-            if (j < nl && nn < 256) {
-                int k;
+            if (j < nl) {
                 for (k = 0; k < nn; k++)
                     if (nxt[k] == p)
                         break;
@@ -1057,6 +1089,23 @@ static void kill_tree_sig(pid_t root, int sig)
             }
         }
         closedir(dd);
+    }
+#endif
+    return nn;
+}
+
+/* 9. 断线：杀掉 sshd 及其子进程 → HB_SSH_ERR_DISCONNECTED + 端口释放 */
+static void kill_tree_sig(pid_t root, int sig)
+{
+    pid_t lvl[256], nxt[256], dead[512];
+    int nl = 0, n_dead = 0, i, j;
+
+    lvl[nl++] = root;
+    /* 先按层收集整棵树，再统一 SIGKILL —— 边杀边扫会让孙辈在下一轮
+     * 进程表扫描前被 reparent 到 init，从而漏杀（sshd 的 privsep 网络
+     * 子进程正是这种孙辈）。 */
+    for (i = 0; i < 6 && nl; i++) {   /* BFS 6 层足够 */
+        int nn = find_children(lvl, nl, nxt, 256);
         for (j = 0; j < nn && n_dead < (int)(sizeof dead / sizeof dead[0]);
              j++)
             dead[n_dead++] = nxt[j];
@@ -1327,8 +1376,9 @@ static void *flood_client(void *arg)
     if (fd < 0)
         return NULL;
     while (!f->stop) {
-        /* MSG_NOSIGNAL：session 关闭会立刻断 fd，write 会 EPIPE */
-        ssize_t n = send(fd, buf, sizeof buf, MSG_NOSIGNAL);
+        /* 关闭对端 socket 后写会 EPIPE：Linux MSG_NOSIGNAL /
+         * macOS SO_NOSIGPIPE（tcp_conn 已设）抑制 SIGPIPE */
+        ssize_t n = send(fd, buf, sizeof buf, HB_MSG_NOSIGNAL);
         if (n <= 0) {
             if (n < 0 && errno == EINTR)
                 continue;

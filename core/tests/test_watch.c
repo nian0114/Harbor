@@ -576,6 +576,15 @@ static bool have(const char *tool)
     return system(cmd) == 0;
 }
 
+/* bash 集成脚本的 133;C 标记依赖 PS0（bash ≥4.4）；
+ * macOS 自带 bash 3.2 → e2e 无从谈起，跳过但声明原因。 */
+static bool bash_ge44(void)
+{
+    return system("bash -c 'exit $((BASH_VERSINFO[0] > 4 || "
+                  "(BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)"
+                  " ? 0 : 1))' </dev/null >/dev/null 2>&1") == 0;
+}
+
 static void test_shell_scripts(void)
 {
     static const char *const sh[] = { "bash", "zsh", "fish" };
@@ -701,10 +710,10 @@ static void test_shell_e2e(void)
     static const char *zsh_fpath =
         "fpath=(/home/x/.local/harbor-sysroot/usr/share/zsh/functions/*"
         "(N/) $fpath)\n";
-    if (have("bash"))
+    if (have("bash") && bash_ge44())
         shell_e2e("bash", "exec bash --norc -i", "$ ", NULL);
     else
-        printf("  bash not installed, e2e skipped\n");
+        printf("  bash missing or <4.4 (no PS0), e2e skipped\n");
     if (have("zsh"))
         /* add-zsh-hook 在 zsh-common 的 functions 目录；本机 zsh 的
          * 编译内 fpath 指向 /usr/share/zsh（不存在于 sysroot 环境），

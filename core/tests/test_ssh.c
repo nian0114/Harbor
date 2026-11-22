@@ -16,6 +16,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <pwd.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -999,9 +1000,14 @@ static void test_osinfo(void)
         return;
     CHECK(drv_run(s, &d, 10000));
     CHECK_EQ_INT(d.connected, 1);
+#ifdef __APPLE__
+    /* 远端（macOS sshd）无 /etc/os-release → 探测不到，不发 OSINFO 事件 */
+    CHECK_EQ_INT(d.osinfo_n, 0);
+#else
     CHECK_EQ_INT(d.osinfo_n, 1);
     CHECK(strcmp(d.os_id, "ubuntu") == 0);
     CHECK(d.os_pretty[0] != 0);
+#endif
     hb_session_free(s);
 }
 

@@ -926,7 +926,7 @@ static void test_links(void)
         char lk[PATH_MAX];
         joinp(lk, sizeof lk, p, "esc-parent");  CHECK(symlink("../sentineld", lk) == 0);
         joinp(lk, sizeof lk, p, "esc-etc");     CHECK(symlink("/etc", lk) == 0);
-        joinp(lk, sizeof lk, p, "esc-file");    CHECK(symlink("/etc/hostname", lk) == 0);
+        joinp(lk, sizeof lk, p, "esc-file");    CHECK(symlink("/etc/hosts", lk) == 0);
         joinp(lk, sizeof lk, p, "inner-link");  CHECK(symlink("real.txt", lk) == 0);
     }
 
@@ -973,7 +973,8 @@ static void test_links(void)
         CHECK_EQ_INT(cnt, 2);
     }
 
-    /* 显式单文件下载链接 → 跟随目标，拿到 /etc/hostname 内容 */
+    /* 显式单文件下载链接 → 跟随目标，拿到 /etc/hosts 内容
+     *（/etc/hosts 是 Linux/macOS 都必然存在的文件） */
     joinp(p, sizeof p, RD, "linktree/esc-file");
     joinp(p2, sizeof p2, LD, "hostnamedl");
     q = hb_sftp_download(s, p, p2, HB_SFTP_OVERWRITE);

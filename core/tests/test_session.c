@@ -489,6 +489,13 @@ static void test_history_osc133(void)
         fprintf(stderr, "  bash integration script missing, skipped\n");
         return;
     }
+    /* 脚本的 133;C 标记靠 PS0（bash ≥4.4）；macOS 自带 bash 3.2 → 跳过 */
+    if (system("bash -c 'exit $((BASH_VERSINFO[0] > 4 || "
+               "(BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)"
+               " ? 0 : 1))' </dev/null >/dev/null 2>&1") != 0) {
+        fprintf(stderr, "  bash <4.4 (no PS0), osc133 history skipped\n");
+        return;
+    }
     fd = mkstemp(tmp);
     CHECK(fd >= 0);
     if (fd < 0)

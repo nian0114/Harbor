@@ -390,8 +390,11 @@ static void test_inspect_p12(void)
          "-pkeyopt ec_paramgen_curve:P-256 -keyout %s/ec.key "
          "-out %s/ec.crt -days 1 -nodes -subj /CN=t 2>/dev/null",
          tmpdir, tmpdir);
+    /* AES-CBC PBE：LibreSSL 默认的 3DES PBE 需要 OpenSSL 3 的 legacy
+     * provider 才能解 → 两处都显式指定（OpenSSL 3 与 LibreSSL 都接受）。 */
     kgen("/usr/bin/openssl pkcs12 -export -inkey %s/ec.key -in %s/ec.crt "
-         "-out %s/ec.p12 -passout pass:pw12 2>/dev/null",
+         "-out %s/ec.p12 -passout pass:pw12 "
+         "-certpbe AES-256-CBC -keypbe AES-256-CBC 2>/dev/null",
          tmpdir, tmpdir, tmpdir);
 
     e = inspect_ret("ec.p12", "bad", &k);
@@ -431,7 +434,8 @@ static void test_inspect_p12(void)
          "-out %s/rsa.crt -days 1 -nodes -subj /CN=t 2>/dev/null",
          tmpdir, tmpdir);
     kgen("/usr/bin/openssl pkcs12 -export -inkey %s/rsa.key -in %s/rsa.crt "
-         "-out %s/rsa.p12 -passout pass:pw12 2>/dev/null",
+         "-out %s/rsa.p12 -passout pass:pw12 "
+         "-certpbe AES-256-CBC -keypbe AES-256-CBC 2>/dev/null",
          tmpdir, tmpdir, tmpdir);
     e = inspect_ret("rsa.p12", "pw12", &k);
     CHECK_EQ_INT(e, HB_OK);
@@ -453,11 +457,13 @@ static void test_inspect_invalid(void)
     e = inspect_ret("garbage", NULL, &k);
     CHECK_EQ_INT(e, HB_ERR_INVALID);
 
-    /* DSA PEM：不支持的类型 */
-    kgen("/usr/bin/ssh-keygen -t dsa -N '' -f %s/d1 -q 2>/dev/null",
+    /* DSA PEM：不支持的类型。macOS 的 OpenSSH ≥10 删了 ssh-keygen -t dsa，
+     * 用 openssl 生成（LibreSSL/OpenSSL 3 都有 dsaparam/gendsa，产出直接
+     * 是 "BEGIN DSA PRIVATE KEY" 传统 PEM）。 */
+    kgen("/usr/bin/openssl dsaparam -out %s/dsap.pem 1024 2>/dev/null",
          tmpdir);
-    kgen("/usr/bin/ssh-keygen -p -m PEM -N '' -P '' -f %s/d1 -q "
-         "2>/dev/null", tmpdir);
+    kgen("/usr/bin/openssl gendsa -out %s/d1 %s/dsap.pem 2>/dev/null",
+         tmpdir, tmpdir);
     e = inspect_ret("d1", NULL, &k);
     CHECK_EQ_INT(e, HB_ERR_INVALID);
 }
@@ -516,6 +522,9 @@ int main(void)
         fprintf(stderr, "SKIP: ssh-keygen/openssl missing\n");
         exit(77);
     }
+    /* LibreSSL 按 umask 写私钥（OpenSSL 恒 0600）→ 收紧保证
+     * ssh-keygen -y 不因权限过宽拒读生成的 key */
+    umask(0077);
     mk_tmp();
     test_generate();
     test_inspect_openssh();
