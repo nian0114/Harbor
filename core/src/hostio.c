@@ -154,7 +154,7 @@ static const char *resolve_jump_elem(hb_vault *v, hb_obj ***phs, size_t *pnh,
     /* (c) 解析 [user@]host[:port] → 复用或新建 */
     if (hb_ssh_parse_target(elem, &pu, &ph, &pp) != HB_OK || !ph || !*ph) {
         free(pu); free(ph);
-        r_warn(r, "跳板 '%s' 无法解析，已忽略", elem);
+        r_warn(r, HB_TR("跳板 '%s' 无法解析，已忽略"), elem);
         return NULL;
     }
     if (pp <= 0) pp = 22;
@@ -260,7 +260,7 @@ hb_err hb_hosts_import_sshcfg(hb_vault *v, const hb_sshcfg *c,
             /* resolve 可能 realloc hs —— o 指针仍有效（hb_obj 本体不动） */
             if (!id) continue;
             if (!strcmp(id, hb_obj_id(o))) {
-                r_warn(r, "%s: 跳板 '%s' 指向自身，已忽略",
+                r_warn(r, HB_TR("%s: 跳板 '%s' 指向自身，已忽略"),
                        h->alias, h->proxy_jump[k]);
                 continue;
             }
@@ -469,14 +469,14 @@ hb_err hb_hosts_import_json(hb_vault *v, const char *json, hb_import_result *r)
         int64_t port = 0;
         hb_obj *ex, *o;
         if (!cJSON_IsObject(it)) {
-            r_warn(r, "hosts[%zu]: 非对象元素，已跳过", idx);
+            r_warn(r, HB_TR("hosts[%zu]: 非对象元素，已跳过"), idx);
             idx++;
             continue;
         }
         jn = cJSON_GetObjectItemCaseSensitive(it, "name");
         ja = cJSON_GetObjectItemCaseSensitive(it, "address");
         if (!cJSON_IsString(jn) || !cJSON_IsString(ja)) {
-            r_warn(r, "hosts[%zu]: 缺少 name/address，已跳过", idx);
+            r_warn(r, HB_TR("hosts[%zu]: 缺少 name/address，已跳过"), idx);
             idx++;
             continue;
         }
@@ -549,7 +549,7 @@ hb_err hb_hosts_import_json(hb_vault *v, const char *json, hb_import_result *r)
                 } else if (find_by_id(hs, nh, jv[k])) {
                     njv[njv_n++] = jv[k];
                 } else {
-                    r_warn(r, "%s: jump 引用的主机 %s 不存在，已丢弃",
+                    r_warn(r, HB_TR("%s: jump 引用的主机 %s 不存在，已丢弃"),
                            hb_obj_get_str(o, "name") ?: "?", jv[k]);
                 }
             }
@@ -567,7 +567,7 @@ hb_err hb_hosts_import_json(hb_vault *v, const char *json, hb_import_result *r)
             if (mapped) { hb_obj_set_str(o, "via", mapped); dirty = 1; }
             else if (find_by_id(hs, nh, via)) { /* keep */ }
             else {
-                r_warn(r, "%s: via 引用的主机 %s 不存在，已丢弃",
+                r_warn(r, HB_TR("%s: via 引用的主机 %s 不存在，已丢弃"),
                        hb_obj_get_str(o, "name") ?: "?", via);
                 hb_obj_set_str(o, "via", NULL);
                 dirty = 1;
@@ -575,14 +575,14 @@ hb_err hb_hosts_import_json(hb_vault *v, const char *json, hb_import_result *r)
         }
         kid = hb_obj_get_str(o, "key_id");
         if (kid && *kid && !obj_exists_typed(v, kid, "key")) {
-            r_warn(r, "%s: key_id 引用的密钥不存在，已丢弃",
+            r_warn(r, HB_TR("%s: key_id 引用的密钥不存在，已丢弃"),
                    hb_obj_get_str(o, "name") ?: "?");
             hb_obj_set_str(o, "key_id", NULL);
             dirty = 1;
         }
         snip = hb_obj_get_str(o, "startup_snippet");
         if (snip && *snip && !obj_exists_typed(v, snip, "snippet")) {
-            r_warn(r, "%s: startup_snippet 引用的片段不存在，已丢弃",
+            r_warn(r, HB_TR("%s: startup_snippet 引用的片段不存在，已丢弃"),
                    hb_obj_get_str(o, "name") ?: "?");
             hb_obj_set_str(o, "startup_snippet", NULL);
             dirty = 1;

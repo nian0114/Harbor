@@ -595,7 +595,7 @@ void hb_watch_eof(hb_watch *w, int code, int64_t now_ms)
     h.signal = HB_WATCH_SIG_EOF;
     h.ok = (code == 0 || code == -1);
     h.exit_code = code;
-    h.rule = strdup("会话结束（EOF）");
+    h.rule = strdup(HB_TR("会话结束（EOF）"));
     h.duration_ms = -1;
     qpush(w, &h);
     w->armed = false;
@@ -662,7 +662,7 @@ bool hb_watch_poll(hb_watch *w, int64_t now_ms, hb_watch_hit *out,
         h.signal = HB_WATCH_SIG_IDLE;
         h.ok = true;
         h.exit_code = -1;
-        h.rule = strdup("空闲启发式");
+        h.rule = strdup(HB_TR("空闲启发式"));
         {
             const char *ts; size_t tn;
             trim_span(w->line, w->len, &ts, &tn);

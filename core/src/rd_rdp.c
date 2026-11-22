@@ -155,7 +155,7 @@ static bool cert_prompt(hb_rd *rd, int changed, const char *fp,
      * 隧道随机端口永远无知，FLAG 恒为 0）。 */
     changed = changed || (rd->o.cert_fp != NULL);
     char sum[640];
-    snprintf(sum, sizeof sum, "CN=%s\n颁发者: %s\n主机: %s",
+    snprintf(sum, sizeof sum, HB_TR("CN=%s\n颁发者: %s\n主机: %s"),
              subj && *subj ? subj : "?", issuer && *issuer ? issuer : "?",
              host ? host : "?");
     hb__rd_arm_cert(rd);
@@ -245,7 +245,7 @@ static BOOL rdp_authenticate(freerdp *instance, char **username, char **password
     hb__rd_arm_prompt(rd);
     hb_rd_event ev = { .type = HB_RD_EV_PROMPT,
                        .code = 1,
-                       .text = (char *)"需要 RDP 凭据（用户名 / 密码 / 域）" };
+                       .text = (char *)HB_TR("需要 RDP 凭据（用户名 / 密码 / 域）") };
     hb__rd_push(rd, &ev);
     char *u = NULL, *p = NULL, *d = NULL;
     if (!hb__rd_wait_prompt(rd, &u, &p, &d)) {
@@ -467,7 +467,7 @@ static BOOL rdp_pre_connect(freerdp *instance)
         dvc->custom = be;
         dvc->OnChannelConnected = drdynvc_connected;
     }
-    hb__rd_stage(rd, "RDP 协商 / 认证…");
+    hb__rd_stage(rd, HB_TR("RDP 协商 / 认证…"));
     return TRUE;
 }
 
@@ -756,7 +756,7 @@ void hb__rd_rdp_run(hb_rd *rd)
     static pthread_once_t log_once = PTHREAD_ONCE_INIT;
     pthread_once(&log_once, rdp_init_log);
 
-    hb__rd_stage(rd, "正在连接…");
+    hb__rd_stage(rd, HB_TR("正在连接…"));
 
     RDP_CLIENT_ENTRY_POINTS ep = { 0 };
     ep.Size = sizeof ep;
@@ -772,7 +772,7 @@ void hb__rd_rdp_run(hb_rd *rd)
 
     rdpContext *context = freerdp_client_context_new(&ep);
     if (!context) {
-        hb__rd_error(rd, HB_RD_ERR_PROTOCOL, "无法创建 FreeRDP 上下文", NULL);
+        hb__rd_error(rd, HB_RD_ERR_PROTOCOL, HB_TR("无法创建 FreeRDP 上下文"), NULL);
         return;
     }
     rdp_map_put(context, rd);
@@ -824,13 +824,13 @@ void hb__rd_rdp_run(hb_rd *rd)
         else
             err = map_last_error(rd, det, sizeof det);
         const char *cn =
-            err == HB_RD_ERR_AUTH           ? "认证失败：用户名或密码错误"
-            : err == HB_RD_ERR_TLS          ? "TLS/加密协商失败"
-            : err == HB_RD_ERR_TIMEOUT      ? "连接超时"
-            : err == HB_RD_ERR_CERT_REJECTED ? "证书被拒绝"
-            : err == HB_RD_ERR_CANCELLED    ? "已取消"
-            : err == HB_RD_ERR_REFUSED      ? "无法连接到服务器"
-                                            : "RDP 协议错误";
+            err == HB_RD_ERR_AUTH           ? HB_TR("认证失败：用户名或密码错误")
+            : err == HB_RD_ERR_TLS          ? HB_TR("TLS/加密协商失败")
+            : err == HB_RD_ERR_TIMEOUT      ? HB_TR("连接超时")
+            : err == HB_RD_ERR_CERT_REJECTED ? HB_TR("证书被拒绝")
+            : err == HB_RD_ERR_CANCELLED    ? HB_TR("已取消")
+            : err == HB_RD_ERR_REFUSED      ? HB_TR("无法连接到服务器")
+                                            : HB_TR("RDP 协议错误");
         hb__rd_error(rd, err, cn, det);
         goto out;
     }
@@ -841,7 +841,7 @@ void hb__rd_rdp_run(hb_rd *rd)
         DWORD n = freerdp_get_event_handles(context, handles, 31);
         if (n == (DWORD)-1) {
             if (!hb__rd_closing(rd))
-                hb__rd_error(rd, HB_RD_ERR_DISCONNECTED, "连接中断",
+                hb__rd_error(rd, HB_RD_ERR_DISCONNECTED, HB_TR("连接中断"),
                              "freerdp_get_event_handles failed");
             break;
         }
@@ -857,8 +857,8 @@ void hb__rd_rdp_run(hb_rd *rd)
             char det[512] = { 0 };
             hb_rd_err e2 = map_last_error(rd, det, sizeof det);
             hb__rd_error(rd, e2,
-                         e2 == HB_RD_ERR_AUTH ? "认证失败：用户名或密码错误"
-                                              : "连接中断",
+                         e2 == HB_RD_ERR_AUTH ? HB_TR("认证失败：用户名或密码错误")
+                                              : HB_TR("连接中断"),
                          det);
             break;
         }
@@ -872,7 +872,7 @@ void hb__rd_rdp_run(hb_rd *rd)
 
 out:
     if (be->connected && !hb__rd_closing(rd))
-        hb__rd_error(rd, HB_RD_ERR_DISCONNECTED, "连接中断", "session ended");
+        hb__rd_error(rd, HB_RD_ERR_DISCONNECTED, HB_TR("连接中断"), "session ended");
     freerdp_client_stop(context);
     if (wake)
         CloseHandle(wake);

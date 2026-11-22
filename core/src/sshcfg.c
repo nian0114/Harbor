@@ -240,7 +240,7 @@ static char *tilde_expand(parser *p, const char *s,
         struct passwd *pw = un ? getpwnam(un) : NULL;
         free(un);
         if (!pw) {
-            warnf(p, file, line, "~user 形式无法展开，已保留原文");
+            warnf(p, file, line, HB_TR("~user 形式无法展开，已保留原文"));
             return xstrdup(s);
         }
         {
@@ -282,7 +282,7 @@ static char *expand_tokens(parser *p, const char *s, const char *hostname,
         case '%': rep = "%"; break;
         default:
             warnf(p, file, line,
-                  "IdentityFile 含未支持的令牌 %%%c，已保留原文", *q);
+                  HB_TR("IdentityFile 含未支持的令牌 %%%c，已保留原文"), *q);
             rep = NULL;
             if (n + 3 > cap) { cap *= 2; out = realloc(out, cap); w = out + n; }
             *w++ = '%'; *w++ = *q; n += 2;
@@ -379,7 +379,7 @@ static hb_err parse_text(parser *p, const char *path, const char *text)
             free(pos); free(neg);
             p->in_match = 0;
         } else if (kw_is(key, "match")) {
-            warnf(p, path, lineno, "Match 块暂不支持，已忽略");
+            warnf(p, path, lineno, HB_TR("Match 块暂不支持，已忽略"));
             p->in_match = 1;
         } else if (p->in_match) {
             /* Match 块内一切跳过（含 Include/未知关键字） */
@@ -415,7 +415,7 @@ static hb_err parse_text(parser *p, const char *path, const char *text)
                        !strcasecmp(key, "remoteforward") ||
                        !strcasecmp(key, "dynamicforward") ||
                        !strcasecmp(key, "certificatefile")) {
-                warnf(p, path, lineno, "%s 暂不支持，已忽略", key);
+                warnf(p, path, lineno, HB_TR("%s 暂不支持，已忽略"), key);
             }
             /* 其它未知关键字静默忽略 */
         }
@@ -440,23 +440,23 @@ static hb_err parse_file_into(parser *p, const char *path)
     hb_err e;
 
     if (p->depth >= MAX_INCLUDE_DEPTH) {
-        warnf(p, path, 0, "Include 嵌套过深（>%d），已忽略",
+        warnf(p, path, 0, HB_TR("Include 嵌套过深（>%d），已忽略"),
               MAX_INCLUDE_DEPTH);
         return HB_OK;
     }
     fd = open(path, O_RDONLY);
     if (fd < 0) {
-        warnf(p, path, 0, "无法读取 %s：%s", path, strerror(errno));
+        warnf(p, path, 0, HB_TR("无法读取 %s：%s"), path, strerror(errno));
         return HB_OK;             /* 单个 Include 失败不致命 */
     }
     /* glob 可能匹配目录/设备/管道：只读普通文件，限 1 MiB */
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
-        warnf(p, path, 0, "不是普通文件，已忽略");
+        warnf(p, path, 0, HB_TR("不是普通文件，已忽略"));
         close(fd);
         return HB_OK;
     }
     if (st.st_size > 1024 * 1024) {
-        warnf(p, path, 0, "文件过大（>1 MiB），已忽略");
+        warnf(p, path, 0, HB_TR("文件过大（>1 MiB），已忽略"));
         close(fd);
         return HB_OK;
     }
@@ -466,7 +466,7 @@ static hb_err parse_file_into(parser *p, const char *path)
         ssize_t g = read(fd, text + off, (size_t)st.st_size - off);
         if (g < 0) {
             if (errno == EINTR) continue;
-            warnf(p, path, 0, "读取失败：%s", strerror(errno));
+            warnf(p, path, 0, HB_TR("读取失败：%s"), strerror(errno));
             free(text); close(fd);
             return HB_OK;
         }
@@ -655,7 +655,7 @@ static void resolve_one(parser *p, hb_sshcfg_host *h)
                     have_port = 1;
                     if (!ok || v < 1 || v > 65535)
                         warnf(p, e->file, e->line,
-                              "Port 无效（'%s'），已忽略", e->val);
+                              HB_TR("Port 无效（'%s'），已忽略"), e->val);
                     else
                         h->port = (int)v;
                 }
@@ -677,7 +677,7 @@ static void resolve_one(parser *p, hb_sshcfg_host *h)
                     have_ka = 1;
                     if (!ok || v < 0 || v > 86400)
                         warnf(p, e->file, e->line,
-                              "ServerAliveInterval 无效（'%s'），已忽略", e->val);
+                              HB_TR("ServerAliveInterval 无效（'%s'），已忽略"), e->val);
                     else
                         h->keepalive = (int)v;
                 }

@@ -113,7 +113,7 @@ static void load_existing(imp_t *im)
     hb_obj **objs = NULL;
     size_t n = 0, i;
     if (hb_vault_list(im->v, "known", &objs, &n) != HB_OK) {
-        warn(im->r, "无法读取现有 known 记录，按空处理");
+        warn(im->r, HB_TR("无法读取现有 known 记录，按空处理"));
         return;
     }
     for (i = 0; i < n; i++) {
@@ -142,7 +142,7 @@ static int parse_name(const char *tok, char **host_out, int *port_out,
         return *host_out != NULL;
     }
     if (strpbrk(tok, "*?!")) {
-        warn(r, "第 %d 行：跳过通配/取反模式 '%s'（libssh2 无法匹配）",
+        warn(r, HB_TR("第 %d 行：跳过通配/取反模式 '%s'（libssh2 无法匹配）"),
              lineno, tok);
         return 0;
     }
@@ -153,7 +153,7 @@ static int parse_name(const char *tok, char **host_out, int *port_out,
             *port_out = atoi(rb + 2);
             return *host_out != NULL;
         }
-        warn(r, "第 %d 行：无法解析 '%s'", lineno, tok);
+        warn(r, HB_TR("第 %d 行：无法解析 '%s'"), lineno, tok);
         return 0;
     }
     *host_out = strdup(tok);
@@ -215,7 +215,7 @@ static void import_one(imp_t *im, const char *host, int port,
     }
     if (strv_has(im->ck, im->nck, ck)) {       /* 同键不同 key → 冲突 */
         warn(im->r,
-             "第 %d 行：%s:%d 的 %s 与已有记录冲突（可能已更换主机密钥），已跳过",
+             HB_TR("第 %d 行：%s:%d 的 %s 与已有记录冲突（可能已更换主机密钥），已跳过"),
              lineno, host, port, keytype);
         im->r->skipped++;
         free(dk); free(ck);
@@ -261,7 +261,7 @@ static void import_line(imp_t *im, char *line, int lineno)
         size_t ml = strcspn(p, " \t");
         if (ml >= sizeof m) ml = sizeof m - 1;
         memcpy(m, p, ml); m[ml] = 0;
-        warn(im->r, "第 %d 行：%s 条目暂不支持，已跳过", lineno, m);
+        warn(im->r, HB_TR("第 %d 行：%s 条目暂不支持，已跳过"), lineno, m);
         return;
     }
 
@@ -278,11 +278,11 @@ static void import_line(imp_t *im, char *line, int lineno)
     if (*p) *p = 0;                           /* comment 丢弃 */
 
     if (!*hosts || !*keytype || !*b64) {
-        warn(im->r, "第 %d 行：字段不足，已跳过", lineno);
+        warn(im->r, HB_TR("第 %d 行：字段不足，已跳过"), lineno);
         return;
     }
     if (!b64_key_ok(b64, &fp)) {
-        warn(im->r, "第 %d 行：base64 密钥解码失败，已跳过", lineno);
+        warn(im->r, HB_TR("第 %d 行：base64 密钥解码失败，已跳过"), lineno);
         return;
     }
 

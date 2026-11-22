@@ -1007,7 +1007,7 @@ static void own_input(hb_share_owner *o, part *p,
 {
     uint8_t *pt;
     size_t pl = 0;
-    static const char RO[] = "只读模式，输入未生效";
+    const char *ro = HB_TR("只读模式，输入未生效");
 
     if (p->perm == HB_SHARE_COLLAB && p->k_in) {
         pt = hb_sync_open(p->k_in, sealed, n, ad, ad_len, &pl);
@@ -1019,9 +1019,9 @@ static void own_input(hb_share_owner *o, part *p,
         }
     }
     /* perm 不符、k_in 未发放或解密失败（含用 K_out 伪造）→ 统一拒收并 NOTICE */
-    own_send(o, HB_FR_NOTICE, p->id, o->k_out, (const uint8_t *)RO,
-             sizeof RO - 1);
-    outq_ev(&o->q, HB_SH_EV_INPUT_REJECTED, p->id, 0, NULL, NULL, RO);
+    own_send(o, HB_FR_NOTICE, p->id, o->k_out, (const uint8_t *)ro,
+             strlen(ro));
+    outq_ev(&o->q, HB_SH_EV_INPUT_REJECTED, p->id, 0, NULL, NULL, ro);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1915,7 +1915,7 @@ static void peer_frame(hb_share_peer *p, const uint8_t *data, size_t n)
                     p->isk = NULL;
                     p->ended = true;
                     outq_ev(&p->q, HB_SH_EV_PAKE_FAIL, 0, 0,
-                            NULL, NULL, "配对码错误");
+                            NULL, NULL, HB_TR("配对码错误"));
                     outq_ev(&p->q, HB_SH_EV_ENDED, 0, 0,
                             NULL, NULL, "pake_fail");
                 }

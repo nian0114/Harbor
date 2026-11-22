@@ -562,7 +562,7 @@ hb_rd *hb_rd_new(const hb_rd_opts *o)
     if (pthread_create(&rd->th, NULL, rd_thread, rd) == 0)
         rd->th_started = true;
     else {
-        hb__rd_error(rd, HB_RD_ERR_PROTOCOL, "无法启动连接线程", strerror(errno));
+        hb__rd_error(rd, HB_RD_ERR_PROTOCOL, HB_TR("无法启动连接线程"), strerror(errno));
         rd->exited = true;
     }
     return rd;

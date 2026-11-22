@@ -440,14 +440,14 @@ void hb_sftp_result_free(hb_sftp_result *r)
 static const char *status_msg(hb_sftp_status st)
 {
     switch (st) {
-    case HB_SFTP_ERR_NOENT:     return "没有那个文件或目录";
-    case HB_SFTP_ERR_PERM:      return "权限不足";
-    case HB_SFTP_ERR_EXISTS:    return "目标已存在";
-    case HB_SFTP_ERR_NOTEMPTY:  return "目录非空";
-    case HB_SFTP_ERR_CONN:      return "连接已断开";
-    case HB_SFTP_ERR_CANCELLED: return "已取消";
-    case HB_SFTP_ERR_IO:        return "读写错误";
-    default:                    return "操作失败";
+    case HB_SFTP_ERR_NOENT:     return HB_TR("没有那个文件或目录");
+    case HB_SFTP_ERR_PERM:      return HB_TR("权限不足");
+    case HB_SFTP_ERR_EXISTS:    return HB_TR("目标已存在");
+    case HB_SFTP_ERR_NOTEMPTY:  return HB_TR("目录非空");
+    case HB_SFTP_ERR_CONN:      return HB_TR("连接已断开");
+    case HB_SFTP_ERR_CANCELLED: return HB_TR("已取消");
+    case HB_SFTP_ERR_IO:        return HB_TR("读写错误");
+    default:                    return HB_TR("操作失败");
     }
 }
 
@@ -505,13 +505,13 @@ static void emit_res(eng *e, sfreq *r, hb_sftp_rkind kind,
         char sb[160];
         if (r->nskip_bad && r->nskip_link)
             snprintf(sb, sizeof sb,
-                     "已跳过 %u 个非法文件名、%u 个符号链接",
+                     HB_TR("已跳过 %u 个非法文件名、%u 个符号链接"),
                      r->nskip_bad, r->nskip_link);
         else if (r->nskip_bad)
-            snprintf(sb, sizeof sb, "已跳过 %u 个非法文件名",
+            snprintf(sb, sizeof sb, HB_TR("已跳过 %u 个非法文件名"),
                      r->nskip_bad);
         else
-            snprintf(sb, sizeof sb, "已跳过 %u 个符号链接",
+            snprintf(sb, sizeof sb, HB_TR("已跳过 %u 个符号链接"),
                      r->nskip_link);
         res->message = strdup(sb);
     } else {
@@ -822,7 +822,7 @@ static int step_stat(eng *e, sfreq *r)
         return req_fail(e, r);
     en = calloc(1, sizeof *en);
     if (!en)
-        return req_done(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+        return req_done(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
     fill_entry(en, base_name(r->a), strlen(base_name(r->a)),
                &e->ctl.att, NULL);
     r->ents = en;
@@ -865,7 +865,7 @@ static int step_list(eng *e, sfreq *r)
             return req_fail(e, r);
         f = calloc(1, sizeof *f);
         if (!f)
-            return req_done(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+            return req_done(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
         f->dh = e->ctl.h;
         f->path = strdup(r->a);
         r->stk = f;
@@ -893,7 +893,7 @@ static int step_list(eng *e, sfreq *r)
             size_t nc = r->ecap ? r->ecap * 2 : 32;
             hb_sftp_entry *ne = realloc(r->ents, nc * sizeof *ne);
             if (!ne)
-                return req_done(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+                return req_done(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
             r->ents = ne;
             r->ecap = nc;
         }
@@ -901,7 +901,7 @@ static int step_list(eng *e, sfreq *r)
         fill_entry(en, e->ctl.nbuf, (size_t)e->ctl.rc, &e->ctl.att,
                    e->ctl.lbuf);
         if (!en->name)
-            return req_done(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+            return req_done(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
         r->nents++;
         return ST_WORK;
     }
@@ -924,7 +924,7 @@ static int step_list(eng *e, sfreq *r)
         if (!r->pend_child) {
             r->pend_child = path_join(r->a, r->ents[i].name);
             if (!r->pend_child)
-                return req_done(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+                return req_done(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
         }
         if (ctl_do(e, r, CTL_READLINK, r->pend_child, NULL, 0, NULL,
                    NULL) == ST_BLK)
@@ -1018,14 +1018,14 @@ static int step_remove(eng *e, sfreq *r)
             return req_fail(e, r);
         f = calloc(1, sizeof *f);
         if (!f)
-            return req_done(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+            return req_done(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
         f->dh = e->ctl.h;
         f->path = strdup(p);
         free(r->pend_child);
         r->pend_child = NULL;
         if (!f->path) {
             free(f);
-            return req_done(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+            return req_done(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
         }
         f->up = r->stk;
         r->stk = f;
@@ -1050,7 +1050,7 @@ static int step_remove(eng *e, sfreq *r)
         free(r->pend_child);
         r->pend_child = path_join(r->stk->path, e->ctl.nbuf);
         if (!r->pend_child)
-            return req_done(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+            return req_done(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
         r->st = ((e->ctl.att.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) &&
                  LIBSSH2_SFTP_S_ISDIR(e->ctl.att.permissions))
                 ? 1 : 3;
@@ -1304,7 +1304,7 @@ static int xfer_step(eng *e, sfreq *r)
             }
             if (xent_push(&x->files, &x->nf, &x->fcap, r->a, r->b,
                           &st, NULL))
-                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
             x->total = x->files[0].size;
             x->files_total = 1;
             r->st = X_WALK;
@@ -1327,7 +1327,7 @@ static int xfer_step(eng *e, sfreq *r)
         }
         if (xent_push(&x->files, &x->nf, &x->fcap, r->b, r->a, NULL,
                       &e->ctl.att))
-            return xfer_fail(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+            return xfer_fail(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
         x->total = x->files[0].size;
         x->files_total = 1;
         r->st = X_WALK;
@@ -1345,7 +1345,7 @@ static int xfer_step(eng *e, sfreq *r)
                 if ((e->ctl.att.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS)
                     && !LIBSSH2_SFTP_S_ISDIR(e->ctl.att.permissions))
                     return xfer_fail(e, r, HB_SFTP_ERR_EXISTS,
-                                     "目标已存在且不是目录");
+                                     HB_TR("目标已存在且不是目录"));
                 nr = path_join(r->b, base_name(r->a));
             } else if (last_err(e, e->ctl.sf) == HB_SFTP_ERR_NOENT) {
                 nr = strdup(r->b);
@@ -1355,7 +1355,7 @@ static int xfer_step(eng *e, sfreq *r)
             if (!nr || xent_push(&x->dirs, &x->nd, &x->dcap, r->a, nr,
                                  NULL, NULL)) {
                 free(nr);
-                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
             }
             free(nr);
             if (walk_local(x, r->a, x->dirs[0].rp, &r->nskip_link) < 0)
@@ -1383,7 +1383,7 @@ static int xfer_step(eng *e, sfreq *r)
                 LIBSSH2_SFTP_S_ISDIR(e->ctl.att.permissions)) {
                 char *p = path_join(r->b, base_name(r->a));
                 if (!p)
-                    return xfer_fail(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+                    return xfer_fail(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
                 free(x->files[0].rp);
                 x->files[0].rp = p;
             } else if (e->ctl.rc < 0 &&
@@ -1405,7 +1405,7 @@ static int xfer_step(eng *e, sfreq *r)
                 return xfer_fail(e, r, last_err(e, e->ctl.sf), NULL);
             f = calloc(1, sizeof *f);
             if (!f)
-                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
             f->dh = e->ctl.h;
             f->path = strdup(p);
             if (!r->stk) {
@@ -1422,7 +1422,7 @@ static int xfer_step(eng *e, sfreq *r)
                     free(f->path);
                     free(f);
                     return xfer_fail(e, r, HB_SFTP_ERR_OTHER,
-                                     "内存不足");
+                                     HB_TR("内存不足"));
                 }
                 f->lpath = lr;          /* dirs[0].lp 持有同一字符串副本 */
             } else {
@@ -1435,7 +1435,7 @@ static int xfer_step(eng *e, sfreq *r)
                 free(f->path);
                 free(f->lpath);
                 free(f);
-                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
             }
             f->up = r->stk;
             r->stk = f;
@@ -1470,7 +1470,7 @@ static int xfer_step(eng *e, sfreq *r)
             if (!rp || !lp) {
                 free(rp);
                 free(lp);
-                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
             }
             if ((e->ctl.att.flags & LIBSSH2_SFTP_ATTR_PERMISSIONS) &&
                 LIBSSH2_SFTP_S_ISDIR(e->ctl.att.permissions)) {
@@ -1479,7 +1479,7 @@ static int xfer_step(eng *e, sfreq *r)
                     free(rp);
                     free(lp);
                     return xfer_fail(e, r, HB_SFTP_ERR_OTHER,
-                                     "内存不足");
+                                     HB_TR("内存不足"));
                 }
                 free(r->pend_child);
                 r->pend_child = rp;
@@ -1492,7 +1492,7 @@ static int xfer_step(eng *e, sfreq *r)
                           &e->ctl.att)) {
                 free(rp);
                 free(lp);
-                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
             }
             x->total += x->files[x->nf - 1].size;
             x->files_total = (uint32_t)x->nf;
@@ -1522,7 +1522,7 @@ static int xfer_step(eng *e, sfreq *r)
                 char *p = path_join(r->b, base_name(r->a));
                 if (!p)
                     return xfer_fail(e, r, HB_SFTP_ERR_OTHER,
-                                     "内存不足");
+                                     HB_TR("内存不足"));
                 free(x->files[0].lp);
                 x->files[0].lp = p;
             }
@@ -1530,7 +1530,7 @@ static int xfer_step(eng *e, sfreq *r)
             x->fi = 0;
             return ST_WORK;
         }
-        return xfer_fail(e, r, HB_SFTP_ERR_OTHER, "内部状态错误");
+        return xfer_fail(e, r, HB_SFTP_ERR_OTHER, HB_TR("内部状态错误"));
 
     case X_MKDIRS:              /* 先建完所有目录再传文件 */
         if (x->di >= x->nd) {
@@ -1577,7 +1577,7 @@ static int xfer_step(eng *e, sfreq *r)
         x->cur_mtime = f->mtime;
         x->cur_mode = f->mode;
         if (!x->base || !x->fin)
-            return xfer_fail(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+            return xfer_fail(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
         /* 纵深防御：递归下载时落盘目标必须在下载根内（名字早已校验，
          * 这里再拦一次防服务器构造的怪路径）。 */
         if (!up && x->nd > 0 &&
@@ -1637,7 +1637,7 @@ static int xfer_step(eng *e, sfreq *r)
         {
             char *v = ren_variant(x->base, x->ren_n);
             if (!v)
-                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, "内存不足");
+                return xfer_fail(e, r, HB_SFTP_ERR_OTHER, HB_TR("内存不足"));
             free(x->fin);
             x->fin = v;
         }
@@ -1669,7 +1669,7 @@ static int xfer_step(eng *e, sfreq *r)
                 x->part = part_name(x->fin);
                 if (!x->part)
                     return xfer_fail(e, r, HB_SFTP_ERR_OTHER,
-                                     "内存不足");
+                                     HB_TR("内存不足"));
             }
             if (ctl_do(e, r, CTL_OPEN_W, x->part, NULL, 0600, NULL,
                        NULL) == ST_BLK)
@@ -1968,7 +1968,7 @@ static void eng_promote(eng *e)
             *pp = r->next;
             id_del(e, r->id);
             emit_res(e, r, HB_SFTP_R_DONE, HB_SFTP_ERR_CANCELLED,
-                     "已取消");
+                     HB_TR("已取消"));
             req_free(r);
             continue;
         }
@@ -2239,7 +2239,7 @@ int hb__sftp_run(void *ctx, hb_session *s)
         if (!h->disconnect_emitted) {
             h->disconnect_emitted = true;
             hb__ssh_set_err(h, "sftp transport lost");
-            hb__ssh_emit_error(h, HB_SSH_ERR_DISCONNECTED, "连接已断开");
+            hb__ssh_emit_error(h, HB_SSH_ERR_DISCONNECTED, HB_TR("连接已断开"));
         }
         eng_abort_all(e, HB_SFTP_ERR_CONN);
     } else {

@@ -539,11 +539,11 @@ static int mk_listener_fd(const struct addrinfo *ai)
 static void bind_fail_msg(char **err, const char *addr, int port, int e2)
 {
     if (e2 == EADDRINUSE)
-        set_err(err, "%s:%d 已被占用（%s）", addr, port, strerror(e2));
+        set_err(err, HB_TR("%s:%d 已被占用（%s）"), addr, port, strerror(e2));
     else if (e2 == EACCES && port > 0 && port < 1024)
-        set_err(err, "权限不足：绑定 1024 以下端口需要 root");
+        set_err(err, HB_TR("权限不足：绑定 1024 以下端口需要 root"));
     else
-        set_err(err, "绑定 %s:%d 失败（%s）", addr, port, strerror(e2));
+        set_err(err, HB_TR("绑定 %s:%d 失败（%s）"), addr, port, strerror(e2));
 }
 
 /* 绑定全部解析结果；port==0 时首个成功绑定的端口被其余沿用。
@@ -556,7 +556,7 @@ static int bind_listeners(const char *addr, int port, int *fds, int maxfds,
 
     res = resolve_numeric(addr, port);
     if (!res) {
-        set_err(err, "无效绑定地址：%s", addr);
+        set_err(err, HB_TR("无效绑定地址：%s"), addr);
         return -1;
     }
     for (ai = res; ai && n < maxfds; ai = ai->ai_next) {
@@ -589,14 +589,14 @@ static int bind_listeners(const char *addr, int port, int *fds, int maxfds,
         if (listen(fd, PF_BACKLOG) != 0) {
             int e2 = errno;
             close(fd);
-            set_err(err, "监听 %s:%d 失败（%s）", addr, real, strerror(e2));
+            set_err(err, HB_TR("监听 %s:%d 失败（%s）"), addr, real, strerror(e2));
             goto fail;
         }
         fds[n++] = fd;
     }
     freeaddrinfo(res);
     if (n == 0) {
-        set_err(err, "绑定 %s:%d 失败（无可用地址）", addr, port);
+        set_err(err, HB_TR("绑定 %s:%d 失败（无可用地址）"), addr, port);
         return -1;
     }
     *bound_out = real;
@@ -615,7 +615,7 @@ hb_err hb_pf_probe_bind(const char *addr, int port, char **err)
     if (err)
         *err = NULL;
     if (port < 0 || port > 65535) {
-        set_err(err, "无效端口：%d", port);
+        set_err(err, HB_TR("无效端口：%d"), port);
         return HB_ERR_INVALID;
     }
     na = norm_bind_addr(addr);
@@ -623,7 +623,7 @@ hb_err hb_pf_probe_bind(const char *addr, int port, char **err)
         return HB_ERR_NOMEM;
     res = resolve_numeric(na, port);
     if (!res) {
-        set_err(err, "无效绑定地址：%s", na);
+        set_err(err, HB_TR("无效绑定地址：%s"), na);
         free(na);
         return HB_ERR_INVALID;
     }
@@ -704,17 +704,17 @@ hb_session *hb_session_new_forward(const hb_ssh_opts *opts,
         rule->kind > HB_PF_DYNAMIC ||
         rule->bind_port < 0 || rule->bind_port > 65535 ||
         rule->dest_port < 0 || rule->dest_port > 65535) {
-        set_err(err, "无效的转发规则");
+        set_err(err, HB_TR("无效的转发规则"));
         return NULL;
     }
     if (rule->kind != HB_PF_DYNAMIC &&
         (!rule->dest_addr || !*rule->dest_addr || rule->dest_port <= 0)) {
-        set_err(err, "转发规则缺少目标地址或端口");
+        set_err(err, HB_TR("转发规则缺少目标地址或端口"));
         return NULL;
     }
     e = calloc(1, sizeof *e);
     if (!e) {
-        set_err(err, "内存不足");
+        set_err(err, HB_TR("内存不足"));
         return NULL;
     }
     e->kind = rule->kind;
@@ -723,7 +723,7 @@ hb_session *hb_session_new_forward(const hb_ssh_opts *opts,
     e->dest_addr = rule->dest_addr ? strdup(rule->dest_addr) : NULL;
     e->dest_port = rule->dest_port;
     if (!e->bind_addr || (rule->dest_addr && !e->dest_addr)) {
-        set_err(err, "内存不足");
+        set_err(err, HB_TR("内存不足"));
         goto fail;
     }
 
@@ -743,7 +743,7 @@ hb_session *hb_session_new_forward(const hb_ssh_opts *opts,
     oo.reuse_vt = NULL;
     s = hb__ssh_new_forward(&oo, e);   /* 无条件接管 e（含失败） */
     if (!s) {
-        set_err(err, "无法创建 SSH 会话");
+        set_err(err, HB_TR("无法创建 SSH 会话"));
         return NULL;
     }
     if (bound_port)
@@ -789,13 +789,13 @@ int hb__pf_connect(void *eng, hb_ssh *h, hop *hp, int64_t dl)
     e->hp = hp;
 
     if (e->kind != HB_PF_REMOTE) {
-        stage_pf(e, 4, "本地监听 %s:%d 已就绪", e->bind_addr, e->bound_port);
+        stage_pf(e, 4, HB_TR("本地监听 %s:%d 已就绪"), e->bind_addr, e->bound_port);
         pf_connected(e);
         return 0;
     }
 
     /* remote：向服务器申请 tcpip-forward 监听 */
-    stage_pf(e, 4, "请求远程转发 %s:%d…", e->bind_addr, e->bind_port);
+    stage_pf(e, 4, HB_TR("请求远程转发 %s:%d…"), e->bind_addr, e->bind_port);
     for (;;) {
         e->lst = libssh2_channel_forward_listen_ex(
             hp->sess, e->bind_addr, e->bind_port, &e->bound_port, 16);
@@ -806,14 +806,14 @@ int hb__pf_connect(void *eng, hb_ssh *h, hop *hp, int64_t dl)
         w = hb__ssh_wait_dir(h, hp, dl);
         if (w) {
             if (w == W_CANCEL) {
-                hb__ssh_emit_error(h, HB_SSH_ERR_CANCELLED, "连接已取消");
+                hb__ssh_emit_error(h, HB_SSH_ERR_CANCELLED, HB_TR("连接已取消"));
                 return -HB_SSH_ERR_CANCELLED;
             }
             if (w == W_TMOUT) {
-                hb__ssh_emit_error(h, HB_SSH_ERR_TIMEOUT, "请求远程转发超时");
+                hb__ssh_emit_error(h, HB_SSH_ERR_TIMEOUT, HB_TR("请求远程转发超时"));
                 return -HB_SSH_ERR_TIMEOUT;
             }
-            hb__ssh_emit_error(h, HB_SSH_ERR_FORWARD, "远程转发请求失败");
+            hb__ssh_emit_error(h, HB_SSH_ERR_FORWARD, HB_TR("远程转发请求失败"));
             return -HB_SSH_ERR_FORWARD;
         }
     }
@@ -821,27 +821,27 @@ int hb__pf_connect(void *eng, hb_ssh *h, hop *hp, int64_t dl)
         char msg[512];
         hb__ssh_set_lib_err(h, hp->sess);
         snprintf(msg, sizeof msg,
-                 "服务器拒绝远程转发 %s:%d：检查 sshd_config "
+                 HB_TR("服务器拒绝远程转发 %s:%d：检查 sshd_config "
                  "AllowTcpForwarding（需 yes 或 remote）、"
                  "服务器侧端口是否被占用、1024 以下端口需 root、"
-                 "非回环绑定需 GatewayPorts",
+                 "非回环绑定需 GatewayPorts"),
                  e->bind_addr, e->bind_port);
         hb__ssh_emit_error(h, HB_SSH_ERR_FORWARD, msg);
         return -HB_SSH_ERR_FORWARD;
     }
 
     /* dest 本地解析（线程化 + 取消）一次 */
-    stage_pf(e, 4, "解析转发目标 %s:%d…", e->dest_addr, e->dest_port);
+    stage_pf(e, 4, HB_TR("解析转发目标 %s:%d…"), e->dest_addr, e->dest_port);
     w = hb__ssh_resolve(h, e->dest_addr, e->dest_port, 10000, &e->dest_ai);
     if (w == W_CANCEL) {
         libssh2_channel_forward_cancel(e->lst);
         e->lst = NULL;
-        hb__ssh_emit_error(h, HB_SSH_ERR_CANCELLED, "连接已取消");
+        hb__ssh_emit_error(h, HB_SSH_ERR_CANCELLED, HB_TR("连接已取消"));
         return -HB_SSH_ERR_CANCELLED;
     }
     if (w || !e->dest_ai) {
         char msg[512];
-        snprintf(msg, sizeof msg, "无法解析转发目标 %s:%d",
+        snprintf(msg, sizeof msg, HB_TR("无法解析转发目标 %s:%d"),
                  e->dest_addr, e->dest_port);
         libssh2_channel_forward_cancel(e->lst);
         e->lst = NULL;
@@ -850,7 +850,7 @@ int hb__pf_connect(void *eng, hb_ssh *h, hop *hp, int64_t dl)
         return -HB_SSH_ERR_RESOLVE;
     }
 
-    stage_pf(e, 4, "已连接");
+    stage_pf(e, 4, HB_TR("已连接"));
     pf_connected(e);
     return 0;
 }
@@ -1015,7 +1015,7 @@ static void open_step(pfeng *e, int *prog)
         return;
     if (!c->dead && hb_now_ms() > c->open_dl) {
         e->opening = NULL;
-        warnf(e, "打开到 %s:%d 的通道超时", c->dhost, c->dport);
+        warnf(e, HB_TR("打开到 %s:%d 的通道超时"), c->dhost, c->dport);
         conn_kill(e, c);
         (*prog)++;
         return;
@@ -1052,7 +1052,7 @@ static void open_step(pfeng *e, int *prog)
         char *em = NULL;
         int el = 0;
         libssh2_session_last_error(e->hp->sess, &em, &el, 0);
-        warnf(e, "无法连接目标 %s:%d（经 SSH 服务器）：%s",
+        warnf(e, HB_TR("无法连接目标 %s:%d（经 SSH 服务器）：%s"),
               c->dhost, c->dport,
               (em && el) ? em : "channel open failed");
     }
@@ -1077,7 +1077,7 @@ static bool remote_resolve(pfeng *e)
     w = hb__ssh_resolve(e->h, e->dest_addr, e->dest_port, PF_RS_MS, &ai);
     if (w || !ai) {
         e->dest_retry = hb_now_ms() + 5000;
-        warnf(e, "无法解析转发目标 %s:%d", e->dest_addr, e->dest_port);
+        warnf(e, HB_TR("无法解析转发目标 %s:%d"), e->dest_addr, e->dest_port);
         return false;
     }
     if (e->dest_ai)
@@ -1111,7 +1111,7 @@ static void accept_step(pfeng *e, int *prog)
                 close(fd);
                 if (!e->cap_warned) {
                     e->cap_warned = true;
-                    warnf(e, "并发连接数已达上限 %d，新连接已丢弃",
+                    warnf(e, HB_TR("并发连接数已达上限 %d，新连接已丢弃"),
                           PF_MAX_CONN);
                 }
                 continue;
@@ -1143,7 +1143,7 @@ static void accept_step(pfeng *e, int *prog)
                     push_dying(e, ch);
                     if (e->active >= PF_MAX_CONN && !e->cap_warned) {
                         e->cap_warned = true;
-                        warnf(e, "并发连接数已达上限 %d，新连接已丢弃",
+                        warnf(e, HB_TR("并发连接数已达上限 %d，新连接已丢弃"),
                               PF_MAX_CONN);
                     }
                     continue;
@@ -1179,7 +1179,7 @@ static void lconn_step(pfeng *e, pfconn *c, int *prog)
     int rc, ce;
     if (c->fd < 0) {
         if (!c->ai) {
-            warnf(e, "无法连接目标 %s:%d（本地）：无可用地址",
+            warnf(e, HB_TR("无法连接目标 %s:%d（本地）：无可用地址"),
                   e->dest_addr, e->dest_port);
             conn_kill(e, c);
             return;
@@ -1202,7 +1202,7 @@ static void lconn_step(pfeng *e, pfconn *c, int *prog)
     }
     if (errno == EALREADY || errno == EINPROGRESS) {
         if (hb_now_ms() > c->hs_dl) {
-            warnf(e, "连接目标 %s:%d（本地）超时", e->dest_addr, e->dest_port);
+            warnf(e, HB_TR("连接目标 %s:%d（本地）超时"), e->dest_addr, e->dest_port);
             conn_kill(e, c);
         }
         return;
@@ -1214,7 +1214,7 @@ static void lconn_step(pfeng *e, pfconn *c, int *prog)
     c->ai = c->ai->ai_next;
     (*prog)++;
     if (!c->ai) {
-        warnf(e, "无法连接目标 %s:%d（本地）：%s",
+        warnf(e, HB_TR("无法连接目标 %s:%d（本地）：%s"),
               e->dest_addr, e->dest_port, strerror(ce));
         conn_kill(e, c);
         e->dest_bad = true;          /* 触发下次接受前再解析 */
@@ -1649,7 +1649,7 @@ int hb__pf_run(void *ctx, hb_session *s)
         if (!h->disconnect_emitted) {
             h->disconnect_emitted = true;
             hb__ssh_set_err(h, "forward transport lost");
-            hb__ssh_emit_error(h, HB_SSH_ERR_DISCONNECTED, "连接已断开");
+            hb__ssh_emit_error(h, HB_SSH_ERR_DISCONNECTED, HB_TR("连接已断开"));
         }
         conns_teardown(e, false);
         return -1;

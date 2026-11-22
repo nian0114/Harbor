@@ -93,7 +93,7 @@ static char *vnc_get_password(rfbClient *client)
         return strdup(rd->password); /* libvncclient 用后 free() */
     hb__rd_arm_prompt(rd);
     hb_rd_event ev = { .type = HB_RD_EV_PROMPT, .code = 0,
-                       .text = (char *)"服务器要求 VNC 密码" };
+                       .text = (char *)HB_TR("服务器要求 VNC 密码") };
     hb__rd_push(rd, &ev);
     char *user = NULL, *pass = NULL, *dom = NULL;
     if (!hb__rd_wait_prompt(rd, &user, &pass, &dom)) {
@@ -281,12 +281,12 @@ void hb__rd_vnc_run(hb_rd *rd)
     char det[512] = { 0 };
     hb_rd_err err;
 
-    hb__rd_stage(rd, "正在连接…");
+    hb__rd_stage(rd, HB_TR("正在连接…"));
     int fd = tcp_connect(rd, rd->o.connect_timeout_s, &err, det, sizeof det);
     if (fd < 0) {
-        const char *cn = err == HB_RD_ERR_TIMEOUT   ? "连接超时"
-                         : err == HB_RD_ERR_CANCELLED ? "已取消"
-                                                      : "无法连接到服务器";
+        const char *cn = err == HB_RD_ERR_TIMEOUT   ? HB_TR("连接超时")
+                         : err == HB_RD_ERR_CANCELLED ? HB_TR("已取消")
+                                                      : HB_TR("无法连接到服务器");
         hb__rd_error(rd, err, cn, det);
         return;
     }
@@ -294,7 +294,7 @@ void hb__rd_vnc_run(hb_rd *rd)
     be->sock = fd;
     pthread_mutex_unlock(&be->mu);
 
-    hb__rd_stage(rd, "RFB 握手…");
+    hb__rd_stage(rd, HB_TR("RFB 握手…"));
     /* 静默 libvncclient 日志（可能含协议细节；口令永不经此路径） */
     rfbClientLog = vnc_log_quiet;
     rfbClientErr = vnc_log_quiet;
@@ -323,11 +323,11 @@ void hb__rd_vnc_run(hb_rd *rd)
         be->cl = NULL;
         pthread_mutex_unlock(&be->mu);
         if (hb__rd_closing(rd) || be->cancelled)
-            hb__rd_error(rd, HB_RD_ERR_CANCELLED, "已取消", NULL);
+            hb__rd_error(rd, HB_RD_ERR_CANCELLED, HB_TR("已取消"), NULL);
         else if (be->auth_attempted)
-            hb__rd_error(rd, HB_RD_ERR_AUTH, "密码错误", "vncAuth failed");
+            hb__rd_error(rd, HB_RD_ERR_AUTH, HB_TR("密码错误"), "vncAuth failed");
         else
-            hb__rd_error(rd, HB_RD_ERR_PROTOCOL, "RFB 握手失败",
+            hb__rd_error(rd, HB_RD_ERR_PROTOCOL, HB_TR("RFB 握手失败"),
                          "server does not speak RFB or auth type mismatch");
         return;
     }
@@ -368,14 +368,14 @@ void hb__rd_vnc_run(hb_rd *rd)
             if (errno == EINTR)
                 continue;
             if (!hb__rd_closing(rd))
-                hb__rd_error(rd, HB_RD_ERR_DISCONNECTED, "连接中断",
+                hb__rd_error(rd, HB_RD_ERR_DISCONNECTED, HB_TR("连接中断"),
                              "poll failed");
             break;
         }
         if (cl->buffered == 0 && (pfd[0].revents & (POLLERR | POLLHUP | POLLNVAL)) &&
             !(pfd[0].revents & POLLIN)) {
             if (!hb__rd_closing(rd))
-                hb__rd_error(rd, HB_RD_ERR_DISCONNECTED, "连接中断",
+                hb__rd_error(rd, HB_RD_ERR_DISCONNECTED, HB_TR("连接中断"),
                              "socket closed");
             break;
         }
@@ -412,7 +412,7 @@ void hb__rd_vnc_run(hb_rd *rd)
         bool sock_ready = cl->buffered > 0 || (pfd[0].revents & POLLIN);
         if (sock_ready && !HandleRFBServerMessage(cl)) {
             if (!hb__rd_closing(rd))
-                hb__rd_error(rd, HB_RD_ERR_DISCONNECTED, "连接中断",
+                hb__rd_error(rd, HB_RD_ERR_DISCONNECTED, HB_TR("连接中断"),
                              "HandleRFBServerMessage failed");
             break;
         }
