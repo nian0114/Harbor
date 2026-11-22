@@ -4,6 +4,8 @@
 #include <glib-unix.h>
 #include <string.h>
 
+static void send_input_scroll_bottom(HbTerminal *t);
+
 #define PAD_X 16.0
 #define PAD_Y 14.0
 #define WHEEL_LINES 3
@@ -17,6 +19,8 @@ struct _HbTerminal {
     hb_session *sess;            /* borrowed */
     hb_vt      *preview_vt;      /* 预览模式：无会话的内部 vt（设置页） */
     char       *preview_text;    /* 预览 ANSI 文本；尺寸变化时重喂 */
+    hb_vt      *ext_vt;          /* 外部 vt（FR-12 viewer，borrowed） */
+    gboolean    ext_writable;    /* ext 模式：false=只读，输入被拒 */
     guint       ev_source;
 
     const HbTermTheme *theme;
@@ -132,9 +136,18 @@ static gboolean same_rgba(const GdkRGBA *a, const GdkRGBA *b)
 /* 渲染/滚动/查找走"当前 vt"：预览模式用内部 vt，否则用 session 的 */
 static hb_vt *term_vt(HbTerminal *t)
 {
+    if (t->ext_vt)
+        return t->ext_vt;
     if (t->preview_vt)
         return t->preview_vt;
     return t->sess ? hb_session_vt(t->sess) : NULL;
+}
+
+/* ext 模式下所有输入经 vt 的 output_fn（服务挂到 hb_share_peer_input）
+ * 统一编码送出；ext_writable=false 走 dead-input 拒绝路径。 */
+static gboolean ext_dead(HbTerminal *t)
+{
+    return t->ext_vt && !t->ext_writable;
 }
 
 /* ------------------------------------------------------------------ */
@@ -463,6 +476,7 @@ void hb_terminal_set_session(HbTerminal *t, hb_session *s)
         t->ev_source = 0;
     }
     t->sess = s;
+    t->ext_vt = NULL;           /* session 模式与 ext 模式互斥 */
     t->dead = FALSE;
     t->scroll_off = 0;
     t->sel = FALSE;
@@ -491,6 +505,51 @@ void hb_terminal_set_session(HbTerminal *t, hb_session *s)
 hb_session *hb_terminal_get_session(HbTerminal *t)
 {
     return t->sess;
+}
+
+/* ------------------------- 外部 vt（FR-12 viewer） ------------------------- */
+
+void hb_terminal_set_external_vt(HbTerminal *t, hb_vt *v)
+{
+    hb_terminal_set_session(t, NULL);   /* 清 sess/ev_source + 复位命中 */
+    t->ext_vt = v;
+    t->ext_writable = FALSE;
+    t->dead = FALSE;
+    t->focused = TRUE;                  /* viewer 里实心块光标 */
+    t->blink_vis = TRUE;
+    if (v) {
+        t->last_total = hb_vt_total_pushed(v);
+        hb_vt_set_osc52_allowed(v, t->osc52);
+        if (!t->blink_src)
+            t->blink_src = g_timeout_add(BLINK_MS, blink_cb, t);
+    }
+    sync_adj(t);
+    gtk_widget_queue_draw(GTK_WIDGET(t));
+}
+
+void hb_terminal_set_external_writable(HbTerminal *t, gboolean writable)
+{
+    t->ext_writable = writable;
+}
+
+gboolean hb_terminal_external_writable(HbTerminal *t)
+{
+    return t->ext_writable;
+}
+
+void hb_terminal_external_poke(HbTerminal *t)
+{
+    if (!t->ext_vt)
+        return;
+    find_schedule(t);
+    sync_adj(t);
+    gtk_widget_queue_draw(GTK_WIDGET(t));
+}
+
+void hb_terminal_cell_size(HbTerminal *t, double *cw, double *ch)
+{
+    if (cw) *cw = t->cw;
+    if (ch) *ch = t->ch;
 }
 
 /* 预览 vt 重建：按当前尺寸新建再喂文本。resize 会把顶行推入 scrollback
@@ -570,8 +629,9 @@ static char *sel_text(HbTerminal *t)
 {
     hb_vt *v;
     int64_t r0, r1; int c0, c1;
-    if (!t->sel || !t->sess) return NULL;
-    v = hb_session_vt(t->sess);
+    if (!t->sel) return NULL;
+    v = term_vt(t);
+    if (!v) return NULL;
     sel_normalize(t, &r0, &c0, &r1, &c1);
     return hb_vt_get_text(v, (int)(r0 - (int64_t)hb_vt_total_pushed(v)),
                           c0,
@@ -583,8 +643,8 @@ void hb_terminal_select_all(HbTerminal *t)
 {
     hb_vt *v;
     int rows, cols;
-    if (!t->sess) return;
-    v = hb_session_vt(t->sess);
+    v = term_vt(t);
+    if (!v) return;
     hb_vt_size(v, &rows, &cols);
     t->sel = TRUE;
     t->sel_a_r = (int64_t)hb_vt_total_pushed(v) - hb_vt_scrollback_count(v);
@@ -618,7 +678,12 @@ static void on_paste_text(GObject *src, GAsyncResult *res, gpointer ud)
 {
     HbTerminal *t = ud;
     char *txt = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(src), res, NULL);
-    if (txt && t->sess && hb_session_alive(t->sess)) {
+    if (txt && t->ext_vt && t->ext_writable) {
+        send_input_scroll_bottom(t);
+        hb_vt_paste(t->ext_vt, txt);
+    } else if (txt && t->ext_vt) {
+        g_signal_emit(t, sigs[SIG_DEAD_INPUT], 0, txt);
+    } else if (txt && t->sess && hb_session_alive(t->sess)) {
         hb_terminal_mirror_event me = { HB_MIRROR_PASTE, 0, 0, 0,
                                         txt, strlen(txt) };
         hb_session_paste(t->sess, txt);
@@ -751,8 +816,9 @@ static gboolean on_key_pressed(GtkEventControllerKey *kc, guint keyval,
         }
     }
 
-    if (!t->sess || !hb_session_alive(t->sess)) {
-        /* 断线时：可打印字符上报 dead-input，由页层缓冲到重连后发送 */
+    if (t->ext_vt ? !t->ext_writable
+                  : (!t->sess || !hb_session_alive(t->sess))) {
+        /* 断线/只读时：可打印字符上报 dead-input，由页层缓冲/提示 */
         guint32 uc = gdk_keyval_to_unicode(keyval);
         if (uc && uc >= 0x20 && uc != 0x7f && !ctrl &&
             !(state & GDK_ALT_MASK)) {
@@ -778,7 +844,10 @@ static gboolean on_key_pressed(GtkEventControllerKey *kc, guint keyval,
         if (keyval == GDK_KEY_ISO_Left_Tab)
             mods |= HB_MOD_SHIFT;
         send_input_scroll_bottom(t);
-        hb_session_key(t->sess, k, mods);
+        if (t->ext_vt)
+            hb_vt_key(t->ext_vt, k, mods);
+        else
+            hb_session_key(t->sess, k, mods);
         me.kind = HB_MIRROR_KEY; me.key = k; me.mods = mods;
         me.unichar = 0; me.text = NULL; me.len = 0;
         mirror_emit(t, &me);
@@ -792,7 +861,10 @@ static gboolean on_key_pressed(GtkEventControllerKey *kc, guint keyval,
             hb_terminal_mirror_event me = { HB_MIRROR_UNICHAR, 0,
                                             mods, uc, NULL, 0 };
             send_input_scroll_bottom(t);
-            hb_session_unichar(t->sess, uc, mods);
+            if (t->ext_vt)
+                hb_vt_unichar(t->ext_vt, uc, mods);
+            else
+                hb_session_unichar(t->sess, uc, mods);
             mirror_emit(t, &me);
             return TRUE;
         }
@@ -806,7 +878,10 @@ static gboolean on_key_pressed(GtkEventControllerKey *kc, guint keyval,
             hb_terminal_mirror_event me = { HB_MIRROR_UNICHAR, 0,
                                             mods, uc, NULL, 0 };
             send_input_scroll_bottom(t);
-            hb_session_unichar(t->sess, uc, mods);
+            if (t->ext_vt)
+                hb_vt_unichar(t->ext_vt, uc, mods);
+            else
+                hb_session_unichar(t->sess, uc, mods);
             mirror_emit(t, &me);
             return TRUE;
         }
@@ -818,7 +893,17 @@ static void on_im_commit(GtkIMContext *im, const gchar *str, gpointer ud)
 {
     HbTerminal *t = ud;
     (void)im;
-    if (t->sess && hb_session_alive(t->sess)) {
+    if (t->ext_vt && t->ext_writable) {
+        const char *p = str;
+        send_input_scroll_bottom(t);
+        while (*p) {
+            gunichar uc = g_utf8_get_char(p);
+            hb_vt_unichar(t->ext_vt, uc, 0);
+            p = g_utf8_next_char(p);
+        }
+    } else if (t->ext_vt) {
+        g_signal_emit(t, sigs[SIG_DEAD_INPUT], 0, str);
+    } else if (t->sess && hb_session_alive(t->sess)) {
         hb_terminal_mirror_event me = { HB_MIRROR_RAW, 0, 0, 0,
                                         str, strlen(str) };
         send_input_scroll_bottom(t);
@@ -865,7 +950,9 @@ static void on_focus_enter(GtkEventControllerFocus *f, gpointer ud)
     (void)f;
     t->focused = TRUE;
     gtk_im_context_focus_in(t->im);
-    if (t->sess)
+    if (t->ext_vt && t->ext_writable)
+        hb_vt_focus(t->ext_vt, TRUE);
+    else if (t->sess)
         hb_vt_focus(hb_session_vt(t->sess), TRUE);
     t->blink_vis = TRUE;
     if (!t->blink_src)
@@ -879,7 +966,9 @@ static void on_focus_leave(GtkEventControllerFocus *f, gpointer ud)
     (void)f;
     t->focused = FALSE;
     gtk_im_context_focus_out(t->im);
-    if (t->sess)
+    if (t->ext_vt && t->ext_writable)
+        hb_vt_focus(t->ext_vt, FALSE);
+    else if (t->sess)
         hb_vt_focus(hb_session_vt(t->sess), FALSE);
     if (t->blink_src) {
         g_source_remove(t->blink_src);
@@ -939,7 +1028,7 @@ static int col_from_byte(hb_vt *v, int row, int byte_off)
 
 static void sel_word(HbTerminal *t, int64_t abs_r, int col)
 {
-    hb_vt *v = hb_session_vt(t->sess);
+    hb_vt *v = term_vt(t);
     int row = (int)(abs_r - (int64_t)hb_vt_total_pushed(v));
     int cols, lo = col, hi = col, i;
     hb_vt_size(v, NULL, &cols);
@@ -966,7 +1055,7 @@ static void sel_word(HbTerminal *t, int64_t abs_r, int col)
 static gboolean url_at(HbTerminal *t, int row, int col,
                        int *c0, int *c1, char **url)
 {
-    hb_vt *v = hb_session_vt(t->sess);
+    hb_vt *v = term_vt(t);
     char *line;
     GMatchInfo *mi;
     int byte_col;
@@ -1007,9 +1096,9 @@ static void on_drag_begin(GtkGestureDrag *g, double sx, double sy, gpointer ud)
 {
     HbTerminal *t = ud;
     hb_vt *v;
-    if (!t->sess) return;
-    v = hb_session_vt(t->sess);
-    if (hb_vt_mouse_mode(v) > 0 &&
+    v = term_vt(t);
+    if (!v) return;
+    if (hb_vt_mouse_mode(v) > 0 && !ext_dead(t) &&
         !(gtk_event_controller_get_current_event_state(
             GTK_EVENT_CONTROLLER(g)) & GDK_SHIFT_MASK)) {
         {
@@ -1068,13 +1157,14 @@ static void on_click_pressed(GtkGestureClick *g, int n_press,
     hb_vt *v;
     int64_t r; int c, d;
 
-    if (!t->sess) return;
-    v = hb_session_vt(t->sess);
+    v = term_vt(t);
+    if (!v) return;
 
     if (btn == GDK_BUTTON_SECONDARY)
         return;                 /* 右键菜单在 popover 控制器里处理 */
 
-    if (hb_vt_mouse_mode(v) > 0 && !(st & GDK_SHIFT_MASK) &&
+    if (hb_vt_mouse_mode(v) > 0 && !ext_dead(t) &&
+        !(st & GDK_SHIFT_MASK) &&
         (btn == GDK_BUTTON_PRIMARY || btn == GDK_BUTTON_MIDDLE)) {
         cell_from_xy(t, x, y, &r, &c, &d);
         hb_vt_mouse(v, d, c, (int)btn, TRUE, ev_mods(st));
@@ -1139,8 +1229,8 @@ static void on_click_released(GtkGestureClick *g, int n_press,
     hb_vt *v;
     int64_t r; int c, d;
     (void)n_press;
-    if (!t->sess) return;
-    v = hb_session_vt(t->sess);
+    v = term_vt(t);
+    if (!v || ext_dead(t)) return;
     if (hb_vt_mouse_mode(v) <= 0) return;
     btn = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(g));
     st = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(g));
@@ -1156,10 +1246,10 @@ static void on_motion(GtkEventControllerMotion *m, double x, double y,
     GdkModifierType st;
     gboolean hover = FALSE;
     (void)m;
-    if (!t->sess) return;
+    if (!term_vt(t)) return;
     st = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(m));
-    if ((st & GDK_CONTROL_MASK) && t->sess) {
-        hb_vt *v = hb_session_vt(t->sess);
+    if ((st & GDK_CONTROL_MASK) && term_vt(t)) {
+        hb_vt *v = term_vt(t);
         int64_t r; int c, d;
         cell_from_xy(t, x, y, &r, &c, &d);
         hover = url_at(t, (int)(r - (int64_t)hb_vt_total_pushed(v)),
@@ -1168,11 +1258,11 @@ static void on_motion(GtkEventControllerMotion *m, double x, double y,
             t->url_r = r;
     }
     /* vt 移动上报（mode 2/3） */
-    if (hb_vt_mouse_mode(hb_session_vt(t->sess)) >= 2 &&
+    if (!ext_dead(t) && hb_vt_mouse_mode(term_vt(t)) >= 2 &&
         !(st & GDK_SHIFT_MASK)) {
         int64_t r; int c, d;
         cell_from_xy(t, x, y, &r, &c, &d);
-        hb_vt_mouse(hb_session_vt(t->sess), d, c, 0,
+        hb_vt_mouse(term_vt(t), d, c, 0,
                     t->dragging, ev_mods(st));
     }
     if (hover != t->url_hover) {
@@ -1189,9 +1279,9 @@ static gboolean on_scroll(GtkEventControllerScroll *sc, double dx, double dy,
     HbTerminal *t = ud;
     hb_vt *v;
     (void)sc; (void)dx;
-    if (!t->sess) return FALSE;
-    v = hb_session_vt(t->sess);
-    if (hb_vt_mouse_mode(v) > 0)
+    v = term_vt(t);
+    if (!v) return FALSE;
+    if (hb_vt_mouse_mode(v) > 0 && !ext_dead(t))
         return TRUE;            /* 应用自己处理滚轮（mouse 模式下不滚） */
     if (hb_vt_altscreen(v)) {
         /* alt screen 无滚轮回滚：转成 3 次方向键 */
@@ -1199,7 +1289,10 @@ static gboolean on_scroll(GtkEventControllerScroll *sc, double dx, double dy,
             dy < 0 ? HB_KEY_UP : HB_KEY_DOWN, 0, 0, NULL, 0 };
         int i;
         for (i = 0; i < WHEEL_LINES; i++) {
-            hb_session_key(t->sess, me.key, 0);
+            if (t->ext_vt)
+                hb_vt_key(t->ext_vt, me.key, 0);
+            else
+                hb_session_key(t->sess, me.key, 0);
             mirror_emit(t, &me);
         }
         return TRUE;

@@ -27,6 +27,19 @@ void hb_terminal_set_cursor_blink(HbTerminal *t, gboolean enabled);
  * 输入被忽略；实心块光标按 cursor_blink 设置闪烁。 */
 void hb_terminal_set_preview(HbTerminal *t, const char *ansi_text);
 
+/* 外部 vt 模式（FR-12 共享 viewer）：渲染调用方拥有的 vt。
+ * vt 的输出（编码输入）经调用方在 vt 上设置的 hb_vt_set_output_fn
+ * 走 —— 终端只调用 hb_vt_key/unichar/paste/mouse/focus。
+ * writable=false 时输入被拒，dead-input 信号照样发（页层弹"只读"提示）。
+ * poke() 在 vt 内容变化后调用 → 重绘/滚动调整。
+ * cell_size() 返回当前 cell 像素尺寸，供外部按 vt rows×cols 做
+ * letterboxing（GtkAspectFrame/尺寸约束）。 */
+void     hb_terminal_set_external_vt(HbTerminal *t, hb_vt *v);
+void     hb_terminal_set_external_writable(HbTerminal *t, gboolean writable);
+gboolean hb_terminal_external_writable(HbTerminal *t);
+void     hb_terminal_external_poke(HbTerminal *t);
+void     hb_terminal_cell_size(HbTerminal *t, double *cw, double *ch);
+
 void hb_terminal_copy_clipboard(HbTerminal *t);
 void hb_terminal_paste_clipboard(HbTerminal *t);
 void hb_terminal_select_all(HbTerminal *t);
