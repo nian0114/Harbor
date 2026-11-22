@@ -38,6 +38,7 @@ struct _HbWindow {
     GtkWidget *toasts;       /* AdwToastOverlay 包住全部内容 */
     GtkWidget *overlay;      /* GtkOverlay：palette 等浮层挂载点 */
     GtkWidget *badge;
+    GtkWidget *badge_lbl;
     GtkWidget *bell;
     GtkWidget *vault_page;
     GList     *tabs;         /* HbTabRec* */
@@ -389,7 +390,7 @@ static void update_badge(HbWindow *win)
     gtk_widget_set_visible(win->badge, n > 0);
     if (n > 0) {
         snprintf(buf, sizeof buf, "%u", n > 99 ? 99 : n);
-        gtk_label_set_label(GTK_LABEL(win->badge), buf);
+        gtk_label_set_label(GTK_LABEL(win->badge_lbl), buf);
     }
 }
 
@@ -539,12 +540,13 @@ static GtkWidget *build_bell(HbWindow *win)
 
     /* 铃铛 + 角标 */
     gtk_overlay_set_child(GTK_OVERLAY(ov), hb_icon_new("bell", 17));
-    win->badge = gtk_label_new("");
+    /* min-size 直接挂 GtkLabel 会被 overlay 挤压报警 → 尺寸放容器 */
+    win->badge = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(win->badge, "hb-badge");
+    win->badge_lbl = gtk_label_new("");
+    gtk_box_append(GTK_BOX(win->badge), win->badge_lbl);
     gtk_widget_set_halign(win->badge, GTK_ALIGN_END);
     gtk_widget_set_valign(win->badge, GTK_ALIGN_START);
-    gtk_widget_set_margin_top(win->badge, -3);
-    gtk_widget_set_margin_end(win->badge, -5);
     gtk_widget_set_visible(win->badge, FALSE);
     gtk_overlay_add_overlay(GTK_OVERLAY(ov), win->badge);
     gtk_menu_button_set_child(GTK_MENU_BUTTON(btn), ov);
