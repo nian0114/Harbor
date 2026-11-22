@@ -9,3 +9,4 @@
 - Protocols are specified in `docs/api/` (sync, share, backup); implementations must follow them byte-for-byte.
 - Release: `-Dbuildtype=release` requires `-Db_ndebug=true` (meson errors otherwise); packages via `scripts/package-deb.sh`, `scripts/package-appimage.sh`.
 - i18n: Chinese source strings wrapped in `_()`/`N_()` (linux) or `HB_TR()` (core); English in `po/en.po`; `meson test` runs `check-i18n` which fails on unwrapped CJK literals.
+- macOS: core-only build `scripts/bootstrap-macos.sh` once + `source scripts/env-macos.sh`; `meson setup b -Dlinux=false -Dserver=false` (deps are static .a under `~/.local/harbor-macos`); port shims live in `core/src/sockutil.h`.
