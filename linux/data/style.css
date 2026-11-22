@@ -739,3 +739,27 @@ checkbutton.pick-row { padding: 7px 8px; }
                      border: 1px solid alpha(@accent_color, .35); }
 .e2ee-t1           { font-weight: 700; color: @accent_color; }
 .e2ee-t2           { font-size: 11px; color: alpha(@window_fg_color, .6); }
+
+/* FR-12 共享 */
+.hb-share-pill { font-size: 10px; padding: 1px 8px; border-radius: 8px;
+    background-color: #f0f3f7; color: @hb_text_3; }
+.hb-share-pill.collab { background-color: #e6f6ee; color: #1d7a4f; }
+.hb-share-code { font-family: monospace; font-size: 15px; letter-spacing: 1px; }
+.hb-share-sec { font-size: 12px; font-weight: 600; color: @hb_text_3;
+    margin-top: 6px; }
+button.hb-share-card { background-color: #fff; border: 1px solid #e3e7ee;
+    border-radius: 10px; padding: 10px 14px; }
+button.hb-share-card:hover { border-color: #b9c4d4; }
+.hb-share-card-title { font-weight: 600; font-size: 13px; }
+.hb-share-card-sub { font-size: 11px; color: @hb_text_3; }
+.hb-share-banner { background-color: #f0fdf6; border-bottom: 1px solid #d7eedd;
+    min-height: 34px; }
+.hb-share-banner-title { font-weight: 600; font-size: 12.5px; }
+.hb-share-notice { font-size: 11px; color: #8a6d1d;
+    background-color: #fdf7e3; padding: 3px 12px; }
+.hb-share-ended { background-color: rgba(255,255,255,0.92);
+    border-radius: 14px; padding: 26px 34px; }
+.hb-share-ended-txt { font-size: 15px; font-weight: 600; }
+.hb-share-hint-title { font-weight: 600; }
+.hb-share-row-title { font-size: 12.5px; color: @hb_text_3; }
+.tbtn.on { background-color: #e6f6ee; color: #1d7a4f; }

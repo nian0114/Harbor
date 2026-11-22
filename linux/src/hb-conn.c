@@ -1,6 +1,7 @@
 #include "hb-conn.h"
 #include "hb-dialogs.h"
 #include "hb-forward-mgr.h"
+#include "hb-share.h"
 
 #include <harbor/ssh.h>
 #include <harbor/keys.h>
@@ -656,6 +657,8 @@ static void continue_connect(HbConnCtl *c, int rows, int cols)
     c->reuse_vt = NULL;
 
     if (c->sess) {
+        hb_share_service_stop_session(hb_share_service_default(),
+                                      c->sess);
         hb_session_close(c->sess);
         hb_session_free(c->sess);
         c->sess = NULL;
@@ -788,6 +791,8 @@ void hb_conn_ctl_start(HbConnCtl *c, const char *host_id,
     /* 上一个 session（重连时的死会话）先收掉 —— 同原 reconnect_now
      * 的顺序：确认对话框弹出前旧会话已死。 */
     if (c->sess) {
+        hb_share_service_stop_session(hb_share_service_default(),
+                                      c->sess);
         if (c->awaiting_reply) {
             hb_session_prompt_reply(c->sess, NULL);
             hb_session_hostkey_reply(c->sess, FALSE);
@@ -869,6 +874,7 @@ void hb_conn_ctl_cancel(HbConnCtl *c)
         hb_session_hostkey_reply(c->sess, FALSE);
         c->awaiting_reply = FALSE;
     }
+    hb_share_service_stop_session(hb_share_service_default(), c->sess);
     hb_session_close(c->sess);
     hb_session_free(c->sess);
     c->sess = NULL;

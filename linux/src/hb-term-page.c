@@ -1,6 +1,9 @@
 #include "hb-term-page.h"
 #include "hb-terminal.h"
 #include "hb-find-bar.h"
+#include "hb-share.h"
+#include "hb-share-owner.h"
+#include "hb-share-dialog.h"
 #include "hb-term-theme.h"
 #include "hb-icons.h"
 #include "hb-notify.h"
@@ -24,6 +27,7 @@ struct _HbTermPage {
     GtkWidget   *st_sb;
     GtkWidget   *st_watch;
     GtkWidget   *watch_btn;
+    GtkWidget   *share_btn;
     GtkWidget   *find_bar;
     GtkWidget   *toolbar;
     GtkWidget   *status_bar;
@@ -93,6 +97,9 @@ static void on_exited(HbTerminal *t, int code, gpointer ud)
     p->dead = TRUE;
     set_status(p, FALSE);
     gtk_widget_set_visible(p->dead_lbl, TRUE);
+    if (p->sess)
+        hb_share_service_stop_session(hb_share_service_default(),
+                                      p->sess);
     hb_session_page_meta_changed(HB_SESSION_PAGE(p));
 }
 
@@ -190,6 +197,16 @@ static void on_split_pick(GtkButton *b, gpointer ud)
         hb_window_split_active(HB_WINDOW(r), o);
 }
 
+static void on_share_btn(GtkButton *b, gpointer ud)
+{
+    HbTermPage *p = ud;
+    (void)b;
+    if (!p->sess) return;
+    hb_share_dialog_present(GTK_WIDGET(p), p->sess,
+                            p->disp_title ? p->disp_title : "Local",
+                            "localhost");
+}
+
 static void on_watch_btn(GtkButton *b, gpointer ud)
 {
     HbTermPage *p = ud;
@@ -234,10 +251,15 @@ static gboolean restart_local(HbTermPage *p)
     }
     hb_session_set_history(ns, p->hist_on);
     if (p->sess) {
+        hb_share_service_stop_session(hb_share_service_default(),
+                                      p->sess);
         hb_session_close(p->sess);
         hb_session_free(p->sess);
     }
     p->sess = ns;
+    if (p->share_btn && p->win && p->tab_id)
+        hb_share_owner_wire(GTK_WIDGET(p), p->sess, p->share_btn,
+                            GTK_WIDGET(p->win), p->tab_id);
     p->dead = FALSE;
     hb_terminal_set_session(HB_TERMINAL(p->term), p->sess);
     watch_apply_session(p);       /* 监控状态随重启重挂 */
@@ -367,6 +389,14 @@ static GtkWidget *build_toolbar(HbTermPage *p)
                      G_CALLBACK(on_watch_btn), p);
     gtk_box_append(GTK_BOX(bar), p->watch_btn);
 
+    p->share_btn = gtk_button_new_with_label("共享");
+    gtk_widget_add_css_class(p->share_btn, "tbtn");
+    gtk_widget_set_tooltip_text(p->share_btn,
+                                "共享会话（端到端加密）");
+    g_signal_connect(p->share_btn, "clicked",
+                     G_CALLBACK(on_share_btn), p);
+    gtk_box_append(GTK_BOX(bar), p->share_btn);
+
     /* 分屏（workspace） */
     {
         GtkWidget *mb = gtk_menu_button_new();
@@ -432,6 +462,8 @@ static void hb_term_page_dispose(GObject *o)
 {
     HbTermPage *p = HB_TERM_PAGE(o);
     if (p->sess) {
+        hb_share_service_stop_session(hb_share_service_default(),
+                                      p->sess);
         hb_terminal_set_session(HB_TERMINAL(p->term), NULL);
         hb_session_close(p->sess);
         hb_session_free(p->sess);
@@ -575,6 +607,9 @@ void hb_term_page_attach_tab(HbTermPage *p, GtkWidget *win,
     p->win = HB_WINDOW(win);
     g_free(p->tab_id);
     p->tab_id = g_strdup(tab_id);
+    if (p->share_btn)
+        hb_share_owner_wire(GTK_WIDGET(p), p->sess, p->share_btn,
+                            win, tab_id);
 }
 
 void hb_term_page_feed_input(HbTermPage *p, const char *text)

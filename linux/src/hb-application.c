@@ -13,6 +13,12 @@
 #include "hb-host-actions.h"
 #include "hb-sync.h"
 #include "hb-account-view.h"
+#ifndef NDEBUG
+#include "hb-share.h"
+#include "hb-share-page.h"
+#include "hb-share-dialog.h"
+#include <stdio.h>
+#endif
 
 #include <harbor/ssh.h>
 #include <string.h>
@@ -109,6 +115,322 @@ static void on_dev_feed(GSimpleAction *a, GVariant *param, gpointer ud)
         hb_term_page_feed_input(HB_TERM_PAGE(page), text);
     else if (HB_IS_SSH_PAGE(page))
         hb_ssh_page_feed_input(HB_SSH_PAGE(page), text);
+}
+
+/* ----------------- FR-12 share dev 动作（DEV_ACTIONS 门控） ----------------- */
+
+static hb_session *dev_active_sess(GtkApplication *app)
+{
+    GtkWindow *win = gtk_application_get_active_window(app);
+    GtkWidget *pg;
+    if (!HB_IS_WINDOW(win)) return NULL;
+    pg = hb_window_active_session_page(HB_WINDOW(win));
+    if (HB_IS_TERM_PAGE(pg))
+        return hb_term_page_session(HB_TERM_PAGE(pg));
+    if (HB_IS_SSH_PAGE(pg))
+        return hb_ssh_page_session(HB_SSH_PAGE(pg));
+    return NULL;
+}
+
+/* app.share-start <mode>：active session → start share；stdout 回执。 */
+static void dev_share_cb(HbShareService *s, const char *sid,
+                         const char *err, gpointer ud)
+{
+    if (err)
+        g_print("SHARE-START-FAIL %s\n", err);
+    else
+        g_print("SHARE-START-OK id=%s link=%s code=%s\n", sid,
+                hb_share_service_link(s, sid),
+                hb_share_service_code(s, sid));
+    fflush(stdout);
+    (void)ud;
+}
+
+static void on_dev_share_start(GSimpleAction *a, GVariant *param,
+                               gpointer ud)
+{
+    hb_session *sess;
+    int mode;
+    (void)a;
+    sess = dev_active_sess(GTK_APPLICATION(ud));
+    if (!sess) { g_print("SHARE-START-FAIL no-session\n"); return; }
+    mode = param ? atoi(g_variant_get_string(param, NULL)) : 0;
+    hb_share_service_start(hb_share_service_default(), sess,
+                           "dev-share", "dev-host",
+                           mode ? HB_SHARE_COLLAB : HB_SHARE_VIEW,
+                           dev_share_cb, NULL);
+}
+
+static void on_dev_share_stop(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    hb_session *sess = dev_active_sess(GTK_APPLICATION(ud));
+    const char *sid;
+    (void)a; (void)p;
+    if (!sess) return;
+    sid = hb_share_service_share_for_session(
+        hb_share_service_default(), sess);
+    if (sid) hb_share_service_stop(hb_share_service_default(), sid);
+    g_print("SHARE-STOPPED\n"); fflush(stdout);
+}
+
+static void on_dev_share_mode(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    hb_session *sess = dev_active_sess(GTK_APPLICATION(ud));
+    const char *sid;
+    (void)a;
+    if (!sess || !p) return;
+    sid = hb_share_service_share_for_session(
+        hb_share_service_default(), sess);
+    if (sid)
+        hb_share_service_set_mode(hb_share_service_default(), sid,
+            atoi(g_variant_get_string(p, NULL))
+                ? HB_SHARE_COLLAB : HB_SHARE_VIEW);
+    g_print("SHARE-MODE-SET\n"); fflush(stdout);
+}
+
+static void on_dev_share_regen(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    hb_session *sess = dev_active_sess(GTK_APPLICATION(ud));
+    const char *sid;
+    (void)a; (void)p;
+    if (!sess) return;
+    sid = hb_share_service_share_for_session(
+        hb_share_service_default(), sess);
+    if (sid) {
+        hb_share_service_regen(hb_share_service_default(), sid);
+        g_print("SHARE-REGEN code=%s link=%s\n",
+                hb_share_service_code(hb_share_service_default(), sid),
+                hb_share_service_link(hb_share_service_default(), sid));
+        fflush(stdout);
+    }
+}
+
+static void on_dev_share_kick(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    hb_session *sess = dev_active_sess(GTK_APPLICATION(ud));
+    const char *sid;
+    (void)a;
+    if (!sess || !p) return;
+    sid = hb_share_service_share_for_session(
+        hb_share_service_default(), sess);
+    if (sid)
+        hb_share_service_kick(hb_share_service_default(), sid,
+            (uint32_t)atoi(g_variant_get_string(p, NULL)));
+    g_print("SHARE-KICKED\n"); fflush(stdout);
+}
+
+/* app.share-info：active session 的 share 状态行。 */
+static void on_dev_share_info(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    hb_session *sess = dev_active_sess(GTK_APPLICATION(ud));
+    HbShareService *s = hb_share_service_default();
+    const char *sid;
+    (void)a; (void)p;
+    sid = sess ? hb_share_service_share_for_session(s, sess) : NULL;
+    if (!sid) {
+        g_print("SHARE-INFO none\n"); fflush(stdout); return;
+    }
+    g_print("SHARE-INFO id=%s mode=%d count=%d link=%s code=%s\n",
+            sid, hb_share_service_mode(s, sid),
+            hb_share_service_count(s, sid),
+            hb_share_service_link(s, sid),
+            hb_share_service_code(s, sid));
+    fflush(stdout);
+}
+
+void dev_share_member_list(GtkApplication *app, const char *sid);
+
+/* app.share-join <"member <sid>"|"guest <link> <code>">：加入并开 viewer tab。 */
+static void dev_join_cb(HbShareService *s, gpointer ctx, const char *err,
+                        gpointer ud)
+{
+    GtkApplication *app = GTK_APPLICATION(ud);
+    GtkWindow *win;
+    (void)s;
+    if (err) {
+        g_print("SHARE-JOIN-FAIL %s\n", err); fflush(stdout);
+        return;
+    }
+    win = gtk_application_get_active_window(app);
+    if (HB_IS_WINDOW(win))
+        hb_share_open_viewer(GTK_WIDGET(win), ctx,
+                             hb_share_peer_ctx_title(ctx));
+    g_print("SHARE-JOIN-OK\n"); fflush(stdout);
+}
+
+static void on_dev_share_join(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    const char *arg;
+    char **f;
+    (void)a;
+    if (!p) return;
+    arg = g_variant_get_string(p, NULL);
+    f = g_strsplit(arg, " ", 4);
+    if (f[0] && f[1] && !strcmp(f[0], "member")) {
+        dev_share_member_list(GTK_APPLICATION(ud), f[1]);
+    } else if (f[0] && f[1] && f[2] && !strcmp(f[0], "guest")) {
+        hb_share_service_join_guest(hb_share_service_default(),
+                                    f[1], f[2], dev_join_cb, ud);
+    }
+    g_strfreev(f);
+}
+
+/* app.share-input <text>：活动 tab 是 share viewer → hb_share_peer_input。 */
+static void on_dev_share_input(GSimpleAction *a, GVariant *p,
+                               gpointer ud)
+{
+    GtkWindow *win;
+    GtkWidget *pg;
+    hb_share_peer_ctx *ctx;
+    const char *txt;
+    (void)a;
+    if (!p) return;
+    txt = g_variant_get_string(p, NULL);
+    win = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (!HB_IS_WINDOW(win)) return;
+    pg = hb_window_active_page(HB_WINDOW(win));
+    ctx = hb_share_page_ctx(pg);
+    if (!ctx || !txt) {
+        g_print("SHARE-INPUT not-a-viewer\n"); fflush(stdout);
+        return;
+    }
+    {
+        hb_err e = hb_share_peer_input(hb_share_peer_ctx_engine(ctx),
+                                       txt, strlen(txt));
+        g_print("SHARE-INPUT %s\n", e == HB_OK ? "ok" : "rejected");
+        fflush(stdout);
+    }
+}
+
+/* app.term-screen <path>：活动 session tab 的可见区文本写文件（dev）。 */
+static void on_dev_term_screen(GSimpleAction *a, GVariant *p,
+                               gpointer ud)
+{
+    hb_session *sess = dev_active_sess(GTK_APPLICATION(ud));
+    hb_vt *v;
+    int rows, cols, r;
+    GString *out;
+    (void)a;
+    if (!p || !sess) {
+        g_print("TERM-SCREEN not-a-session\n"); fflush(stdout);
+        return;
+    }
+    v = hb_session_vt(sess);
+    if (!v) { g_print("TERM-SCREEN no-vt\n"); fflush(stdout); return; }
+    hb_vt_size(v, &rows, &cols);
+    out = g_string_new(NULL);
+    hb_vt_lock(v);
+    for (r = 0; r < rows; r++) {
+        char *line = hb_vt_get_text(v, r, 0, r, cols - 1, false);
+        if (line) { g_string_append(out, line); g_free(line); }
+        g_string_append_c(out, '\n');
+    }
+    hb_vt_unlock(v);
+    {
+        g_autofree char *txt = g_string_free(out, FALSE);
+        g_file_set_contents(g_variant_get_string(p, NULL), txt, -1,
+                            NULL);
+    }
+    g_print("TERM-SCREEN-WROTE\n"); fflush(stdout);
+}
+
+/* app.share-screen <path>：活动 tab 是 share viewer → 文本写文件。 */
+static void on_dev_share_screen(GSimpleAction *a, GVariant *p,
+                                gpointer ud)
+{
+    GtkWindow *win;
+    GtkWidget *pg;
+    char *txt;
+    (void)a;
+    if (!p) return;
+    win = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (!HB_IS_WINDOW(win)) return;
+    pg = hb_window_active_page(HB_WINDOW(win));
+    if (!HB_IS_SHARE_PAGE(pg)) {
+        g_print("SHARE-SCREEN not-a-viewer\n"); fflush(stdout);
+        return;
+    }
+    txt = hb_share_page_screen(pg);
+    g_file_set_contents(g_variant_get_string(p, NULL),
+                        txt ? txt : "", -1, NULL);
+    g_free(txt);
+    g_print("SHARE-SCREEN-WROTE\n"); fflush(stdout);
+}
+
+/* app.share-state：活动 tab 是 share viewer → 打印 ended 状态（dev）。 */
+static void on_dev_share_state(GSimpleAction *a, GVariant *p,
+                               gpointer ud)
+{
+    GtkWindow *win;
+    GtkWidget *pg;
+    const char *lbl;
+    (void)a; (void)p;
+    win = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (!HB_IS_WINDOW(win)) return;
+    pg = hb_window_active_page(HB_WINDOW(win));
+    if (!HB_IS_SHARE_PAGE(pg)) {
+        g_print("SHARE-STATE not-a-viewer\n"); fflush(stdout); return;
+    }
+    lbl = hb_share_page_end_label(pg);
+    g_print("SHARE-STATE ended=%d label=%s\n",
+            hb_share_page_ended(pg), lbl ? lbl : "-");
+    fflush(stdout);
+}
+
+/* app.share-list：GET /shares → stdout。 */
+static void dev_list_cb(HbShareService *s, GList *items, const char *err,
+                        gpointer ud)
+{
+    GList *l;
+    (void)s; (void)ud;
+    if (err) {
+        g_print("SHARE-LIST-FAIL %s\n", err); fflush(stdout); return;
+    }
+    g_print("SHARE-LIST n=%d\n", g_list_length(items));
+    for (l = items; l; l = l->next) {
+        HbShareItem *i = l->data;
+        g_print("SHARE-ITEM id=%s dev=%s\n", i->share_id,
+                i->owner_device);
+    }
+    fflush(stdout);
+}
+
+static void on_dev_share_list(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    (void)a; (void)p; (void)ud;
+    hb_share_service_list(hb_share_service_default(), dev_list_cb, NULL);
+}
+
+/* member join：先 list 拿 meta，再 join。 */
+typedef struct { GtkApplication *app; char *sid; } MemberJC;
+static void member_list_cb(HbShareService *s, GList *items,
+                           const char *err, gpointer ud)
+{
+    MemberJC *jc = ud;
+    GList *l;
+    (void)s;
+    if (!err)
+        for (l = items; l; l = l->next) {
+            HbShareItem *i = l->data;
+            if (!strcmp(i->share_id, jc->sid)) {
+                hb_share_service_join_member(
+                    hb_share_service_default(), i->share_id,
+                    i->meta_b64, dev_join_cb, jc->app);
+                g_free(jc->sid); g_free(jc);
+                return;
+            }
+        }
+    g_print("SHARE-JOIN-FAIL share-not-found\n"); fflush(stdout);
+    g_free(jc->sid); g_free(jc);
+}
+
+void dev_share_member_list(GtkApplication *app, const char *sid)
+{
+    MemberJC *jc = g_new0(MemberJC, 1);
+    jc->app = app;
+    jc->sid = g_strdup(sid);
+    hb_share_service_list(hb_share_service_default(),
+                          member_list_cb, jc);
 }
 
 /* app.open-host <host_id>：dev 调试动作，按主机 id 打开对应 tab。 */
@@ -369,6 +691,38 @@ static void on_dev_setfield(GSimpleAction *a, GVariant *param, gpointer ud)
     }
     g_strfreev(f);
 }
+
+/* app.share-dialog：在活动 session tab 上弹 owner 共享对话框（dev）。 */
+static void on_dev_share_dialog(GSimpleAction *a, GVariant *p,
+                                gpointer ud)
+{
+    GtkWindow *win;
+    GtkWidget *pg;
+    hb_session *sess;
+    (void)a; (void)p;
+    win = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (!HB_IS_WINDOW(win)) return;
+    pg = hb_window_active_page(HB_WINDOW(win));
+    sess = dev_active_sess(GTK_APPLICATION(ud));
+    if (!sess || !pg) return;
+    hb_share_dialog_present(pg, sess, "dev-share", "localhost");
+}
+
+/* app.vault-open <section>：切到 vault tab 并选 section（dev）。 */
+static void on_dev_vault_open(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    GtkWindow *win;
+    GtkWidget *vp;
+    (void)a;
+    if (!p) return;
+    win = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (!HB_IS_WINDOW(win)) return;
+    vp = hb_window_vault_page(HB_WINDOW(win));
+    if (!vp) return;
+    hb_window_switch_tab(HB_WINDOW(win), "vault");
+    hb_vault_page_set_section(HB_VAULT_PAGE(vp),
+                              g_variant_get_string(p, NULL));
+}
 #endif /* !NDEBUG */
 
 /* ------------------------------ 生命周期 ------------------------------ */
@@ -434,6 +788,12 @@ static void hb_application_startup(GApplication *app)
         g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
         g_object_unref(sa);
 
+        sa = g_simple_action_new("term-screen", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_term_screen), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
         sa = g_simple_action_new("close-host", G_VARIANT_TYPE_STRING);
         g_signal_connect(sa, "activate", G_CALLBACK(on_dev_close_host),
                          app);
@@ -472,6 +832,84 @@ static void hb_application_startup(GApplication *app)
 
         sa = g_simple_action_new("resolve", G_VARIANT_TYPE_STRING);
         g_signal_connect(sa, "activate", G_CALLBACK(on_dev_resolve), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-start", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_start), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-stop", NULL);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_stop), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-mode", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_mode), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-regen", NULL);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_regen), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-kick", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_kick), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-info", NULL);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_info), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-join", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_join), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-input", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_input), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-screen", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_screen), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-list", NULL);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_list), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-state", NULL);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_state), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("vault-open", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_vault_open), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("share-dialog", NULL);
+        g_signal_connect(sa, "activate",
+                         G_CALLBACK(on_dev_share_dialog), app);
         g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
         g_object_unref(sa);
 

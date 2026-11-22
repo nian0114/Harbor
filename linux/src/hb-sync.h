@@ -34,7 +34,13 @@ gboolean     hb_sync_service_busy(HbSyncService *s);      /* 账号操作进行�
 /* core 引擎（borrowed，仅主线程）：scope/conflicts 等直查 */
 hb_sync     *hb_sync_service_sync(HbSyncService *s);
 
-/* signals: "changed" */
+/* FR-12 共享：relay REST/WS 需要的窄访问器（signed out 时 NULL/FALSE）。 */
+const char  *hb_sync_service_token(HbSyncService *s);
+gboolean     hb_sync_service_vk_copy(HbSyncService *s, uint8_t out[32]);
+const char  *hb_sync_service_device_id(HbSyncService *s);
+const char  *hb_sync_service_device_name(HbSyncService *s);
+
+/* signals: "changed", "shares"（账号 WS 收到 {"t":"shares"}） */
 
 /* ---- 操作结果 ---- */
 typedef struct {

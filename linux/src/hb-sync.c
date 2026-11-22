@@ -72,7 +72,7 @@ struct _HbSyncService {
 
 G_DEFINE_TYPE(HbSyncService, hb_sync_service, G_TYPE_OBJECT)
 
-enum { SIG_CHANGED, N_SIGS };
+enum { SIG_CHANGED, SIG_SHARES, N_SIGS };
 static guint sigs[N_SIGS];
 static HbSyncService *g_svc;
 static const int BACKOFF[] = { 1, 2, 4, 8, 15, 30 };
@@ -1271,6 +1271,8 @@ static void ws_on_msg(SoupWebsocketConnection *c, gint type, GBytes *msg,
                            NULL);
             return;
         }
+        if (strstr(txt, "\"shares\""))
+            g_signal_emit(s, sigs[SIG_SHARES], 0);
         if (strstr(txt, "\"changed\""))
             sync_kick(s);
     }
@@ -1646,6 +1648,41 @@ gboolean hb_sync_service_busy(HbSyncService *s)
 
 hb_sync *hb_sync_service_sync(HbSyncService *s) { return s->sync; }
 
+const char *hb_sync_service_token(HbSyncService *s)
+{
+    return s && s->state != HB_SYNC_SIGNED_OUT ? s->token : NULL;
+}
+
+gboolean hb_sync_service_vk_copy(HbSyncService *s, uint8_t out[32])
+{
+    if (!s || !s->has_vk || !s->vk ||
+        s->state == HB_SYNC_SIGNED_OUT)
+        return FALSE;
+    memcpy(out, s->vk, 32);
+    return TRUE;
+}
+
+const char *hb_sync_service_device_id(HbSyncService *s)
+{
+    static GMutex mu;
+    static char *cached;
+    char *id = NULL;
+    if (!s || s->state == HB_SYNC_SIGNED_OUT ||
+        hb_sync_get_account(s->sync, NULL, NULL, NULL, &id) != HB_OK ||
+        !id)
+        return NULL;
+    g_mutex_lock(&mu);
+    g_free(cached); cached = id;
+    g_mutex_unlock(&mu);
+    return cached;
+}
+
+const char *hb_sync_service_device_name(HbSyncService *s)
+{
+    (void)s;
+    return g_get_host_name();
+}
+
 void hb_sync_service_sync_now(HbSyncService *s)
 {
     sync_kick(s);
@@ -1696,6 +1733,9 @@ static void hb_sync_service_class_init(HbSyncServiceClass *klass)
     sigs[SIG_CHANGED] = g_signal_new("changed", G_TYPE_FROM_CLASS(klass),
                                      G_SIGNAL_RUN_LAST, 0, NULL, NULL,
                                      NULL, G_TYPE_NONE, 0);
+    sigs[SIG_SHARES] = g_signal_new("shares", G_TYPE_FROM_CLASS(klass),
+                                    G_SIGNAL_RUN_LAST, 0, NULL, NULL,
+                                    NULL, G_TYPE_NONE, 0);
 }
 
 static void hb_sync_service_init(HbSyncService *s)

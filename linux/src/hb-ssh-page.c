@@ -10,6 +10,9 @@
 #include "hb-watch-ui.h"
 #include "hb-session-page.h"
 #include "hb-snippet-send.h"
+#include "hb-share.h"
+#include "hb-share-owner.h"
+#include "hb-share-dialog.h"
 
 #include <harbor/ssh.h>
 #include <string.h>
@@ -67,6 +70,7 @@ struct _HbSshPage {
     GtkWidget  *tt_icon;
     GtkWidget  *reconn_btn;
     GtkWidget  *watch_btn;
+    GtkWidget  *share_btn;
     GtkWidget  *find_bar;
     GtkWidget  *st_conn;
     GtkWidget  *st_sb;
@@ -436,6 +440,21 @@ static void on_find_btn(GtkButton *b, gpointer ud)
     hb_ssh_page_find_open(p);
 }
 
+static void on_share_btn(GtkButton *b, gpointer ud)
+{
+    HbSshPage *p = ud;
+    char *t;
+    hb_session *sess;
+    (void)b;
+    sess = hb_ssh_page_session(p);
+    if (!sess) return;
+    t = g_strdup_printf("ssh %s@%s", p->huser, p->hname);
+    hb_share_dialog_present(GTK_WIDGET(p), sess,
+                            p->disp_title ? p->disp_title : t,
+                            p->hname);
+    g_free(t);
+}
+
 static void on_watch_btn(GtkButton *b, gpointer ud)
 {
     HbSshPage *p = ud;
@@ -575,6 +594,9 @@ static void on_ctl_session(HbConnCtl *c, gpointer sess_p, gpointer ud)
     hb_session *sess = sess_p;
     (void)c;
     hb_terminal_set_session(HB_TERMINAL(p->term), sess);
+    if (p->share_btn && p->win && p->tab_id)
+        hb_share_owner_wire(GTK_WIDGET(p), sess, p->share_btn,
+                            GTK_WIDGET(p->win), p->tab_id);
     hb_session_set_history(sess, p->hist_on);
     watch_apply_session(p);       /* 监控状态随（重）连重挂 */
     set_status(p, "● 连接中…", "hb-term-warn");
@@ -758,6 +780,13 @@ static GtkWidget *build_term_view(HbSshPage *p)
     g_signal_connect(p->watch_btn, "clicked",
                      G_CALLBACK(on_watch_btn), p);
     gtk_box_append(GTK_BOX(bar), p->watch_btn);
+    p->share_btn = gtk_button_new_with_label("共享");
+    gtk_widget_add_css_class(p->share_btn, "tbtn");
+    gtk_widget_set_tooltip_text(p->share_btn,
+                                "共享会话（端到端加密）");
+    g_signal_connect(p->share_btn, "clicked",
+                     G_CALLBACK(on_share_btn), p);
+    gtk_box_append(GTK_BOX(bar), p->share_btn);
     p->reconn_btn = gtk_button_new();
     gtk_widget_add_css_class(p->reconn_btn, "tbtn");
     {
