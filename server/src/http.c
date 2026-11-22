@@ -422,7 +422,14 @@ static void register_done(HashJob *j)
         a.rc_hash = j->h2;
         a.wrapped_vk_rc = c->wvk_rc;
         a.created = hbu_now_ms();
-        hbd_acct_insert(j->srv->db, &a);
+        /* the early hbd_acct_by_email check races concurrent registers;
+         * treat a failed insert as email_taken rather than minting a
+         * session for a phantom account */
+        if (hbd_acct_insert(j->srv->db, &a) != 0) {
+            hbu_error(j->msg, SOUP_STATUS_CONFLICT, "email_taken",
+                      "email already registered", NULL);
+            goto out;
+        }
         tok = new_session(j->srv, a.id, c->dname, c->dplat, &dev);
         respond_session(j->msg, a.id, dev, tok, NULL, NULL);
         hb_log(j->srv, 2, "register account=%s", a.id);
