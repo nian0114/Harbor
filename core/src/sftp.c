@@ -191,6 +191,10 @@ typedef struct {
     bool           shutting;
 } eng;
 
+static void ctl_drop(eng *e, sfreq *r);
+static int   xfer_fail(eng *e, sfreq *r, hb_sftp_status st,
+                       const char *msg);
+
 /* ============================ 小工具 ============================ */
 
 /* 服务器报来的目录项名校验：拒绝 "."/".."、'/'、内嵌 NUL、<0x20 控制符，
@@ -698,7 +702,9 @@ static int ctl_do(eng *e, sfreq *r, int fn, const char *p1, const char *p2,
         return ST_BLK;              /* 槽忙 → 让位 */
     memset(c, 0, sizeof *c);
     c->owner = r;
-    c->sf = (r->x && r->x->sf) ? r->x->sf : e->sf;
+    /* 带柄 op（CLOSE）必须在柄所属的 channel 上打；路径 op 一律走共享
+     * meta channel —— 传输通道停顿时清理（unlink .part 等）不被拖死。 */
+    c->sf = (h && r->x && r->x->sf) ? r->x->sf : e->sf;
     c->fn = fn;
     c->p1 = p1;
     c->p1l = p1 ? strlen(p1) : 0;
@@ -1263,6 +1269,17 @@ static size_t xfer_call_cap(eng *e)
     return meta_pending(e) ? 256 * 1024 : (size_t)CHUNK;
 }
 
+/* sftp_write 单次调用固定封 256KiB：libssh2 把一个调用拆成 ~30KiB
+ * FXP 包做请求流水 —— 4MiB 一次调用意味着 ~140 个在飞写请求，
+ * 服务器串行处理、应答排在队尾，实测两个平台都会拖到永久停摆
+ * （packet_require 无超时干等）。~9 个在飞包实测稳定，且 loopback
+ * 吞吐不降反升（写 ~80-95MB/s）。 */
+static size_t xfer_wcall_cap(eng *e)
+{
+    (void)e;
+    return 256 * 1024;
+}
+
 static int xfer_step(eng *e, sfreq *r)
 {
     xfr *x = r->x;
@@ -1709,7 +1726,7 @@ static int xfer_step(eng *e, sfreq *r)
              * 子请求串，换参数会乱。x->sf 是本传输独占 channel，别的
              * 传输的调用在各自 channel 上互不干扰。 */
             {
-            size_t cap = xfer_call_cap(e);
+            size_t cap = xfer_wcall_cap(e);
             n = libssh2_sftp_write(x->rh, (const char *)x->buf + x->boff,
                                    x->blen - x->boff > cap
                                        ? cap : x->blen - x->boff);
@@ -1842,18 +1859,16 @@ ren_ok:
 
     /* ---------- 取消/出错清理序列 ---------- */
     case X_Z_CLOSE:
-        if (r->stk && !e->conn_dead) {
-            if (ctl_do(e, r, CTL_CLOSE, NULL, NULL, 0, r->stk->dh,
-                       NULL) == ST_BLK)
-                return ST_BLK;
+        /* 传输 channel 上的远端柄一律不发 FXP_CLOSE：取消/出错时读写
+         * 流水线多半还在飞 —— libssh2 的 sftp_close_handle 会 flush
+         * packet_list，把半发包（window 切割的 chunk）尾部永久丢弃，
+         * channel 字节流从此错位，服务器永远等不到完整帧、不再应答，
+         * close 的 packet_require 无超时 → 干等（上游 libssh2#690；
+         * 实测 OpenSSH 9.6/10.3、Linux/macOS 均可复现）。柄随
+         * X_Z_SFTP 的 channel 拆除由服务器释放即可。 */
+        ctl_drop(e, r);
+        while (r->stk)
             stk_pop(r);
-            return ST_WORK;
-        }
-        if (x->rh && !e->conn_dead) {
-            if (ctl_do(e, r, CTL_CLOSE, NULL, NULL, 0, x->rh, NULL)
-                == ST_BLK)
-                return ST_BLK;
-        }
         x->rh = NULL;
         r->st = X_Z_UNLINK;
         return ST_WORK;
@@ -1881,7 +1896,9 @@ ren_ok:
         r->st = X_Z_SFTP;
         return ST_WORK;
     case X_Z_SFTP:
-        /* 拆本传输的 sftp channel；含 channel_close → 独占 */
+        /* 拆本传输的 sftp channel；含 channel_close → 独占。channel
+         * close 是传输层控制消息，不依赖 SFTP 字节流完整性（上面的
+         * 柄是故意不 FXP_CLOSE 的）。 */
         if (x->sf && !e->conn_dead) {
             if (e->io_owner && e->io_owner != r)
                 return ST_BLK;
