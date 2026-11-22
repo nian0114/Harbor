@@ -84,3 +84,9 @@ test_share = executable('test_share', 'test_share.c',
     dependencies: harbor_core_dep,
 )
 test('share', test_share, timeout: 180)
+
+test_backup = executable('test_backup', 'test_backup.c',
+    include_directories: [include_directories('../src'), include_directories('../third_party/cjson')],
+    dependencies: harbor_core_dep,
+)
+test('backup', test_backup, timeout: 120)
