@@ -3,7 +3,7 @@ import CHarbor
 import HarborKit
 
 // ---------- Tab ----------
-final class TermTab: NSObject {
+class TermTab: NSObject {
     let id = UUID()
     var title: String { didSet { onChange?() } }
     var statusDot: Theme.RGBA = Theme.dotPend { didSet { onChange?() } }
@@ -60,7 +60,7 @@ final class TermTab: NSObject {
         s.drain()
     }
 
-    private func showExit(code: Int32) {
+    func showExit(code: Int32) {
         guard let term, exitBar == nil else { return }
         let bar = NSView()
         bar.wantsLayer = true
@@ -100,4 +100,6 @@ final class TermTab: NSObject {
         start(reuse: v)
     }
     var running: Bool { session?.alive ?? false }
+    /// 终止会话并 join 线程（关 tab / 退出时）。
+    func kill() { session?.free_() }
 }

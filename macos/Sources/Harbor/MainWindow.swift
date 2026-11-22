@@ -21,6 +21,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
                    styleMask: [.titled, .closable, .miniaturizable,
                                .resizable, .fullSizeContentView],
                    backing: .buffered, defer: false)
+        isRestorable = false   // 自管理 tab；避免系统崩溃恢复弹窗
         titlebarAppearsTransparent = true
         titleVisibility = .hidden
         isMovableByWindowBackground = true
@@ -122,9 +123,19 @@ final class MainWindow: NSWindow, NSWindowDelegate {
             a.informativeText = L("关闭标签页将终止其中的进程。")
             a.addButton(withTitle: L("关闭"))
             a.addButton(withTitle: L("取消"))
-            if a.runModal() != .alertFirstButtonReturn { return }
+            DialogRegistry.shared.present(alert: a, kind: "close-tab",
+                                          in: self) { [weak self] ok in
+                guard ok, let self else { return }
+                self.closeTabNow(i)
+            }
+            return
         }
-        t.session?.free_()
+        closeTabNow(i)
+    }
+    private func closeTabNow(_ i: Int) {
+        guard i < tabs.count else { return }
+        let t = tabs[i]
+        t.kill()
         t.view.removeFromSuperview()
         tabs.remove(at: i)
         strip.tabs = tabs
@@ -140,11 +151,47 @@ final class MainWindow: NSWindow, NSWindowDelegate {
             : NSRect(x: 0, y: 0, width: contentView?.bounds.width ?? 1100,
                      height: (contentView?.bounds.height ?? 700)-38)
     }
+    private var hostsPage: HostsPage?
+    private var keychainPage: KeychainPage?
+
+    /// 由主机页/快速连接起 SSH tab。
+    func openSSH(hostId: String?, quickTarget: String?, title: String) {
+        let t = SSHTab(hostId: hostId, quickTarget: quickTarget,
+                       window: self, title: title)
+        tabs.append(t)
+        strip.tabs = tabs
+        select(tabs.count - 1)
+        applySettings()
+        t.connect()
+    }
+
     func showSection(_ i: Int) {
         guard i >= 0 && i < kSections.count else { return }
-        // M1a：外观与终端 面板浮出；主机区有占位列表；其余 coming
         let sec = kSections[i].id
         appearancePanel?.removeFromSuperview()
+        hostsPage?.removeFromSuperview(); hostsPage = nil
+        keychainPage?.removeFromSuperview(); keychainPage = nil
+        if sec == "hosts", let card = contentCard {
+            let p = HostsPage(frame: card.bounds)
+            p.autoresizingMask = [.width, .height]
+            p.onConnect = { [weak self] h in
+                self?.openSSH(hostId: h.id, quickTarget: nil,
+                              title: h.label)
+            }
+            p.onQuick = { [weak self] s in
+                self?.openSSH(hostId: nil, quickTarget: s, title: s)
+            }
+            card.addSubview(p)
+            hostsPage = p
+            return
+        }
+        if sec == "keychain", let card = contentCard {
+            let p = KeychainPage(frame: card.bounds)
+            p.autoresizingMask = [.width, .height]
+            card.addSubview(p)
+            keychainPage = p
+            return
+        }
         if sec == "appearance" {
             let p = AppearancePanel()
             p.onChange = { [weak self] in self?.applySettings() }

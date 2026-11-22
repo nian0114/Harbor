@@ -27,6 +27,18 @@ final class Session {
             sess = hb_session_new_local(&o, scrollback)
         }
         free(shellC); free(cwd)
+        attachFd()
+    }
+
+    /// SSH 会话（shell/sftp/forward）：opts 由 ConnCtl 组装；
+    /// core 在返回前深拷贝，opts 内的借用指针随后即可擦除。
+    init(sshOpts o: UnsafeMutablePointer<hb_ssh_opts>,
+         rows: Int32, cols: Int32, scrollback: Int32) {
+        sess = hb_session_new_ssh(o, rows, cols, scrollback)
+        attachFd()
+    }
+
+    private func attachFd() {
         guard sess != nil else { return }
         let fd = hb_session_event_fd(sess)
         let src = DispatchSource.makeReadSource(fileDescriptor: fd,
