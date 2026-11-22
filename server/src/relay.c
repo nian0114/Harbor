@@ -91,6 +91,30 @@ static void dump_frame(const uint8_t *d, size_t n)
 }
 #endif
 
+/* 调试丢包钩子（HARBOR_RELAY_DROP_DELTA_PCT=1..99，release 无）：
+ * 按概率丢弃 owner→participant 的 DELTA，验证 peer 端 dseq gap
+ * 检测 + SNAP_REQ 重同步路径。 */
+#ifndef NDEBUG
+static int delta_drop_hit(void)
+{
+    static int pct = -1;
+    static long ndrops;
+    const char *e;
+    if (pct < 0) {
+        e = g_getenv("HARBOR_RELAY_DROP_DELTA_PCT");
+        pct = (e && *e) ? atoi(e) : 0;
+        if (pct < 0 || pct > 99) pct = 0;
+    }
+    if (pct > 0 && g_random_int_range(0, 100) < pct) {
+        g_printerr("relay: drop DELTA #%ld\n", ++ndrops);
+        return 1;
+    }
+    return 0;
+}
+#else
+static int delta_drop_hit(void) { return 0; }
+#endif
+
 /* ============================ room ============================ */
 
 static ShareRoom *room_for(hb_srv *srv, const char *id, bool create)
@@ -191,6 +215,8 @@ static void qsend(SharePart *p, const uint8_t *d, size_t n)
         return;
     if (p->outq_bytes + n > SH_OUTQ_SOFT && d[0] == T_DELTA)
         return;                              /* 溢出丢 DELTA */
+    if (d[0] == T_DELTA && delta_drop_hit())
+        return;                              /* 调试丢包 */
     if (p->outq_bytes + n > SH_OUTQ_HARD) {
         soup_websocket_connection_close(p->conn, 1011, NULL);
         return;
