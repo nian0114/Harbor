@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <glib/gi18n.h>
 
 /* ------------------------------------------------------------------
  * HbFs —— 文件系统抽象：本地 POSIX（GTask 线程）/ 远端 SFTP。
@@ -144,10 +145,10 @@ static Fres *fres_err(hb_sftp_status st, const char *msg)
 static Fres *fres_errno(int en)
 {
     hb_sftp_status st = errno_status(en);
-    const char *zh = st == HB_SFTP_ERR_NOENT ? "没有那个文件或目录"
-                   : st == HB_SFTP_ERR_PERM ? "权限不足"
-                   : st == HB_SFTP_ERR_EXISTS ? "目标已存在"
-                   : st == HB_SFTP_ERR_NOTEMPTY ? "目录非空"
+    const char *zh = st == HB_SFTP_ERR_NOENT ? _("没有那个文件或目录")
+                   : st == HB_SFTP_ERR_PERM ? _("权限不足")
+                   : st == HB_SFTP_ERR_EXISTS ? _("目标已存在")
+                   : st == HB_SFTP_ERR_NOTEMPTY ? _("目录非空")
                    : NULL;
     return fres_err(st, zh ? zh : g_strerror(en));
 }
@@ -344,7 +345,7 @@ static void remote_submit(HbFs *fs, uint32_t req,
         hb_fs_result r = {0};
         r.ok = FALSE;
         r.status = HB_SFTP_ERR_CONN;
-        r.message = "连接已断开";
+        r.message = _("连接已断开");
         if (!g_atomic_int_get(&fs->dead) && cb) cb(&r, ud);
         if (dtor) dtor(ud);
         g_free(o);

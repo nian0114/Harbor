@@ -8,6 +8,7 @@
 #include <pwd.h>
 #include <string.h>
 #include <unistd.h>
+#include <glib/gi18n.h>
 
 /* 颜色标签 palette（与 data-model color 字段值一致：存色彩名） */
 static const struct { const char *name, *css; } kColors[] = {
@@ -23,10 +24,10 @@ static const struct { const char *name, *css; } kColors[] = {
 static const char *kProtos[]  = { "ssh", "rdp", "vnc" };
 static const char *kProtoLbl[] = { "SSH", "RDP", "VNC" };
 static const char *kAuths[]   = { "auto", "password", "key", "agent", "none" };
-static const char *kAuthLbl[] = { "自动（agent → 密钥 → 密码）",
-                                  "密码", "密钥", "Agent", "无" };
+static const char *kAuthLbl[] = { N_("自动（agent → 密钥 → 密码）"),
+                                  N_("密码"), N_("密钥"), "Agent", N_("无") };
 static const char *kOses[]    = { "auto", "ubuntu", "debian", "generic", "windows" };
-static const char *kOsLbl[]   = { "自动检测", "Ubuntu", "Debian", "通用", "Windows" };
+static const char *kOsLbl[]   = { N_("自动检测"), "Ubuntu", "Debian", N_("通用"), "Windows" };
 
 typedef struct {
     HbStore  *st;
@@ -126,7 +127,7 @@ static void group_rebuild(HostForm *f, const char *select_name)
     f->group_building = TRUE;
     g_ptr_array_set_size(f->group_names, 0);
     sl = gtk_string_list_new(NULL);
-    gtk_string_list_append(sl, "无");
+    gtk_string_list_append(sl, _("无"));
     g_ptr_array_add(f->group_names, g_strdup(""));
 
     gs = hb_store_list(f->st, "group", &ng);
@@ -151,7 +152,7 @@ static void group_rebuild(HostForm *f, const char *select_name)
             g_ptr_array_add(f->group_names, g_strdup(n));
         }
     }
-    gtk_string_list_append(sl, "新建分组…");
+    gtk_string_list_append(sl, _("新建分组…"));
     g_ptr_array_add(f->group_names, g_strdup("\x01new"));
 
     if (select_name)
@@ -191,7 +192,7 @@ static void on_group_sel(GtkDropDown *dd, GParamSpec *ps, HostForm *f)
     if (i >= f->group_names->len) return;
     val = g_ptr_array_index(f->group_names, i);
     if (!strcmp(val, "\x01new"))
-        hb_dialog_prompt(GTK_WIDGET(f->dlg), "新建分组", "分组名称", NULL,
+        hb_dialog_prompt(GTK_WIDGET(f->dlg), _("新建分组"), _("分组名称"), NULL,
                          group_prompt_done, f);
 }
 
@@ -206,7 +207,7 @@ static void jump_rebuild_add(HostForm *f)
     f->jump_building = TRUE;
     g_ptr_array_set_size(f->jump_cand, 0);
     sl = gtk_string_list_new(NULL);
-    gtk_string_list_append(sl, "+ 添加跳板");
+    gtk_string_list_append(sl, _("+ 添加跳板"));
     g_ptr_array_add(f->jump_cand, NULL);
     hs = hb_store_list(f->st, "host", &n);
     for (i = 0; i < n; i++) {
@@ -380,7 +381,7 @@ static void via_rebuild(HostForm *f, const char *select_id)
 
     g_ptr_array_set_size(f->via_ids, 0);
     sl = gtk_string_list_new(NULL);
-    gtk_string_list_append(sl, "选择 SSH 主机…");
+    gtk_string_list_append(sl, _("选择 SSH 主机…"));
     g_ptr_array_add(f->via_ids, NULL);
     hs = hb_store_list(f->st, "host", &n);
     for (i = 0; i < n; i++) {
@@ -413,7 +414,7 @@ static void key_rebuild(HostForm *f, const char *select_id)
     sl = gtk_string_list_new(NULL);
     ks = hb_store_list(f->st, "key", &n);
     if (n == 0)
-        gtk_string_list_append(sl, "Keychain 中暂无密钥");
+        gtk_string_list_append(sl, _("Keychain 中暂无密钥"));
     for (i = 0; i < n; i++) {
         const char *nm = hb_obj_get_str(ks[i], "name");
         const char *fp = hb_obj_get_str(ks[i], "fingerprint");
@@ -428,7 +429,7 @@ static void key_rebuild(HostForm *f, const char *select_id)
             sel = i;
     }
     /* 末位："生成新密钥…"（key_ids 里为 NULL 哨兵） */
-    gtk_string_list_append(sl, "生成新密钥…");
+    gtk_string_list_append(sl, _("生成新密钥…"));
     g_ptr_array_add(f->key_ids, NULL);
     gtk_widget_set_sensitive(f->key_dd, TRUE);
     gtk_drop_down_set_model(GTK_DROP_DOWN(f->key_dd), G_LIST_MODEL(sl));
@@ -480,7 +481,7 @@ static void snip_rebuild(HostForm *f, const char *select_id)
 
     g_ptr_array_set_size(f->snip_ids, 0);
     sl = gtk_string_list_new(NULL);
-    gtk_string_list_append(sl, "无");
+    gtk_string_list_append(sl, _("无"));
     g_ptr_array_add(f->snip_ids, NULL);
     ss = hb_store_list(f->st, "snippet", &n);
     for (i = 0; i < n; i++) {
@@ -518,7 +519,7 @@ static void on_browse(GtkButton *b, HostForm *f)
     (void)b;
     if (f->dead) return;
     d = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(d, "选择私钥文件");
+    gtk_file_dialog_set_title(d, _("选择私钥文件"));
     g_object_ref(f->dlg);
     gtk_file_dialog_open(d, NULL, NULL, on_browse_done, f);
     g_object_unref(d);
@@ -563,7 +564,7 @@ static GtkWidget *color_row_new(HostForm *f, const char *initial)
     size_t i;
     /* "无" */
     {
-        GtkWidget *b = gtk_button_new_with_label("无");
+        GtkWidget *b = gtk_button_new_with_label(_("无"));
         gtk_widget_add_css_class(b, "hb-btn");
         gtk_widget_add_css_class(b, "hb-color-none");
         g_object_set_data(G_OBJECT(b), "form", f);
@@ -698,14 +699,14 @@ static void on_gen_fwd(GtkButton *b, gpointer ud)
 
     if (vi >= f->via_ids->len ||
         !(vid = g_ptr_array_index(f->via_ids, vi))) {
-        hb_toast(GTK_WIDGET(f->dlg), "请先选择经由 SSH 主机");
+        hb_toast(GTK_WIDGET(f->dlg), _("请先选择经由 SSH 主机"));
         return;
     }
     dport = gtk_spin_button_get_value_as_int(
         GTK_SPIN_BUTTON(f->port_sb));
     bport = fwd_pick_port(f, dport);
     if (!bport) {
-        hb_toast(GTK_WIDGET(f->dlg), "找不到空闲监听端口");
+        hb_toast(GTK_WIDGET(f->dlg), _("找不到空闲监听端口"));
         return;
     }
     o = hb_obj_new("forward");
@@ -726,7 +727,7 @@ static void on_gen_fwd(GtkButton *b, gpointer ud)
         if (nm && *nm) vname = nm;
     }
     msg = g_strdup_printf(
-        "已创建转发规则 127.0.0.1:%d → 127.0.0.1:%d（经 %s）",
+        _("已创建转发规则 127.0.0.1:%d → 127.0.0.1:%d（经 %s）"),
         bport, dport, vname);
     hb_toast(GTK_WIDGET(f->dlg), msg);
     g_free(msg);
@@ -777,7 +778,7 @@ static void do_save(HostForm *f)
 
     /* 校验 */
     if (strcmp(f->proto, "local") && (!addr || !*addr)) {
-        form_err(f, "地址不能为空");
+        form_err(f, _("地址不能为空"));
         gtk_widget_grab_focus(f->addr_e);
         return;
     }
@@ -785,7 +786,7 @@ static void do_save(HostForm *f)
         for (i = 0; i < f->jump_sel->len; i++)
             if (jump_reaches(f->v, g_ptr_array_index(f->jump_sel, i),
                              f->host_id, 0)) {
-                form_err(f, "跳板链存在循环：经该跳板最终会回到本机");
+                form_err(f, _("跳板链存在循环：经该跳板最终会回到本机"));
                 return;
             }
     }
@@ -918,7 +919,7 @@ static void do_save(HostForm *f)
             hb_vault_set_secret(f->v, hb_obj_id(o), "password", pw);
     }
 
-    hb_toast(GTK_WIDGET(f->dlg), "主机已保存");
+    hb_toast(GTK_WIDGET(f->dlg), _("主机已保存"));
     adw_dialog_close(f->dlg);
 }
 
@@ -929,7 +930,7 @@ static void on_dpw_clear(GtkButton *b, HostForm *f)
     f->dpw_cleared = TRUE;
     gtk_widget_set_visible(f->dpw_clear, FALSE);
     gtk_editable_set_text(GTK_EDITABLE(f->dpw_e), "");
-    gtk_widget_set_tooltip_text(f->dpw_e, "保存后将清除已保存密码");
+    gtk_widget_set_tooltip_text(f->dpw_e, _("保存后将清除已保存密码"));
 }
 
 static void on_save(GtkButton *b, HostForm *f)
@@ -957,7 +958,7 @@ static void on_pw_clear(GtkButton *b, HostForm *f)
     f->pw_cleared = TRUE;
     gtk_widget_set_visible(f->pw_clear, FALSE);
     gtk_editable_set_text(GTK_EDITABLE(f->pw_e), "");
-    gtk_widget_set_tooltip_text(f->pw_e, "保存后将清除已保存密码");
+    gtk_widget_set_tooltip_text(f->pw_e, _("保存后将清除已保存密码"));
 }
 
 static void form_free(HostForm *f)
@@ -993,7 +994,7 @@ static GtkDropDown *dd_new(const char *const *items, guint n, guint sel)
     guint i;
     GtkDropDown *dd;
     for (i = 0; i < n; i++)
-        gtk_string_list_append(sl, items[i]);
+        gtk_string_list_append(sl, _(items[i]));
     dd = GTK_DROP_DOWN(gtk_drop_down_new(G_LIST_MODEL(sl), NULL));
     gtk_drop_down_set_selected(dd, sel);
     return dd;
@@ -1040,7 +1041,7 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     strcpy(f->proto, proto);
     f->prev_proto = (int)find_idx(kProtos, 3, proto, 0);
 
-    dlg = GTK_WIDGET(hb_modal_new(f->host_id ? "编辑主机" : "New host",
+    dlg = GTK_WIDGET(hb_modal_new(f->host_id ? _("编辑主机") : "New host",
                                   &body, &foot));
     f->dlg = ADW_DIALOG(dlg);
     f->body = body;
@@ -1049,11 +1050,11 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     {
         GtkStringList *sl = gtk_string_list_new(NULL);
         guint i;
-        b = sec_box(f, "类型", NULL);
+        b = sec_box(f, _("类型"), NULL);
         for (i = 0; i < 3; i++)
             gtk_string_list_append(sl, kProtoLbl[i]);
         if (f->is_local)
-            gtk_string_list_append(sl, "Local");
+            gtk_string_list_append(sl, _("Local"));
         f->type_dd = GTK_WIDGET(gtk_drop_down_new(G_LIST_MODEL(sl), NULL));
         gtk_drop_down_set_selected(GTK_DROP_DOWN(f->type_dd),
             f->is_local ? 3 : (guint)f->prev_proto);
@@ -1064,20 +1065,20 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     }
 
     /* 名称/地址/端口/用户 */
-    b = sec_box(f, "基本信息", &f->sec_addr);
+    b = sec_box(f, _("基本信息"), &f->sec_addr);
     f->name_e = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(f->name_e), "别名（默认=地址）");
-    gtk_box_append(GTK_BOX(b), lbl("别名"));
+    gtk_entry_set_placeholder_text(GTK_ENTRY(f->name_e), _("别名（默认=地址）"));
+    gtk_box_append(GTK_BOX(b), lbl(_("别名")));
     gtk_box_append(GTK_BOX(b), f->name_e);
     f->addr_e = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(f->addr_e), "hostname 或 IP");
-    gtk_box_append(GTK_BOX(b), lbl("地址"));
+    gtk_entry_set_placeholder_text(GTK_ENTRY(f->addr_e), _("hostname 或 IP"));
+    gtk_box_append(GTK_BOX(b), lbl(_("地址")));
     gtk_box_append(GTK_BOX(b), f->addr_e);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     {
         GtkWidget *pc = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
         gtk_widget_set_hexpand(pc, TRUE);
-        gtk_box_append(GTK_BOX(pc), lbl("端口"));
+        gtk_box_append(GTK_BOX(pc), lbl(_("端口")));
         {
             /* 用带初值的 adjustment 创建，避免初始显示 lower bound */
             GtkAdjustment *pa = gtk_adjustment_new(
@@ -1090,7 +1091,7 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     {
         GtkWidget *uc = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
         gtk_widget_set_hexpand(uc, TRUE);
-        gtk_box_append(GTK_BOX(uc), lbl("用户名"));
+        gtk_box_append(GTK_BOX(uc), lbl(_("用户名")));
         f->user_e = gtk_entry_new();
         gtk_entry_set_placeholder_text(GTK_ENTRY(f->user_e), local_user());
         gtk_box_append(GTK_BOX(uc), f->user_e);
@@ -1099,7 +1100,7 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     gtk_box_append(GTK_BOX(b), row);
 
     /* SSH 认证 */
-    b = sec_box(f, "认证", &f->sec_auth);
+    b = sec_box(f, _("认证"), &f->sec_auth);
     f->auth_dd = GTK_WIDGET(dd_new(kAuthLbl, 5, 0));
     g_signal_connect(f->auth_dd, "notify::selected",
                      G_CALLBACK(on_auth_sel), f);
@@ -1112,7 +1113,7 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
             GTK_PASSWORD_ENTRY(f->pw_e), TRUE);
         gtk_widget_set_hexpand(f->pw_e, TRUE);
         gtk_box_append(GTK_BOX(pr), f->pw_e);
-        f->pw_clear = gtk_button_new_with_label("清除已保存密码");
+        f->pw_clear = gtk_button_new_with_label(_("清除已保存密码"));
         gtk_widget_add_css_class(f->pw_clear, "hb-link");
         gtk_widget_set_visible(f->pw_clear, FALSE);
         g_signal_connect(f->pw_clear, "clicked",
@@ -1129,13 +1130,13 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     {
         GtkWidget *kr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         GtkWidget *bt;
-        gtk_box_append(GTK_BOX(kr), lbl("私钥文件"));
+        gtk_box_append(GTK_BOX(kr), lbl(_("私钥文件")));
         f->ident_e = gtk_entry_new();
         gtk_entry_set_placeholder_text(GTK_ENTRY(f->ident_e),
                                        "~/.ssh/id_ed25519");
         gtk_widget_set_hexpand(f->ident_e, TRUE);
         gtk_box_append(GTK_BOX(kr), f->ident_e);
-        bt = gtk_button_new_with_label("浏览…");
+        bt = gtk_button_new_with_label(_("浏览…"));
         gtk_widget_add_css_class(bt, "hb-btn");
         g_signal_connect(bt, "clicked", G_CALLBACK(on_browse), f);
         gtk_box_append(GTK_BOX(kr), bt);
@@ -1145,7 +1146,7 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
 
     /* 桌面认证（rdp/vnc）：密码可存 vault secret；域仅 RDP 显示。
      * 用户名复用「基本信息」里的 user 字段。 */
-    b = sec_box(f, "桌面认证", &f->sec_dauth);
+    b = sec_box(f, _("桌面认证"), &f->sec_dauth);
     {
         GtkWidget *pr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         f->dpw_e = gtk_password_entry_new();
@@ -1153,24 +1154,24 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
             GTK_PASSWORD_ENTRY(f->dpw_e), TRUE);
         gtk_widget_set_hexpand(f->dpw_e, TRUE);
         gtk_box_append(GTK_BOX(pr), f->dpw_e);
-        f->dpw_clear = gtk_button_new_with_label("清除已保存密码");
+        f->dpw_clear = gtk_button_new_with_label(_("清除已保存密码"));
         gtk_widget_add_css_class(f->dpw_clear, "hb-link");
         gtk_widget_set_visible(f->dpw_clear, FALSE);
         g_signal_connect(f->dpw_clear, "clicked",
                          G_CALLBACK(on_dpw_clear), f);
         gtk_box_append(GTK_BOX(pr), f->dpw_clear);
-        gtk_box_append(GTK_BOX(b), lbl("密码（可空，连接时询问）"));
+        gtk_box_append(GTK_BOX(b), lbl(_("密码（可空，连接时询问）")));
         gtk_box_append(GTK_BOX(b), pr);
     }
     f->dom_row = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_box_append(GTK_BOX(f->dom_row), lbl("域（RDP）"));
+    gtk_box_append(GTK_BOX(f->dom_row), lbl(_("域（RDP）")));
     f->dom_e = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(f->dom_e), "留空 = 本机域");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(f->dom_e), _("留空 = 本机域"));
     gtk_box_append(GTK_BOX(f->dom_row), f->dom_e);
     gtk_box_append(GTK_BOX(b), f->dom_row);
 
     /* SSH 跳板链 */
-    b = sec_box(f, "跳板机（外 → 内）", &f->sec_jump);
+    b = sec_box(f, _("跳板机（外 → 内）"), &f->sec_jump);
     f->jump_rows = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_box_append(GTK_BOX(b), f->jump_rows);
     f->jump_dd = GTK_WIDGET(gtk_drop_down_new(NULL, NULL));
@@ -1179,10 +1180,10 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     gtk_box_append(GTK_BOX(b), f->jump_dd);
 
     /* RDP/VNC 隧道 */
-    b = sec_box(f, "隧道", &f->sec_tunnel);
+    b = sec_box(f, _("隧道"), &f->sec_tunnel);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
-        GtkWidget *t = gtk_label_new("通过 SSH 隧道");
+        GtkWidget *t = gtk_label_new(_("通过 SSH 隧道"));
         gtk_widget_set_hexpand(t, TRUE);
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_box_append(GTK_BOX(row), t);
@@ -1196,39 +1197,39 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     g_signal_connect(f->via_dd, "notify::selected",
                      G_CALLBACK(on_tunnel_fwd_sel), f);
     gtk_box_append(GTK_BOX(b), f->via_dd);
-    f->fwd_btn = gtk_button_new_with_label("生成配套转发规则");
+    f->fwd_btn = gtk_button_new_with_label(_("生成配套转发规则"));
     gtk_widget_add_css_class(f->fwd_btn, "hb-btn");
     gtk_widget_set_halign(f->fwd_btn, GTK_ALIGN_START);
     gtk_widget_set_tooltip_text(f->fwd_btn,
-        "创建本机端口 → 此主机端口的 Local 转发，经所选 SSH 主机");
+        _("创建本机端口 → 此主机端口的 Local 转发，经所选 SSH 主机"));
     g_signal_connect(f->fwd_btn, "clicked", G_CALLBACK(on_gen_fwd), f);
     gtk_widget_set_sensitive(f->fwd_btn, FALSE);
     gtk_box_append(GTK_BOX(b), f->fwd_btn);
 
     /* 分组 */
-    b = sec_box(f, "分组", NULL);
+    b = sec_box(f, _("分组"), NULL);
     f->group_dd = GTK_WIDGET(gtk_drop_down_new(NULL, NULL));
     g_signal_connect(f->group_dd, "notify::selected",
                      G_CALLBACK(on_group_sel), f);
     gtk_box_append(GTK_BOX(b), f->group_dd);
 
     /* 启动片段 + 保活 */
-    b = sec_box(f, "启动片段", NULL);
+    b = sec_box(f, _("启动片段"), NULL);
     f->snip_dd = GTK_WIDGET(gtk_drop_down_new(NULL, NULL));
     gtk_box_append(GTK_BOX(b), f->snip_dd);
-    b = sec_box(f, "保活间隔（秒，0 = 关闭）", &f->sec_keep);
+    b = sec_box(f, _("保活间隔（秒，0 = 关闭）"), &f->sec_keep);
     f->keep_sb = gtk_spin_button_new_with_range(0, 3600, 5);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(f->keep_sb), 30);
     gtk_box_append(GTK_BOX(b), f->keep_sb);
 
     /* 颜色 / 标签 / OS */
-    b = sec_box(f, "颜色标签", NULL);
+    b = sec_box(f, _("颜色标签"), NULL);
     gtk_box_append(GTK_BOX(b), color_row_new(f, NULL));
-    b = sec_box(f, "标签（逗号分隔）", NULL);
+    b = sec_box(f, _("标签（逗号分隔）"), NULL);
     f->tags_e = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(f->tags_e), "prod, web, …");
     gtk_box_append(GTK_BOX(b), f->tags_e);
-    b = sec_box(f, "操作系统", &f->sec_os);
+    b = sec_box(f, _("操作系统"), &f->sec_os);
     f->os_dd = GTK_WIDGET(dd_new(kOsLbl, 5, 0));
     gtk_box_append(GTK_BOX(b), f->os_dd);
 
@@ -1244,11 +1245,11 @@ void hb_host_form_open(GtkWidget *parent, HbStore *st, const char *host_id)
     f_ = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(f_, "hb-modal-footer");
     gtk_widget_set_halign(f_, GTK_ALIGN_END);
-    cancel = gtk_button_new_with_label("取消");
+    cancel = gtk_button_new_with_label(_("取消"));
     gtk_widget_add_css_class(cancel, "hb-btn");
     g_signal_connect(cancel, "clicked", G_CALLBACK(on_cancel), f);
     gtk_box_append(GTK_BOX(f_), cancel);
-    ok = gtk_button_new_with_label("保存");
+    ok = gtk_button_new_with_label(_("保存"));
     gtk_widget_add_css_class(ok, "hb-btn");
     gtk_widget_add_css_class(ok, "primary");
     g_signal_connect(ok, "clicked", G_CALLBACK(on_save), f);

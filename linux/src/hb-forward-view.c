@@ -15,6 +15,7 @@
 #include <harbor/pf.h>
 #include <string.h>
 #include <stdlib.h>
+#include <glib/gi18n.h>
 
 struct _HbForwardView {
     GtkBox parent;
@@ -53,10 +54,10 @@ static char *fmt_kind(hb_obj *o, const char **tag_class)
     const char *k = hb_obj_get_str(o, "kind");
     *tag_class = "hb-tag";
     if (k && !strcmp(k, "remote"))
-        return g_strdup("Remote");
+        return g_strdup(_("Remote"));
     if (k && !strcmp(k, "dynamic"))
-        return g_strdup("Dynamic");
-    return g_strdup("Local");
+        return g_strdup(_("Dynamic"));
+    return g_strdup(_("Local"));
 }
 
 /* 监听列：local/dynamic "addr:port"；remote "服务器 addr:port"，
@@ -73,7 +74,7 @@ static char *fmt_bind(HbForwardView *v, hb_obj *o, FwdRow *r)
         st.bound_port > 0)
         actual = st.bound_port;
     if (k && !strcmp(k, "remote"))
-        return g_strdup_printf("服务器 %s:%d",
+        return g_strdup_printf(_("服务器 %s:%d"),
                                ba && *ba ? ba : "127.0.0.1", actual);
     return g_strdup_printf("%s:%d",
                            ba && *ba ? ba : "127.0.0.1", actual);
@@ -95,13 +96,13 @@ static char *fmt_via(HbForwardView *v, hb_obj *o)
     hb_obj *h = NULL;
     char *out;
     if (!via || !*via)
-        return g_strdup("（未设置）");
+        return g_strdup(_("（未设置）"));
     if (hb_vault_get(hb_store_vault(v->store), via, &h) == HB_OK &&
         h && !hb_obj_tombstone(h)) {
         const char *nm = hb_obj_get_str(h, "name");
         out = g_strdup(nm && *nm ? nm : via);
     } else {
-        out = g_strdup("（已删除）");
+        out = g_strdup(_("（已删除）"));
     }
     if (h) hb_obj_free(h);
     return out;
@@ -116,8 +117,8 @@ static char *fmt_traffic(const hb_fwd_status *st)
     {
         char *u = g_format_size(st->bytes_up);
         char *d = g_format_size(st->bytes_down);
-        char *s = g_strdup_printf("↑ %s ↓ %s · %u 连接",
-                                  u, d, st->active);
+        char *s = g_strdup_printf(ngettext("↑ %s ↓ %s · %u 连接", "↑ %s ↓ %s · %u 连接",
+                                  st->active), u, d, st->active);
         g_free(u); g_free(d);
         return s;
     }
@@ -166,30 +167,30 @@ static void update_row(FwdRow *r)
 
     switch (st.state) {
     case HB_FWD_LISTENING:
-        set_pill(r, "on", "监听中");
+        set_pill(r, "on", _("监听中"));
         gtk_widget_set_tooltip_text(r->row,
             st.message ? st.message : NULL);
         break;
     case HB_FWD_CONNECTING:
-        set_pill(r, "run", "连接中…");
+        set_pill(r, "run", _("连接中…"));
         gtk_widget_set_tooltip_text(r->row, NULL);
         break;
     case HB_FWD_RECONNECTING: {
         char buf[48];
-        snprintf(buf, sizeof buf, "断开 · %ds 后重连", st.retry_in_s);
+        snprintf(buf, sizeof buf, _("断开 · %ds 后重连"), st.retry_in_s);
         set_pill(r, "wait", buf);
         gtk_widget_set_tooltip_text(r->row,
-            st.message ? st.message : "连接断开，自动重连中");
+            st.message ? st.message : _("连接断开，自动重连中"));
         break;
     }
     case HB_FWD_FAILED:
-        set_pill(r, "err", "失败");
+        set_pill(r, "err", _("失败"));
         gtk_widget_set_tooltip_text(r->row,
-            st.message ? st.message : "启动失败");
+            st.message ? st.message : _("启动失败"));
         break;
     case HB_FWD_STOPPED:
     default:
-        set_pill(r, "off", "已停止");
+        set_pill(r, "off", _("已停止"));
         gtk_widget_set_tooltip_text(r->row,
             st.message ? st.message : NULL);
         break;
@@ -215,7 +216,7 @@ static gboolean tick_cb(gpointer ud)
             continue;
         if (st.state == HB_FWD_RECONNECTING) {
             char buf[48];
-            snprintf(buf, sizeof buf, "断开 · %ds 后重连",
+            snprintf(buf, sizeof buf, _("断开 · %ds 后重连"),
                      st.retry_in_s);
             gtk_label_set_text(GTK_LABEL(r->pill), buf);
             any = TRUE;
@@ -359,7 +360,7 @@ static void del_done(gboolean ok, gpointer ud)
     if (!ok) { fwd_undo_free(d); return; }
     hb_forward_mgr_stop(d->v->mgr, d->id);
     hb_vault_delete(hb_store_vault(d->v->store), d->id);
-    msg = g_strdup_printf("已删除规则 %s", d->desc ? d->desc : "");
+    msg = g_strdup_printf(_("已删除规则 %s"), d->desc ? d->desc : "");
     hb_toast_undo_destroy(GTK_WIDGET(d->v), msg,
                           fwd_undo_cb, fwd_undo_free, d);
     g_free(msg);
@@ -385,7 +386,7 @@ static void on_del(GtkButton *b, gpointer ud)
         if (k && !strcmp(k, "dynamic"))
             desc = g_strdup_printf("%s → SOCKS5", bind);
         else if (k && !strcmp(k, "remote"))
-            desc = g_strdup_printf("服务器 %s → %s:%d", bind,
+            desc = g_strdup_printf(_("服务器 %s → %s:%d"), bind,
                 da && *da ? da : "127.0.0.1", dp);
         else
             desc = g_strdup_printf("%s → %s:%d", bind,
@@ -398,9 +399,9 @@ static void on_del(GtkButton *b, gpointer ud)
         d->desc = g_strdup(desc);
         d->was_enabled = hb_obj_get_bool(o, "enabled", FALSE);
         msg = g_strdup_printf(
-            "确定删除 <b>%s</b>？监听将立即停止。删除后 9 秒内可撤销。",
+            _("确定删除 <b>%s</b>？监听将立即停止。删除后 9 秒内可撤销。"),
             desc);
-        hb_dialog_confirm(GTK_WIDGET(v), "删除转发规则", msg, "删除",
+        hb_dialog_confirm(GTK_WIDGET(v), _("删除转发规则"), msg, _("删除"),
                           TRUE, del_done, d);
         g_free(msg);
         g_free(desc);
@@ -453,10 +454,10 @@ static void exp_done(GObject *src, GAsyncResult *res, gpointer ud)
                              &out) != HB_OK || !out ||
         !g_file_replace_contents(gf, out, strlen(out), NULL, FALSE,
                                  G_FILE_CREATE_NONE, NULL, NULL, &err)) {
-        hb_toast(GTK_WIDGET(v), "导出失败");
+        hb_toast(GTK_WIDGET(v), _("导出失败"));
         if (err) g_error_free(err);
     } else {
-        hb_toast(GTK_WIDGET(v), "转发规则已导出");
+        hb_toast(GTK_WIDGET(v), _("转发规则已导出"));
     }
     g_free(out);
     g_object_unref(gf);
@@ -468,7 +469,7 @@ static void on_export(GSimpleAction *a, GVariant *p, gpointer ud)
     GtkFileDialog *d;
     (void)a; (void)p;
     d = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(d, "导出转发规则");
+    gtk_file_dialog_set_title(d, _("导出转发规则"));
     gtk_file_dialog_set_initial_name(d, "harbor-forwards.json");
     gtk_file_dialog_save(d, NULL, NULL, exp_done, v);
     g_object_unref(d);
@@ -562,7 +563,7 @@ static GtkWidget *build_row(HbForwardView *v, hb_obj *o)
     add_dclick(r->traffic_l, r);
 
     /* 状态 pill */
-    r->pill = gtk_label_new("已停止");
+    r->pill = gtk_label_new(_("已停止"));
     gtk_widget_add_css_class(r->pill, "pill");
     gtk_widget_add_css_class(r->pill, "off");
     gtk_widget_set_size_request(r->pill, 120, -1);
@@ -579,7 +580,7 @@ static GtkWidget *build_row(HbForwardView *v, hb_obj *o)
     eb = gtk_button_new();
     gtk_widget_add_css_class(eb, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(eb), hb_icon_new("pencil", 13));
-    gtk_widget_set_tooltip_text(eb, "编辑");
+    gtk_widget_set_tooltip_text(eb, _("编辑"));
     g_object_set_data_full(G_OBJECT(eb), "rid",
                            g_strdup(r->id), g_free);
     g_signal_connect(eb, "clicked", G_CALLBACK(on_edit), v);
@@ -588,7 +589,7 @@ static GtkWidget *build_row(HbForwardView *v, hb_obj *o)
     db = gtk_button_new();
     gtk_widget_add_css_class(db, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(db), hb_icon_new("trash", 13));
-    gtk_widget_set_tooltip_text(db, "删除规则");
+    gtk_widget_set_tooltip_text(db, _("删除规则"));
     g_object_set_data_full(G_OBJECT(db), "rid",
                            g_strdup(r->id), g_free);
     g_signal_connect(db, "clicked", G_CALLBACK(on_del), v);
@@ -609,12 +610,12 @@ static GtkWidget *build_head(void)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     struct { const char *t; int w; gboolean grow; } cols[] = {
-        { "类型",         64,  FALSE },
-        { "监听",         -1,  TRUE  },
-        { "目标",         -1,  TRUE  },
-        { "经由 SSH 主机", 150, FALSE },
-        { "流量",         170, FALSE },
-        { "状态",         120, FALSE },
+        { _("类型"),         64,  FALSE },
+        { _("监听"),         -1,  TRUE  },
+        { _("目标"),         -1,  TRUE  },
+        { _("经由 SSH 主机"), 150, FALSE },
+        { _("流量"),         170, FALSE },
+        { _("状态"),         120, FALSE },
         { "",             96,  FALSE },
     };
     int i;
@@ -751,7 +752,7 @@ GtkWidget *hb_forward_view_new(HbStore *st)
     {
         GtkWidget *rr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
         gtk_box_append(GTK_BOX(rr), hb_icon_new("plus", 13));
-        gtk_box_append(GTK_BOX(rr), gtk_label_new("New forwarding"));
+        gtk_box_append(GTK_BOX(rr), gtk_label_new(_("New forwarding")));
         gtk_button_set_child(GTK_BUTTON(newb), rr);
     }
     g_signal_connect(newb, "clicked", G_CALLBACK(on_new), v);
@@ -760,10 +761,10 @@ GtkWidget *hb_forward_view_new(HbStore *st)
     gtk_widget_add_css_class(menub, "hb-btn");
     gtk_menu_button_set_label(GTK_MENU_BUTTON(menub), "▾");
     mm = g_menu_new();
-    g_menu_append(mm, "新建规则", "fwd.new");
-    g_menu_append(mm, "全部启动", "fwd.startall");
-    g_menu_append(mm, "全部停止", "fwd.stopall");
-    g_menu_append(mm, "导出规则 JSON", "fwd.export");
+    g_menu_append(mm, _("新建规则"), "fwd.new");
+    g_menu_append(mm, _("全部启动"), "fwd.startall");
+    g_menu_append(mm, _("全部停止"), "fwd.stopall");
+    g_menu_append(mm, _("导出规则 JSON"), "fwd.export");
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menub),
                                    G_MENU_MODEL(mm));
     g_object_unref(mm);
@@ -798,7 +799,7 @@ GtkWidget *hb_forward_view_new(HbStore *st)
     }
     v->search = gtk_search_entry_new();
     gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(v->search),
-        "搜索监听 / 目标 / 主机…");
+        _("搜索监听 / 目标 / 主机…"));
     gtk_widget_set_size_request(v->search, 240, -1);
     gtk_widget_set_valign(v->search, GTK_ALIGN_CENTER);
     g_signal_connect(v->search, "search-changed",
@@ -846,11 +847,11 @@ GtkWidget *hb_forward_view_new(HbStore *st)
         gtk_box_append(GTK_BOX(empty), ico);
     }
     {
-        GtkWidget *t = gtk_label_new("还没有端口转发规则");
+        GtkWidget *t = gtk_label_new(_("还没有端口转发规则"));
         gtk_widget_add_css_class(t, "hb-e-title");
         gtk_box_append(GTK_BOX(empty), t);
-        t = gtk_label_new("Local / Remote / Dynamic SOCKS5 三种隧道，"
-                          "一键建立、自动重连");
+        t = gtk_label_new(_("Local / Remote / Dynamic SOCKS5 三种隧道，"
+                          "一键建立、自动重连"));
         gtk_widget_add_css_class(t, "hb-e-sub");
         gtk_box_append(GTK_BOX(empty), t);
     }
@@ -860,7 +861,7 @@ GtkWidget *hb_forward_view_new(HbStore *st)
     gtk_widget_add_css_class(nomatch, "hb-empty");
     gtk_widget_set_valign(nomatch, GTK_ALIGN_CENTER);
     {
-        GtkWidget *t = gtk_label_new("无匹配规则");
+        GtkWidget *t = gtk_label_new(_("无匹配规则"));
         gtk_widget_add_css_class(t, "hb-e-title");
         gtk_box_append(GTK_BOX(nomatch), t);
     }
@@ -872,9 +873,9 @@ GtkWidget *hb_forward_view_new(HbStore *st)
     gtk_widget_add_css_class(hint, "hintbox");
     gtk_widget_add_css_class(hint, "plain");
     hl = gtk_label_new(
-        "VNC / RDP 主机勾选「SSH 隧道」后会自动创建临时 Local 规则："
+        _("VNC / RDP 主机勾选「SSH 隧道」后会自动创建临时 Local 规则："
         "本机随机端口 → 服务器回环 127.0.0.1:3389/5901，"
-        "桌面会话关闭即拆除（FR-07）。");
+        "桌面会话关闭即拆除（FR-07）。"));
     gtk_label_set_wrap(GTK_LABEL(hl), TRUE);
     gtk_label_set_xalign(GTK_LABEL(hl), 0);
     gtk_widget_set_hexpand(hl, TRUE);

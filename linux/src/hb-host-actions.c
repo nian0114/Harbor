@@ -9,6 +9,7 @@
 
 #include <harbor/harbor_core.h>
 #include <string.h>
+#include <glib/gi18n.h>
 
 static HbWindow *win_of(GtkWidget *w)
 {
@@ -140,7 +141,7 @@ static char *dup_name(HbStore *st, const char *name)
     int i;
 
     objs = hb_store_list(st, "host", &n);
-    cand = g_strdup_printf("%s (副本)", name && *name ? name : "host");
+    cand = g_strdup_printf(_("%s (副本)"), name && *name ? name : "host");
     for (i = 2; ; i++) {
         taken = FALSE;
         for (j = 0; j < n; j++) {
@@ -149,7 +150,7 @@ static char *dup_name(HbStore *st, const char *name)
         }
         if (!taken) break;
         g_free(cand);
-        cand = g_strdup_printf("%s (副本 %d)",
+        cand = g_strdup_printf(_("%s (副本 %d)"),
                                name && *name ? name : "host", i);
     }
     if (objs) hb_obj_list_free(objs, n);
@@ -201,8 +202,8 @@ void hb_host_action_duplicate(GtkWidget *any, HbStore *st, const char *id)
     d->st = st;
     d->id = g_strdup(hb_obj_id(copy));
     d->win = win;
-    toast = g_strdup_printf("已复制为「%s」", name);
-    hb_window_toast_action(win, toast, "编辑", 9,
+    toast = g_strdup_printf(_("已复制为「%s」"), name);
+    hb_window_toast_action(win, toast, _("编辑"), 9,
                            G_CALLBACK(dup_edit_toast), d);
     g_free(toast);
     g_free(name);
@@ -262,7 +263,7 @@ static void del_done(gboolean ok, gpointer ud)
     }
     hb_vault_delete(hb_store_vault(d->st), d->id);
     hb_window_close_host_tabs(d->win, d->id);
-    toast = g_strdup_printf("已删除主机「%s」", d->msg);
+    toast = g_strdup_printf(_("已删除主机「%s」"), d->msg);
     hb_window_toast_undo(d->win, toast, G_CALLBACK(del_undo), d);
     g_free(toast);
     /* d 移交 undo 回调 */
@@ -282,14 +283,14 @@ void hb_host_action_delete(GtkWidget *any, HbStore *st, const char *id)
         return;
     nm = hb_obj_get_str(o, "name");
     esc = g_markup_escape_text(nm && *nm ? nm :
-                               (hb_obj_get_str(o, "address") ?: "主机"), -1);
+                               (hb_obj_get_str(o, "address") ?: _("主机")), -1);
     markup = g_strdup_printf(
-        "确定删除 <b>%s</b>？已保存的密码会随主机一起删除。删除后 9 秒内可撤销。",
+        _("确定删除 <b>%s</b>？已保存的密码会随主机一起删除。删除后 9 秒内可撤销。"),
         esc);
     refs = count_references(st, id);
     if (refs > 0) {
-        char *m2 = g_strdup_printf("%s\n\n有 %d 台主机以它为跳板/隧道",
-                                   markup, refs);
+        char *m2 = g_strdup_printf(ngettext("%s\n\n有 %d 台主机以它为跳板/隧道", "%s\n\n有 %d 台主机以它为跳板/隧道",
+                                   refs), markup, refs);
         g_free(markup);
         markup = m2;
     }
@@ -299,8 +300,8 @@ void hb_host_action_delete(GtkWidget *any, HbStore *st, const char *id)
     d->st = st;
     d->win = win;
     d->id = g_strdup(id);
-    d->msg = g_strdup(nm && *nm ? nm : "主机");
-    hb_dialog_confirm(GTK_WIDGET(win), "删除主机", markup, "删除", TRUE,
+    d->msg = g_strdup(nm && *nm ? nm : _("主机"));
+    hb_dialog_confirm(GTK_WIDGET(win), _("删除主机"), markup, _("删除"), TRUE,
                       del_done, d);
     g_free(markup);
     hb_obj_free(o);

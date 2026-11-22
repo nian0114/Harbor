@@ -526,7 +526,7 @@ static GtkWidget *panel_head(const char *icon, const char *title,
     GtkWidget *h = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     GtkWidget *s;
     GtkWidget *hd = gtk_label_new(NULL);
-    char *mk = g_strdup_printf("<b>%s</b>", title);
+    char *mk = g_markup_printf_escaped("<b>%s</b>", title);
     gtk_label_set_markup(GTK_LABEL(hd), mk);
     g_free(mk);
     gtk_widget_add_css_class(hd, "set-h4");
@@ -680,7 +680,7 @@ static GtkWidget *build_preview(HbSettingsView *v)
     {
         GtkWidget *r = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
         gtk_box_append(GTK_BOX(r), hb_icon_new("eye", 12));
-        gtk_box_append(GTK_BOX(r), gtk_label_new("监控 开"));
+        gtk_box_append(GTK_BOX(r), gtk_label_new(_("监控 开")));
         gtk_button_set_child(GTK_BUTTON(pill), r);
     }
     gtk_box_append(GTK_BOX(tb), pill);
@@ -702,7 +702,7 @@ static GtkWidget *build_preview(HbSettingsView *v)
     gtk_box_append(GTK_BOX(view), ov);
 
     gtk_widget_add_css_class(st, "hb-term-status");
-    ok = gtk_label_new("● 已连接");
+    ok = gtk_label_new(_("● 已连接"));
     gtk_widget_add_css_class(ok, "hb-term-ok");
     gtk_box_append(GTK_BOX(st), ok);
     mt = gtk_label_new("xterm-256color");
@@ -713,7 +713,7 @@ static GtkWidget *build_preview(HbSettingsView *v)
         gtk_widget_set_hexpand(sp2, TRUE);
         gtk_box_append(GTK_BOX(st), sp2);
     }
-    mt = gtk_label_new("scrollback 10,000 行");
+    mt = gtk_label_new(_("scrollback 10,000 行"));
     gtk_box_append(GTK_BOX(st), mt);
     gtk_box_append(GTK_BOX(view), st);
 
@@ -802,7 +802,7 @@ static void sc_commit(ScRow *r, const char *accel)
 
     r->capturing = FALSE;
     if (!hb_shortcut_accel_parse(accel, &k, &m)) {
-        hb_toast(GTK_WIDGET(v), "无效的快捷键");
+        hb_toast(GTK_WIDGET(v), _("无效的快捷键"));
         sc_row_update(r);
         return;
     }
@@ -815,8 +815,8 @@ static void sc_commit(ScRow *r, const char *accel)
         const HbShortcut *sc = hb_shortcuts(NULL);
         hb_shortcuts_apply_override(o, (size_t)conf, "");
         {
-            char *m2 = g_strdup_printf("与「%s」冲突，已解绑对方",
-                                       sc[conf].label);
+            char *m2 = g_strdup_printf(_("与「%s」冲突，已解绑对方"),
+                                       _(sc[conf].label));
             hb_toast(GTK_WIDGET(v), m2);
             g_free(m2);
         }
@@ -824,7 +824,7 @@ static void sc_commit(ScRow *r, const char *accel)
     if (k && m == GDK_CONTROL_MASK &&
         k >= GDK_KEY_a && k <= GDK_KEY_z)
         hb_toast(GTK_WIDGET(v),
-                 "警告：Ctrl+字母在终端里常是 shell 控制键");
+                 _("警告：Ctrl+字母在终端里常是 shell 控制键"));
     hb_shortcuts_apply_override(o, r->idx, accel);
     hb_vault_put(hb_store_vault(v->store), o);
     hb_obj_free(o);
@@ -861,7 +861,7 @@ static void on_sc_btn(GtkButton *b, gpointer ud)
     (void)b;
     r->capturing = TRUE;
     gtk_button_set_label(GTK_BUTTON(r->btn),
-                         "按下新的快捷键…（Esc 取消，Backspace 禁用）");
+                         _("按下新的快捷键…（Esc 取消，Backspace 禁用）"));
     gtk_widget_grab_focus(r->btn);
 }
 
@@ -882,9 +882,9 @@ static GtkWidget *build_shortcuts_panel(HbSettingsView *v)
 
     gtk_widget_add_css_class(panel, "panel");
     gtk_box_append(GTK_BOX(panel),
-        panel_head("terminal", "快捷键",
-                   "点击按键编辑；Backspace 禁用，↺ 恢复默认。"
-                   "Alt/Ctrl+1…9 家族固定。"));
+        panel_head("terminal", _("快捷键"),
+                   _("点击按键编辑；Backspace 禁用，↺ 恢复默认。"
+                   "Alt/Ctrl+1…9 家族固定。")));
     grid = gtk_grid_new();
     gtk_grid_set_column_spacing(GTK_GRID(grid), 18);
     gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
@@ -892,7 +892,7 @@ static GtkWidget *build_shortcuts_panel(HbSettingsView *v)
     if (!v->sc_rows)
         v->sc_rows = g_ptr_array_new_with_free_func(g_free);
     for (i = 0; i < n; i++) {
-        GtkWidget *l = gtk_label_new(sc[i].label);
+        GtkWidget *l = gtk_label_new(_(sc[i].label));
         ScRow *r = g_new0(ScRow, 1);
         gtk_label_set_xalign(GTK_LABEL(l), 0);
         r->v = v;
@@ -928,7 +928,7 @@ static GtkWidget *build_shortcuts_panel(HbSettingsView *v)
                         (int)(row % 2) * 3 + 1, row / 2, 1, 1);
         r->rst = gtk_button_new_from_icon_name("view-refresh-symbolic");
         gtk_widget_add_css_class(r->rst, "flat");
-        gtk_widget_set_tooltip_text(r->rst, "恢复默认");
+        gtk_widget_set_tooltip_text(r->rst, _("恢复默认"));
         g_signal_connect_swapped(r->rst, "clicked",
                                  G_CALLBACK(sc_reset_row), r);
         gtk_grid_attach(GTK_GRID(grid), r->rst,
@@ -936,7 +936,7 @@ static GtkWidget *build_shortcuts_panel(HbSettingsView *v)
         row++;
     }
     gtk_box_append(GTK_BOX(panel), grid);
-    rst_all = gtk_button_new_with_label("全部恢复默认");
+    rst_all = gtk_button_new_with_label(_("全部恢复默认"));
     gtk_widget_set_halign(rst_all, GTK_ALIGN_END);
     g_signal_connect(rst_all, "clicked",
                      G_CALLBACK(on_sc_reset_all), v);
@@ -957,7 +957,7 @@ static void on_login_sw(GObject *sw, GParamSpec *ps, gpointer ud)
         v->updating = TRUE;
         gtk_switch_set_active(GTK_SWITCH(sw), FALSE);
         v->updating = FALSE;
-        hb_toast(GTK_WIDGET(v), err ? err->message : "写入自启动项失败");
+        hb_toast(GTK_WIDGET(v), err ? err->message : _("写入自启动项失败"));
         g_clear_error(&err);
         return;
     }
@@ -1006,8 +1006,8 @@ static void hb_settings_view_init(HbSettingsView *v)
     gtk_widget_set_hexpand(left, TRUE);
     gtk_box_append(GTK_BOX(grid), left);
     gtk_box_append(GTK_BOX(left),
-        panel_head("palette", "终端主题",
-                   "实时应用到所有会话与分屏。"));
+        panel_head("palette", _("终端主题"),
+                   _("实时应用到所有会话与分屏。")));
 
     tgrid = gtk_grid_new();
     gtk_widget_add_css_class(tgrid, "theme-grid");
@@ -1022,10 +1022,10 @@ static void hb_settings_view_init(HbSettingsView *v)
     gtk_box_append(GTK_BOX(left), tgrid);
 
     gtk_box_append(GTK_BOX(left),
-        slider_row("字号", &v->font_scale, &v->font_lbl,
+        slider_row(_("字号"), &v->font_scale, &v->font_lbl,
                    10, 20, 1, G_CALLBACK(on_font_scale), v));
     gtk_box_append(GTK_BOX(left),
-        slider_row("行距", &v->lh_scale, &v->lh_lbl,
+        slider_row(_("行距"), &v->lh_scale, &v->lh_lbl,
                    1.2, 2.0, 0.1, G_CALLBACK(on_lh_scale), v));
 
     /* 字体族：安装的单宽字体；Monospace 总在首位（别名永远有效） */
@@ -1053,7 +1053,7 @@ static void hb_settings_view_init(HbSettingsView *v)
     {
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-        GtkWidget *t = gtk_label_new("字体");
+        GtkWidget *t = gtk_label_new(_("字体"));
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_widget_add_css_class(t, "sl-title");
         gtk_box_append(GTK_BOX(col), t);
@@ -1068,8 +1068,8 @@ static void hb_settings_view_init(HbSettingsView *v)
     /* scrollback */
     {
         GtkStringList *m = gtk_string_list_new(NULL);
-        const char *lbls[] = { "1,000 行", "5,000 行", "10,000 行",
-                               "50,000 行", "100,000 行" };
+        const char *lbls[] = { _("1,000 行"), _("5,000 行"), _("10,000 行"),
+                               _("50,000 行"), _("100,000 行") };
         GtkWidget *row, *col, *t, *s;
         for (i = 0; i < N_SB; i++)
             gtk_string_list_append(m, lbls[i]);
@@ -1079,11 +1079,11 @@ static void hb_settings_view_init(HbSettingsView *v)
                          G_CALLBACK(on_dd_changed), v);
         row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-        t = gtk_label_new("Scrollback");
+        t = gtk_label_new(_("Scrollback"));
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_widget_add_css_class(t, "sl-title");
         gtk_box_append(GTK_BOX(col), t);
-        s = gtk_label_new("新会话生效");
+        s = gtk_label_new(_("新会话生效"));
         gtk_label_set_xalign(GTK_LABEL(s), 0);
         gtk_widget_add_css_class(s, "hb-dim");
         gtk_box_append(GTK_BOX(col), s);
@@ -1096,19 +1096,19 @@ static void hb_settings_view_init(HbSettingsView *v)
     }
 
     gtk_box_append(GTK_BOX(left),
-        switch_row("光标闪烁", NULL, &v->blink_sw,
+        switch_row(_("光标闪烁"), NULL, &v->blink_sw,
                    G_CALLBACK(on_sw_changed), v));
     gtk_box_append(GTK_BOX(left),
-        switch_row("允许远端写入剪贴板（OSC 52）",
-                   "远端程序可改写本机剪贴板，仅在信任的主机上开启",
+        switch_row(_("允许远端写入剪贴板（OSC 52）"),
+                   _("远端程序可改写本机剪贴板，仅在信任的主机上开启"),
                    &v->osc52_sw, G_CALLBACK(on_sw_changed), v));
 
     /* SFTP 并发传输数（1-8，默认 3） */
     {
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-        GtkWidget *t = gtk_label_new("SFTP 并发传输数");
-        GtkWidget *s = gtk_label_new("同一主机同时进行的传输（1-8）");
+        GtkWidget *t = gtk_label_new(_("SFTP 并发传输数"));
+        GtkWidget *s = gtk_label_new(_("同一主机同时进行的传输（1-8）"));
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_box_append(GTK_BOX(col), t);
         gtk_label_set_xalign(GTK_LABEL(s), 0);
@@ -1131,9 +1131,9 @@ static void hb_settings_view_init(HbSettingsView *v)
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
         GtkWidget *trow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-        GtkWidget *t = gtk_label_new("Autocomplete");
+        GtkWidget *t = gtk_label_new(_("Autocomplete"));
         GtkWidget *beta = gtk_label_new("BETA");
-        GtkWidget *s = gtk_label_new("即将推出");
+        GtkWidget *s = gtk_label_new(_("即将推出"));
         GtkWidget *sw = gtk_switch_new();
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_box_append(GTK_BOX(trow), t);
@@ -1158,7 +1158,7 @@ static void hb_settings_view_init(HbSettingsView *v)
         GtkWidget *r = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
         gtk_widget_add_css_class(rst, "hb-btn-small");
         gtk_box_append(GTK_BOX(r), hb_icon_new("refresh", 12));
-        gtk_box_append(GTK_BOX(r), gtk_label_new("恢复默认"));
+        gtk_box_append(GTK_BOX(r), gtk_label_new(_("恢复默认")));
         gtk_button_set_child(GTK_BUTTON(rst), r);
         gtk_widget_set_halign(rst, GTK_ALIGN_START);
         g_signal_connect(rst, "clicked", G_CALLBACK(on_reset), v);
@@ -1171,8 +1171,8 @@ static void hb_settings_view_init(HbSettingsView *v)
     gtk_widget_set_hexpand(right, TRUE);
     gtk_box_append(GTK_BOX(grid), right);
     gtk_box_append(GTK_BOX(right),
-        panel_head("terminal", "实时预览",
-                   "拖动左侧滑杆 / 切换主题，立即生效。"));
+        panel_head("terminal", _("实时预览"),
+                   _("拖动左侧滑杆 / 切换主题，立即生效。")));
     {
         GtkWidget *pv = build_preview(v);
         gtk_widget_set_size_request(pv, -1, 300);
@@ -1185,7 +1185,7 @@ static void hb_settings_view_init(HbSettingsView *v)
         gtk_widget_add_css_class(hint, "plain");
         gtk_box_append(GTK_BOX(hint), hb_icon_new("info", 14));
         txt = gtk_label_new(
-            "设置保存在本机 Vault；账号同步上线后随 E2EE 同步到其它设备。");
+            _("设置保存在本机 Vault；账号同步上线后随 E2EE 同步到其它设备。"));
         gtk_label_set_wrap(GTK_LABEL(txt), TRUE);
         gtk_label_set_xalign(GTK_LABEL(txt), 0);
         gtk_box_append(GTK_BOX(hint), txt);
@@ -1199,19 +1199,19 @@ static void hb_settings_view_init(HbSettingsView *v)
         gtk_widget_add_css_class(grp, "panel");
         gtk_box_append(GTK_BOX(outer), grp);
         gtk_box_append(GTK_BOX(grp),
-            panel_head("monitor", "外观",
-                       "界面配色主题；终端配色在上方预览区单独选择。"));
+            panel_head("monitor", _("外观"),
+                       _("界面配色主题；终端配色在上方预览区单独选择。")));
 
         row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-        t = gtk_label_new("界面主题");
+        t = gtk_label_new(_("界面主题"));
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_widget_add_css_class(t, "sl-title");
         gtk_box_append(GTK_BOX(col), t);
         gtk_widget_set_hexpand(col, TRUE);
         gtk_box_append(GTK_BOX(row), col);
         {
-            const char *lbls[] = { "浅色", "深色", "跟随系统", NULL };
+            const char *lbls[] = { _("浅色"), _("深色"), _("跟随系统"), NULL };
             v->ui_dd = gtk_drop_down_new_from_strings(
                 (const char * const *)lbls);
         }
@@ -1269,22 +1269,22 @@ static void hb_settings_view_init(HbSettingsView *v)
         gtk_widget_add_css_class(grp, "panel");
         gtk_box_append(GTK_BOX(outer), grp);
         gtk_box_append(GTK_BOX(grp),
-            panel_head("window", "系统托盘与启动",
-                       "关闭窗口时驻留托盘、登录时自动启动。"));
+            panel_head("window", _("系统托盘与启动"),
+                       _("关闭窗口时驻留托盘、登录时自动启动。")));
 
-        tray_row = switch_row("关闭时驻留系统托盘", NULL,
+        tray_row = switch_row(_("关闭时驻留系统托盘"), NULL,
                               &v->tray_sw, G_CALLBACK(on_tray_sw), v);
         gtk_box_append(GTK_BOX(grp), tray_row);
         if (!hb_application_tray_available()) {
             gtk_widget_set_sensitive(tray_row, FALSE);
-            sub = gtk_label_new("当前桌面未提供系统托盘");
+            sub = gtk_label_new(_("当前桌面未提供系统托盘"));
             gtk_widget_add_css_class(sub, "hb-dim");
             gtk_label_set_xalign(GTK_LABEL(sub), 0);
             gtk_box_append(GTK_BOX(grp), sub);
         }
         gtk_box_append(GTK_BOX(grp),
-            switch_row("登录时自动启动",
-                       "图形会话启动时以 --background 后台运行",
+            switch_row(_("登录时自动启动"),
+                       _("图形会话启动时以 --background 后台运行"),
                        &v->login_sw, G_CALLBACK(on_login_sw), v));
     }
 
@@ -1363,9 +1363,9 @@ static const char *pw_strength(const char *pw)
         else sym = TRUE;
     }
     cls = lo + up + dg + sym;
-    if (n >= 12 && cls >= 3) return "强度：强";
-    if (n >= 8)              return "强度：中（建议 12+ 位混合字符）";
-    if (n > 0)               return "强度：弱（至少 8 位）";
+    if (n >= 12 && cls >= 3) return _("强度：强");
+    if (n >= 8)              return _("强度：中（建议 12+ 位混合字符）");
+    if (n > 0)               return _("强度：弱（至少 8 位）");
     return "";
 }
 
@@ -1379,7 +1379,7 @@ static void bk_pw_changed(GtkEditable *e, gpointer ud)
 
     g_strlcpy(msg, pw_strength(a), sizeof msg);
     if (c && *c && strcmp(a, c))
-        g_strlcat(msg, "　·　两次输入不一致", sizeof msg);
+        g_strlcat(msg, _("　·　两次输入不一致"), sizeof msg);
     gtk_label_set_label(GTK_LABEL(b->hint), msg);
     (void)e;
 }
@@ -1416,9 +1416,9 @@ static void bk_export_done(GObject *src, GAsyncResult *res, gpointer ud)
     BkExportJob *j = g_task_get_task_data(G_TASK(res));
     (void)src;
     if (j->err == HB_OK)
-        hb_toast(GTK_WIDGET(b->v), "加密备份已导出");
+        hb_toast(GTK_WIDGET(b->v), _("加密备份已导出"));
     else
-        hb_toast(GTK_WIDGET(b->v), "导出失败");
+        hb_toast(GTK_WIDGET(b->v), _("导出失败"));
     bkui_free(b);
 }
 
@@ -1463,15 +1463,15 @@ static void bk_export_go(GtkButton *btn, gpointer ud)
     (void)btn;
 
     if (!*a) {
-        gtk_label_set_label(GTK_LABEL(b->hint), "请输入备份密码");
+        gtk_label_set_label(GTK_LABEL(b->hint), _("请输入备份密码"));
         return;
     }
     if (strcmp(a, c)) {
-        gtk_label_set_label(GTK_LABEL(b->hint), "两次输入不一致");
+        gtk_label_set_label(GTK_LABEL(b->hint), _("两次输入不一致"));
         return;
     }
     if (strlen(a) < 8)
-        hb_toast(GTK_WIDGET(b->v), "密码少于 8 位，仍继续导出");
+        hb_toast(GTK_WIDGET(b->v), _("密码少于 8 位，仍继续导出"));
     b->busy = TRUE;
     /* 关窗后 pw 控件即销毁，先留副本给 worker */
     g_free(b->pw_stash);
@@ -1488,7 +1488,7 @@ static void bk_export_go(GtkButton *btn, gpointer ud)
     {
         GtkFileDialog *d = gtk_file_dialog_new();
         adw_dialog_close(b->dlg);
-        gtk_file_dialog_set_title(d, "保存加密备份");
+        gtk_file_dialog_set_title(d, _("保存加密备份"));
         gtk_file_dialog_set_initial_name(d, "harbor" HB_BACKUP_EXT);
         gtk_file_dialog_save(d, NULL, NULL, bk_save_cb, b);
         g_object_unref(d);
@@ -1521,13 +1521,13 @@ static void bk_import_do(BkUi *b, const char *pw)
     if (e == HB_OK) {
         char msg[160];
         g_snprintf(msg, sizeof msg,
-                   "已导入 %zu 个对象：新建 %zu · 覆盖 %zu",
-                   st.total, st.created, st.overwritten);
+                   ngettext("已导入 %zu 个对象：新建 %zu · 覆盖 %zu", "已导入 %zu 个对象：新建 %zu · 覆盖 %zu",
+                   st.total), st.total, st.created, st.overwritten);
         hb_toast(GTK_WIDGET(b->v), msg);
         /* settings 可能被覆盖 → 立即重挂主题 */
         hb_application_apply_theme();
     } else {
-        hb_toast(GTK_WIDGET(b->v), "口令错误或文件已损坏");
+        hb_toast(GTK_WIDGET(b->v), _("口令错误或文件已损坏"));
     }
 }
 
@@ -1546,7 +1546,7 @@ static void bk_preview_done(GObject *src, GAsyncResult *res, gpointer ud)
     BkImportJob *j = g_task_get_task_data(G_TASK(res));
     (void)src;
     if (j->err != HB_OK) {
-        hb_toast(GTK_WIDGET(b->v), "口令错误或文件已损坏");
+        hb_toast(GTK_WIDGET(b->v), _("口令错误或文件已损坏"));
         if (b->path) sodium_memzero(b->path, strlen(b->path));
         bkui_free(b);
         return;
@@ -1554,12 +1554,14 @@ static void bk_preview_done(GObject *src, GAsyncResult *res, gpointer ud)
     {
         char msg[200];
         g_snprintf(msg, sizeof msg,
+                   ngettext("备份文件校验通过，包含 <b>%zu</b> 个对象"
+                   "（含密钥与密文）。导入将按对象覆盖同名数据。",
                    "备份文件校验通过，包含 <b>%zu</b> 个对象"
                    "（含密钥与密文）。导入将按对象覆盖同名数据。",
-                   j->st.total);
+                   j->st.total), j->st.total);
         b->dlg = hb_dialog_confirm(GTK_WIDGET(b->v),
-                                   "导入加密备份", msg,
-                                   "导入", FALSE, bk_confirm_cb, b);
+                                   _("导入加密备份"), msg,
+                                   _("导入"), FALSE, bk_confirm_cb, b);
     }
 }
 
@@ -1581,7 +1583,7 @@ static void bk_import_go(GtkButton *btn, gpointer ud)
     (void)btn;
 
     if (!*pw) {
-        gtk_label_set_label(GTK_LABEL(b->hint), "请输入备份密码");
+        gtk_label_set_label(GTK_LABEL(b->hint), _("请输入备份密码"));
         return;
     }
     b->busy = TRUE;
@@ -1606,10 +1608,10 @@ static void bk_import_pw_dialog(BkUi *b)
     AdwDialog *d;
     GtkWidget *hint;
 
-    d = hb_modal_new("导入加密备份", &body, &foot);
+    d = hb_modal_new(_("导入加密备份"), &body, &foot);
     b->dlg = d;
     gtk_box_append(GTK_BOX(body),
-        gtk_label_new("输入该备份的导出密码："));
+        gtk_label_new(_("输入该备份的导出密码：")));
     b->pw1 = gtk_password_entry_new();
     gtk_password_entry_set_show_peek_icon(
         GTK_PASSWORD_ENTRY(b->pw1), TRUE);
@@ -1620,7 +1622,7 @@ static void bk_import_pw_dialog(BkUi *b)
     gtk_box_append(GTK_BOX(body), hint);
     b->hint = hint;
     {
-        GtkWidget *ok = gtk_button_new_with_label("下一步");
+        GtkWidget *ok = gtk_button_new_with_label(_("下一步"));
         gtk_widget_add_css_class(ok, "primary");
         g_signal_connect(ok, "clicked", G_CALLBACK(bk_import_go), b);
         gtk_box_append(GTK_BOX(foot), ok);
@@ -1643,7 +1645,7 @@ static void bk_file_cb(GObject *src, GAsyncResult *res, gpointer ud)
     if (!gf) { bkui_free(b); return; }
     if (!g_file_load_contents(gf, NULL, &contents, &len, NULL, NULL)) {
         g_object_unref(gf);
-        hb_toast(GTK_WIDGET(b->v), "无法读取备份文件");
+        hb_toast(GTK_WIDGET(b->v), _("无法读取备份文件"));
         bkui_free(b);
         return;
     }
@@ -1663,10 +1665,10 @@ static void on_bk_export(GtkButton *btn, gpointer ud)
     (void)btn;
 
     b->v = v;
-    d = hb_modal_new("导出加密备份", &body, &foot);
+    d = hb_modal_new(_("导出加密备份"), &body, &foot);
     b->dlg = d;
-    l = gtk_label_new("备份包含全部主机、密钥与密文；密码用于"
-                      " Argon2id 加密，遗失无法恢复。");
+    l = gtk_label_new(_("备份包含全部主机、密钥与密文；密码用于"
+                      " Argon2id 加密，遗失无法恢复。"));
     gtk_label_set_wrap(GTK_LABEL(l), TRUE);
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(body), l);
@@ -1685,7 +1687,7 @@ static void on_bk_export(GtkButton *btn, gpointer ud)
     b->hint = hint;
     g_signal_connect(b->pw1, "changed", G_CALLBACK(bk_pw_changed), b);
     g_signal_connect(b->pw2, "changed", G_CALLBACK(bk_pw_changed), b);
-    ok = gtk_button_new_with_label("导出…");
+    ok = gtk_button_new_with_label(_("导出…"));
     gtk_widget_add_css_class(ok, "primary");
     g_signal_connect(ok, "clicked", G_CALLBACK(bk_export_go), b);
     gtk_box_append(GTK_BOX(foot), ok);
@@ -1704,7 +1706,7 @@ static void on_bk_import(GtkButton *btn, gpointer ud)
     (void)btn;
     b->v = v;
     d = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(d, "导入加密备份");
+    gtk_file_dialog_set_title(d, _("导入加密备份"));
     gtk_file_dialog_open(d, NULL, NULL, bk_file_cb, b);
     g_object_unref(d);
 }
@@ -1726,11 +1728,11 @@ static GtkWidget *build_backup_panel(HbSettingsView *v)
 
     gtk_widget_add_css_class(panel, "panel");
     gtk_box_append(GTK_BOX(panel),
-        panel_head("keyring", "数据",
-                   "加密备份包含主机、密钥、密文与设置（.harbor-backup）。"));
+        panel_head("keyring", _("数据"),
+                   _("加密备份包含主机、密钥、密文与设置（.harbor-backup）。")));
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    be = gtk_button_new_with_label("导出加密备份…");
-    bi = gtk_button_new_with_label("导入备份…");
+    be = gtk_button_new_with_label(_("导出加密备份…"));
+    bi = gtk_button_new_with_label(_("导入备份…"));
     gtk_widget_add_css_class(be, "hb-btn");
     gtk_widget_add_css_class(bi, "hb-btn");
     g_signal_connect(be, "clicked", G_CALLBACK(on_bk_export), v);
@@ -1852,7 +1854,7 @@ void hb_settings_view_bk_dev_confirm(gboolean yes)
     BkUi *b = bk_cur;
     GtkWidget *btn;
     if (!b || !b->dlg) return;
-    btn = find_button_lbl(GTK_WIDGET(b->dlg), yes ? "导入" : "取消");
+    btn = find_button_lbl(GTK_WIDGET(b->dlg), yes ? _("导入") : _("取消"));
     if (btn) gtk_widget_activate(btn);
     else if (!yes) adw_dialog_close(b->dlg);   /* pw 阶段直接关窗 */
 }
@@ -1866,7 +1868,7 @@ void hb_settings_view_import_backup_dev(HbSettingsView *v,
     b->v = v;
     if (!path ||
         !g_file_get_contents(path, &contents, &len, NULL)) {
-        hb_toast(GTK_WIDGET(v), "无法读取备份文件");
+        hb_toast(GTK_WIDGET(v), _("无法读取备份文件"));
         bkui_free(b);
         return;
     }

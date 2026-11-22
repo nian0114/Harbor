@@ -3,6 +3,7 @@
 
 #include <glib-unix.h>
 #include <string.h>
+#include <glib/gi18n.h>
 
 static void send_input_scroll_bottom(HbTerminal *t);
 
@@ -1874,10 +1875,10 @@ static void hb_terminal_init(HbTerminal *t)
 
     /* 右键菜单 */
     mm = g_menu_new();
-    g_menu_append(mm, "复制", "term.copy");
-    g_menu_append(mm, "粘贴", "term.paste");
-    g_menu_append(mm, "全选", "term.selall");
-    g_menu_append(mm, "清除回滚", "term.clrsb");
+    g_menu_append(mm, _("复制"), "term.copy");
+    g_menu_append(mm, _("粘贴"), "term.paste");
+    g_menu_append(mm, _("全选"), "term.selall");
+    g_menu_append(mm, _("清除回滚"), "term.clrsb");
     menu = gtk_popover_menu_new_from_model(G_MENU_MODEL(mm));
     g_object_unref(mm);
     pop = menu;

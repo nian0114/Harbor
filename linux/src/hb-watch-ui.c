@@ -8,6 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <glib/gi18n.h>
 
 /* ============================ settings ============================ */
 
@@ -215,8 +216,8 @@ static char *fmt_duration(int64_t ms)
     if (ms < 0)
         return g_strdup("");
     if (ms < 60000)
-        return g_strdup_printf("耗时 %.1fs", ms / 1000.0);
-    return g_strdup_printf("耗时 %dm%02ds", (int)(ms / 60000),
+        return g_strdup_printf(_("耗时 %.1fs"), ms / 1000.0);
+    return g_strdup_printf(_("耗时 %dm%02ds"), (int)(ms / 60000),
                            (int)((ms % 60000) / 1000));
 }
 
@@ -275,19 +276,19 @@ void hb_watch_route(GtkWidget *page, const char *tab_id,
     if (host_only) {
         /* 隐私模式：正文只带主机名，不携带命令/输出行 */
         title = g_strdup_printf("%s · %s",
-            termnotify ? "终端通知"
-                       : (hit->ok ? "会话任务完成" : "任务失败"), host);
-        body = g_strdup_printf("%s 上的任务%s", host,
-            termnotify ? "有新通知" : (hit->ok ? "已完成" : "失败"));
+            termnotify ? _("终端通知")
+                       : (hit->ok ? _("会话任务完成") : _("任务失败")), host);
+        body = g_strdup_printf(_("%s 上的任务%s"), host,
+            termnotify ? _("有新通知") : (hit->ok ? _("已完成") : _("失败")));
     } else if (termnotify) {
         const char *tt = hit->title && *hit->title ? hit->title
-                                                   : "终端通知";
+                                                   : _("终端通知");
         title = g_strdup_printf("%s · %s", tt, host);
         body = g_strdup(hit->line ? hit->line : "");
     } else {
         GString *b = g_string_new(NULL);
         title = g_strdup_printf("%s · %s",
-            hit->ok ? "会话任务完成" : "任务失败", host);
+            hit->ok ? _("会话任务完成") : _("任务失败"), host);
         g_string_append(b, hit->command && *hit->command ? hit->command
                           : (hit->rule ? hit->rule : ""));
         if (!hit->ok && hit->exit_code >= 0)
@@ -295,7 +296,7 @@ void hb_watch_route(GtkWidget *page, const char *tab_id,
         dur = fmt_duration(hit->duration_ms);
         if (*dur)
             g_string_append_printf(b, " · %s", dur);
-        g_string_append(b, " — 可以进行下一步了");
+        g_string_append(b, _(" — 可以进行下一步了"));
         body = g_string_free(b, FALSE);
     }
 
@@ -361,14 +362,14 @@ void hb_watch_route(GtkWidget *page, const char *tab_id,
 
 char *hb_watch_signal_summary(unsigned signals)
 {
-    GString *s = g_string_new("监控: ");
+    GString *s = g_string_new(_("监控: "));
     gboolean first = TRUE;
     struct { unsigned bit; const char *name; } map[] = {
         { HB_WATCH_SIG_EOF,       "EOF" },
         { HB_WATCH_SIG_OSC133,    "OSC133" },
-        { HB_WATCH_SIG_RULES,     "AI 预设" },
-        { HB_WATCH_SIG_IDLE,      "空闲" },
-        { HB_WATCH_SIG_TERMNOTIFY,"通知" },
+        { HB_WATCH_SIG_RULES,     _("AI 预设") },
+        { HB_WATCH_SIG_IDLE,      _("空闲") },
+        { HB_WATCH_SIG_TERMNOTIFY,_("通知") },
     };
     int i;
     for (i = 0; i < 5; i++)
@@ -378,7 +379,7 @@ char *hb_watch_signal_summary(unsigned signals)
             first = FALSE;
         }
     if (first)
-        g_string_append(s, "关");
+        g_string_append(s, _("关"));
     return g_string_free(s, FALSE);
 }
 
@@ -510,8 +511,8 @@ static void on_rules_changed(GtkTextBuffer *buf, WatchDlg *d)
     text = gtk_text_buffer_get_text(buf, &a, &b, FALSE);
     parsed = hb_watch_rules_parse_text(text, &n, &err_line);
     if (!parsed) {
-        char *m = g_strdup_printf("第 %d 行不是合法的 \"名称: 正则\"，"
-                                  "或正则无法编译 —— 未保存", err_line);
+        char *m = g_strdup_printf(_("第 %d 行不是合法的 \"名称: 正则\"，"
+                                  "或正则无法编译 —— 未保存"), err_line);
         gtk_label_set_label(GTK_LABEL(d->rules_err), m);
         gtk_widget_set_visible(d->rules_err, TRUE);
         g_free(m);
@@ -600,7 +601,7 @@ static void on_tester_run(GtkButton *b, gpointer ud)
     hb_watch_cfg_build(d->ops.store, host, d->ops.signals,
                        &c, &rules, &nr);
     if (hb_watch_test_text(&c, text, &hit)) {
-        char *m = g_strdup_printf("命中：%s (%s) — %s",
+        char *m = g_strdup_printf(_("命中：%s (%s) — %s"),
             hit.rule ? hit.rule : "?",
             hit.ok ? "ok" : "err",
             hit.line ? hit.line : "");
@@ -608,7 +609,7 @@ static void on_tester_run(GtkButton *b, gpointer ud)
         g_free(m);
         hb_watch_hit_clear(&hit);
     } else {
-        gtk_label_set_label(GTK_LABEL(t->result), "未命中");
+        gtk_label_set_label(GTK_LABEL(t->result), _("未命中"));
     }
     hb_watch_rules_free(rules, nr);
     if (host) hb_obj_free(host);
@@ -622,13 +623,13 @@ static void open_tester(GtkButton *b, WatchDlg *d)
     TesterDlg *t;
     (void)b;
 
-    dlg = hb_modal_new("规则测试器", &body, &foot);
+    dlg = hb_modal_new(_("规则测试器"), &body, &foot);
     t = g_new0(TesterDlg, 1);
     t->wd = wd_ref(d);
 
     {
         GtkWidget *h = gtk_label_new(
-            "粘贴一段终端输出样例，用当前信号与规则跑一遍引擎。");
+            _("粘贴一段终端输出样例，用当前信号与规则跑一遍引擎。"));
         gtk_label_set_xalign(GTK_LABEL(h), 0);
         gtk_label_set_wrap(GTK_LABEL(h), TRUE);
         gtk_widget_add_css_class(h, "hb-dim");
@@ -645,7 +646,7 @@ static void open_tester(GtkButton *b, WatchDlg *d)
     gtk_widget_add_css_class(sw, "codebox");
     gtk_box_append(GTK_BOX(body), sw);
 
-    t->hint = gtk_label_new("样例不足 2 行，可能不具代表性");
+    t->hint = gtk_label_new(_("样例不足 2 行，可能不具代表性"));
     gtk_widget_add_css_class(t->hint, "hb-dim");
     gtk_label_set_xalign(GTK_LABEL(t->hint), 0);
     gtk_widget_set_visible(t->hint, FALSE);
@@ -660,7 +661,7 @@ static void open_tester(GtkButton *b, WatchDlg *d)
     f = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(f, "hb-modal-footer");
     gtk_widget_set_halign(f, GTK_ALIGN_END);
-    run = gtk_button_new_with_label("测试");
+    run = gtk_button_new_with_label(_("测试"));
     gtk_widget_add_css_class(run, "hb-btn");
     gtk_widget_add_css_class(run, "primary");
     g_signal_connect(run, "clicked", G_CALLBACK(on_tester_run), t);
@@ -763,14 +764,14 @@ static void inst_refresh_preview(InstDlg *d)
 
     if (d->wd->ops.is_ssh) {
         char *cmd = remote_cmd(sh);
-        txt = g_strdup_printf("远端将执行：\n%s", cmd);
+        txt = g_strdup_printf(_("远端将执行：\n%s"), cmd);
         g_free(cmd);
     } else {
         char *sp = shell_script_path(sh);
         char *rp = local_rc_path(sh);
         char *rl = local_rc_line(sh);
         txt = g_strdup_printf(
-            "将写入 %s 并向 %s 追加：\n%s",
+            _("将写入 %s 并向 %s 追加：\n%s"),
             sp, rp, rl);
         g_free(sp); g_free(rp); g_free(rl);
     }
@@ -801,13 +802,13 @@ static gboolean install_local(InstDlg *d, const char *shell, char **err)
     dir = g_build_filename(g_get_home_dir(), ".config", "harbor",
                            "shell", NULL);
     if (g_mkdir_with_parents(dir, 0700) != 0) {
-        *err = g_strdup_printf("无法创建 %s", dir);
+        *err = g_strdup_printf(_("无法创建 %s"), dir);
         g_free(dir);
         return FALSE;
     }
     sp = g_strdup_printf("%s/harbor.%s", dir, shell);
     if (!g_file_set_contents(sp, script, -1, NULL)) {
-        *err = g_strdup_printf("无法写入 %s", sp);
+        *err = g_strdup_printf(_("无法写入 %s"), sp);
         ok = FALSE;
         goto out;
     }
@@ -821,7 +822,7 @@ static gboolean install_local(InstDlg *d, const char *shell, char **err)
         g_mkdir_with_parents(pd, 0755);
         content = g_strdup_printf("%s\n", rl);
         if (!g_file_set_contents(rp, content, -1, NULL)) {
-            *err = g_strdup_printf("无法写入 %s", rp);
+            *err = g_strdup_printf(_("无法写入 %s"), rp);
             ok = FALSE;
         }
         g_free(content);
@@ -838,7 +839,7 @@ static gboolean install_local(InstDlg *d, const char *shell, char **err)
                                       old ? old : "",
                                       rl);
             if (!g_file_set_contents(rp, content, -1, NULL)) {
-                *err = g_strdup_printf("无法写入 %s", rp);
+                *err = g_strdup_printf(_("无法写入 %s"), rp);
                 ok = FALSE;
             }
             g_free(content);
@@ -877,7 +878,7 @@ static void on_ssh_inst_confirm(gboolean yes, gpointer ud)
     sess = s->wd->ops.session
         ? s->wd->ops.session(s->wd->ops.session_ud) : NULL;
     if (!sess) {
-        hb_toast(s->wd->ops.page, "会话不可用，无法写入远端");
+        hb_toast(s->wd->ops.page, _("会话不可用，无法写入远端"));
         ssh_inst_free(s);
         return;
     }
@@ -885,7 +886,7 @@ static void on_ssh_inst_confirm(gboolean yes, gpointer ud)
     hb_session_write(sess, nl, strlen(nl));
     g_free(nl);
     hb_toast(s->wd->ops.page,
-             "已发送到远端 · 重新打开 shell 后生效");
+             _("已发送到远端 · 重新打开 shell 后生效"));
     ssh_inst_free(s);
 }
 
@@ -904,11 +905,11 @@ static void on_inst_run(GtkButton *b, gpointer ud)
         s->cmd = remote_cmd(sh);
         esc = g_markup_escape_text(s->cmd, -1);
         mk = g_strdup_printf(
-            "将在远端执行以下命令，请确认远端处于 shell 提示符：\n\n"
-            "<tt>%s</tt>", esc);
+            _("将在远端执行以下命令，请确认远端处于 shell 提示符：\n\n"
+            "<tt>%s</tt>"), esc);
         g_free(esc);
-        hb_dialog_confirm(d->wd->ops.page, "安装 shell 集成",
-                          mk, "执行", FALSE,
+        hb_dialog_confirm(d->wd->ops.page, _("安装 shell 集成"),
+                          mk, _("执行"), FALSE,
                           on_ssh_inst_confirm, s);
         g_free(mk);
     } else {
@@ -916,9 +917,9 @@ static void on_inst_run(GtkButton *b, gpointer ud)
         if (install_local(d, sh, &err)) {
             inst_err(d, NULL);
             hb_toast(d->wd->ops.page,
-                     "已安装 · 重新打开 shell 后生效");
+                     _("已安装 · 重新打开 shell 后生效"));
         } else {
-            inst_err(d, err ? err : "安装失败");
+            inst_err(d, err ? err : _("安装失败"));
             g_free(err);
         }
     }
@@ -955,14 +956,14 @@ static void on_installer(GtkButton *b, gpointer ud)
     in = g_new0(InstDlg, 1);
     in->wd = wd_ref(d);
 
-    dlg = hb_modal_new("安装 shell 集成", &body, &foot);
+    dlg = hb_modal_new(_("安装 shell 集成"), &body, &foot);
     {
         GtkWidget *h = gtk_label_new(
             d->ops.is_ssh
-            ? "OSC 133 标记让监控拿到精确的命令边界与退出码。"
-              "将在远端 shell rc 中注入集成脚本（需确认远端在提示符下）。"
-            : "OSC 133 标记让监控拿到精确的命令边界与退出码。"
-              "脚本写入 ~/.config/harbor/shell 并在 rc 中追加一行加载。");
+            ? _("OSC 133 标记让监控拿到精确的命令边界与退出码。"
+              "将在远端 shell rc 中注入集成脚本（需确认远端在提示符下）。")
+            : _("OSC 133 标记让监控拿到精确的命令边界与退出码。"
+              "脚本写入 ~/.config/harbor/shell 并在 rc 中追加一行加载。"));
         gtk_label_set_xalign(GTK_LABEL(h), 0);
         gtk_label_set_wrap(GTK_LABEL(h), TRUE);
         gtk_widget_add_css_class(h, "hb-dim");
@@ -997,7 +998,7 @@ static void on_installer(GtkButton *b, gpointer ud)
     f = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(f, "hb-modal-footer");
     gtk_widget_set_halign(f, GTK_ALIGN_END);
-    run = gtk_button_new_with_label("安装");
+    run = gtk_button_new_with_label(_("安装"));
     gtk_widget_add_css_class(run, "hb-btn");
     gtk_widget_add_css_class(run, "primary");
     g_signal_connect(run, "clicked", G_CALLBACK(on_inst_run), in);
@@ -1023,15 +1024,15 @@ void hb_watch_ui_open(const HbWatchUiOps *ops)
     static const struct {
         unsigned bit; const char *title; const char *sub;
     } rows[] = {
-        { HB_WATCH_SIG_EOF,       "会话/进程结束（EOF）",   "最强信号" },
-        { HB_WATCH_SIG_OSC133,    "OSC 133 shell 集成",
-                                  "含退出码，可区分成败" },
-        { HB_WATCH_SIG_RULES,     "AI CLI 输出预设",
-                                  "aider / 编译 / pytest / 下载等" },
-        { HB_WATCH_SIG_IDLE,      "空闲启发式（输出≥10s 后静默≥5s）",
-                                  "兜底信号，置信度低" },
-        { HB_WATCH_SIG_TERMNOTIFY,"终端通知（BEL · OSC 9/777）",
-                                  "应用主动请求的通知" },
+        { HB_WATCH_SIG_EOF,       N_("会话/进程结束（EOF）"),   N_("最强信号") },
+        { HB_WATCH_SIG_OSC133,    N_("OSC 133 shell 集成"),
+                                  N_("含退出码，可区分成败") },
+        { HB_WATCH_SIG_RULES,     N_("AI CLI 输出预设"),
+                                  N_("aider / 编译 / pytest / 下载等") },
+        { HB_WATCH_SIG_IDLE,      N_("空闲启发式（输出≥10s 后静默≥5s）"),
+                                  N_("兜底信号，置信度低") },
+        { HB_WATCH_SIG_TERMNOTIFY,N_("终端通知（BEL · OSC 9/777）"),
+                                  N_("应用主动请求的通知") },
     };
     WatchDlg *d;
     AdwDialog *dlg;
@@ -1050,8 +1051,8 @@ void hb_watch_ui_open(const HbWatchUiOps *ops)
         g_object_add_weak_pointer(G_OBJECT(ops->apply_ud),
                                   (gpointer)&d->ops.apply_ud);
 
-    title = g_strdup_printf("会话监控 · %s",
-                            ops->is_ssh ? "SSH" : "Local");
+    title = g_strdup_printf(_("会话监控 · %s"),
+                            ops->is_ssh ? "SSH" : _("Local"));
     dlg = hb_modal_new(title, &body, &foot);
     g_free(title);
     d->dlg = dlg;
@@ -1062,9 +1063,9 @@ void hb_watch_ui_open(const HbWatchUiOps *ops)
         GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
         GtkWidget *t = gtk_label_new(NULL);
         GtkWidget *s = gtk_label_new(
-            "命中完成信号 → Tab 角标 + 通知中心 + 系统通知");
+            _("命中完成信号 → Tab 角标 + 通知中心 + 系统通知"));
         GtkWidget *sw = gtk_switch_new();
-        gtk_label_set_markup(GTK_LABEL(t), "<b>启用完成监控</b>");
+        gtk_label_set_markup(GTK_LABEL(t), _("<b>启用完成监控</b>"));
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_label_set_xalign(GTK_LABEL(s), 0);
         gtk_widget_add_css_class(s, "hb-dim");
@@ -1084,14 +1085,14 @@ void hb_watch_ui_open(const HbWatchUiOps *ops)
 
     /* 信号开关组 */
     {
-        GtkWidget *lb = gtk_label_new("完成信号（任一命中即提醒）");
+        GtkWidget *lb = gtk_label_new(_("完成信号（任一命中即提醒）"));
         gtk_label_set_xalign(GTK_LABEL(lb), 0);
         gtk_widget_add_css_class(lb, "hb-form-label");
         gtk_box_append(GTK_BOX(body), lb);
     }
     for (i = 0; i < 5; i++) {
         GtkWidget *sw;
-        GtkWidget *r = switch_row(rows[i].title, rows[i].sub, &sw);
+        GtkWidget *r = switch_row(_(rows[i].title), _(rows[i].sub), &sw);
         gtk_switch_set_active(GTK_SWITCH(sw),
                               (d->ops.signals & rows[i].bit) != 0);
         g_object_set_data(G_OBJECT(sw), "bit",
@@ -1104,11 +1105,11 @@ void hb_watch_ui_open(const HbWatchUiOps *ops)
     /* 自定义规则 */
     {
         GtkWidget *lb = gtk_label_new(
-            "自定义规则（正则，命中后需安静片刻确认）");
+            _("自定义规则（正则，命中后需安静片刻确认）"));
         GtkWidget *sw = gtk_scrolled_window_new();
         GtkWidget *tv = gtk_text_view_new();
         GtkWidget *hint = gtk_label_new(
-            "每行一条：name: 正则 = 成功 · !name: 正则 = 失败 · # 开头为注释");
+            _("每行一条：name: 正则 = 成功 · !name: 正则 = 失败 · # 开头为注释"));
         const char **v = NULL;
         size_t n = 0;
         GString *cur = g_string_new(NULL);
@@ -1164,14 +1165,14 @@ void hb_watch_ui_open(const HbWatchUiOps *ops)
             hb_obj_free(o);
         }
         gtk_box_append(GTK_BOX(body),
-            switch_row("聚焦本 Tab 时免打扰",
-                       "仅更新角标，不弹系统通知", &sw1));
+            switch_row(_("聚焦本 Tab 时免打扰"),
+                       _("仅更新角标，不弹系统通知"), &sw1));
         gtk_switch_set_active(GTK_SWITCH(sw1), fdnd);
         g_signal_connect(sw1, "notify::active",
                          G_CALLBACK(on_focus_sw), d);
         gtk_box_append(GTK_BOX(body),
-            switch_row("通知正文仅显示主机名",
-                       "隐藏命令与输出内容，防敏感外显", &sw2));
+            switch_row(_("通知正文仅显示主机名"),
+                       _("隐藏命令与输出内容，防敏感外显"), &sw2));
         gtk_switch_set_active(GTK_SWITCH(sw2), host_only);
         g_signal_connect(sw2, "notify::active",
                          G_CALLBACK(on_priv_sw), d);
@@ -1181,18 +1182,18 @@ void hb_watch_ui_open(const HbWatchUiOps *ops)
     f = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(f, "hb-modal-footer");
     gtk_widget_set_hexpand(f, TRUE);
-    btn = gtk_button_new_with_label("规则测试器");
+    btn = gtk_button_new_with_label(_("规则测试器"));
     gtk_widget_add_css_class(btn, "hb-btn");
     g_signal_connect(btn, "clicked", G_CALLBACK(open_tester), d);
     gtk_box_append(GTK_BOX(f), btn);
-    btn = gtk_button_new_with_label("安装 shell 集成…");
+    btn = gtk_button_new_with_label(_("安装 shell 集成…"));
     gtk_widget_add_css_class(btn, "hb-btn");
     g_signal_connect(btn, "clicked", G_CALLBACK(on_installer), d);
     gtk_box_append(GTK_BOX(f), btn);
     sp = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_hexpand(sp, TRUE);
     gtk_box_append(GTK_BOX(f), sp);
-    btn = gtk_button_new_with_label("完成");
+    btn = gtk_button_new_with_label(_("完成"));
     gtk_widget_add_css_class(btn, "hb-btn");
     gtk_widget_add_css_class(btn, "primary");
     g_signal_connect_swapped(btn, "clicked",

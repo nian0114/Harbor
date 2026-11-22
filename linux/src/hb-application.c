@@ -924,8 +924,8 @@ static gboolean on_close_request(GtkWindow *win, gpointer ud)
     g_application_hold(g_application_get_default());
     if (!tray_notify_shown) {
         tray_notify_shown = TRUE;
-        n = g_notification_new("Harbor 仍在托盘中运行");
-        g_notification_set_body(n, "会话保持连接；点托盘图标可重新打开窗口。");
+        n = g_notification_new(_("Harbor 仍在托盘中运行"));
+        g_notification_set_body(n, _("会话保持连接；点托盘图标可重新打开窗口。"));
         g_application_send_notification(
             g_application_get_default(), "tray-alive", n);
         g_object_unref(n);
@@ -1427,7 +1427,7 @@ static void quick_connect(HbWindow *win, const char *text)
     if (objs) hb_obj_list_free(objs, n);
 
     if (pe != HB_OK || !host || !*host) {
-        hb_toast(GTK_WIDGET(win), "格式：user@hostname[:port]");
+        hb_toast(GTK_WIDGET(win), _("格式：user@hostname[:port]"));
         g_free(user); g_free(host);
         return;
     }
@@ -1466,7 +1466,7 @@ static void hb_application_activate(GApplication *app)
     win = hb_window_new(GTK_APPLICATION(app));
 
     vp = hb_vault_page_new();
-    hb_window_add_tab(win, "vault", "Vault", "server", vp, FALSE, FALSE);
+    hb_window_add_tab(win, "vault", _("Vault"), "server", vp, FALSE, FALSE);
     hb_window_set_vault_page(win, vp);
     {
         GtkWidget *sv = hb_sftp_view_new(hb_store_default());

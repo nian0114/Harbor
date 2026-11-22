@@ -11,6 +11,7 @@
 #include <sodium.h>
 #include <string.h>
 #include <stdio.h>
+#include <glib/gi18n.h>
 
 /* ==================================================================
  * Keychain（PRD FR-02）：表格列出密钥对象 + 生成 / 导入 / 详情 /
@@ -105,7 +106,7 @@ static GtkWidget *key_row_new(HbKeychainView *v, hb_obj *k, size_t refs)
     ic = hb_icon_new("key", 15);
     gtk_widget_set_valign(ic, GTK_ALIGN_CENTER);
     gtk_widget_add_css_class(ic, "hb-dim");
-    name = gtk_label_new(nm && *nm ? nm : "key");
+    name = gtk_label_new(nm && *nm ? nm : _("key"));
     gtk_label_set_xalign(GTK_LABEL(name), 0);
     gtk_label_set_ellipsize(GTK_LABEL(name), PANGO_ELLIPSIZE_END);
     gtk_widget_set_valign(name, GTK_ALIGN_CENTER);
@@ -119,7 +120,7 @@ static GtkWidget *key_row_new(HbKeychainView *v, hb_obj *k, size_t refs)
     gtk_widget_set_margin_start(typ, 14);
     gtk_box_append(GTK_BOX(row), typ);
 
-    fp = gtk_label_new(fpv && *fpv ? fpv : "加密 · 首次使用后显示");
+    fp = gtk_label_new(fpv && *fpv ? fpv : _("加密 · 首次使用后显示"));
     gtk_widget_add_css_class(fp, "mono");
     gtk_label_set_ellipsize(GTK_LABEL(fp), PANGO_ELLIPSIZE_MIDDLE);
     gtk_label_set_xalign(GTK_LABEL(fp), 0);
@@ -127,7 +128,7 @@ static GtkWidget *key_row_new(HbKeychainView *v, hb_obj *k, size_t refs)
     gtk_widget_set_margin_start(fp, 14);
     gtk_box_append(GTK_BOX(row), fp);
 
-    pill = gtk_label_new(conf ? "开" : "关");
+    pill = gtk_label_new(conf ? _("开") : _("关"));
     gtk_widget_add_css_class(pill, "pill");
     gtk_widget_add_css_class(pill, conf ? "on" : "off");
     gtk_widget_set_size_request(pill, COL_CONF_W, -1);
@@ -136,7 +137,7 @@ static GtkWidget *key_row_new(HbKeychainView *v, hb_obj *k, size_t refs)
     gtk_widget_set_margin_start(pill, 14);
     gtk_box_append(GTK_BOX(row), pill);
 
-    g_snprintf(rbuf, sizeof rbuf, "%d 台主机", (int)refs);
+    g_snprintf(rbuf, sizeof rbuf, ngettext("%d 台主机", "%d 台主机", refs), (int)refs);
     ref = gtk_label_new(rbuf);
     gtk_label_set_xalign(GTK_LABEL(ref), 0);
     gtk_widget_set_size_request(ref, COL_REF_W, -1);
@@ -150,8 +151,8 @@ static GtkWidget *key_row_new(HbKeychainView *v, hb_obj *k, size_t refs)
     bc = gtk_button_new();
     gtk_widget_add_css_class(bc, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(bc), hb_icon_new("copy", 13));
-    gtk_widget_set_tooltip_text(bc, pub && *pub ? "复制公钥"
-                                              : "公钥未知（加密导入）");
+    gtk_widget_set_tooltip_text(bc, pub && *pub ? _("复制公钥")
+                                              : _("公钥未知（加密导入）"));
     gtk_widget_set_sensitive(bc, pub && *pub);
     g_object_set_data_full(G_OBJECT(bc), "pub",
                            g_strdup(pub ? pub : ""), g_free);
@@ -161,7 +162,7 @@ static GtkWidget *key_row_new(HbKeychainView *v, hb_obj *k, size_t refs)
     bd = gtk_button_new();
     gtk_widget_add_css_class(bd, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(bd), hb_icon_new("trash", 13));
-    gtk_widget_set_tooltip_text(bd, "删除密钥");
+    gtk_widget_set_tooltip_text(bd, _("删除密钥"));
     g_object_set_data_full(G_OBJECT(bd), "kid",
                            g_strdup(hb_obj_id(k)), g_free);
     g_object_set_data(G_OBJECT(bd), "kv", v);
@@ -188,7 +189,7 @@ static void on_row_copy(GtkButton *b, gpointer ud)
     (void)ud;
     if (pub && *pub) {
         copy_text(GTK_WIDGET(b), pub);
-        hb_toast(GTK_WIDGET(b), "公钥已复制");
+        hb_toast(GTK_WIDGET(b), _("公钥已复制"));
     }
 }
 
@@ -326,10 +327,10 @@ static void del_done(gboolean ok, gpointer ud)
     u->key_id = g_strdup(d->key_id);
     if (hb_vault_delete_key_cascade(vault, d->key_id,
                                     &u->refs, &u->nrefs) != HB_OK) {
-        hb_toast(GTK_WIDGET(d->v), "删除密钥失败");
+        hb_toast(GTK_WIDGET(d->v), _("删除密钥失败"));
         key_undo_free(u);
     } else {
-        msg = g_strdup_printf("已删除密钥 %s", d->name);
+        msg = g_strdup_printf(_("已删除密钥 %s"), d->name);
         hb_toast_undo_destroy(GTK_WIDGET(d->v), msg,
                               key_undo_cb, key_undo_free, u);
         g_free(msg);
@@ -354,13 +355,13 @@ static void delete_key(HbKeychainView *v, const char *key_id)
     {
         GString *g = g_string_new(NULL);
         char *esc = g_markup_escape_text(nm ? nm : "key", -1);
-        g_string_append_printf(g, "确定删除 <b>%s</b>？", esc);
+        g_string_append_printf(g, _("确定删除 <b>%s</b>？"), esc);
         g_free(esc);
         if (refs)
             g_string_append_printf(g,
-                "有 %d 台主机引用此密钥，删除后这些主机将改为自动认证。",
+                _("有 %d 台主机引用此密钥，删除后这些主机将改为自动认证。"),
                 (int)refs);
-        g_string_append(g, "删除后 9 秒内可撤销。");
+        g_string_append(g, _("删除后 9 秒内可撤销。"));
         mk = g_strdup(g->str);
         g_string_free(g, TRUE);
     }
@@ -369,7 +370,7 @@ static void delete_key(HbKeychainView *v, const char *key_id)
     d->key_id = g_strdup(key_id);
     d->name = g_strdup(nm);
     d->refs = refs;
-    hb_dialog_confirm(GTK_WIDGET(v), "删除密钥", mk, "删除", TRUE,
+    hb_dialog_confirm(GTK_WIDGET(v), _("删除密钥"), mk, _("删除"), TRUE,
                       del_done, d);
     g_free(mk);
     if (k) hb_obj_free(k);
@@ -462,7 +463,7 @@ static void gen_done(GObject *src, GAsyncResult *res, gpointer ud)
 
     if (!w || w->err != HB_OK) {
         gtk_label_set_text(GTK_LABEL(d->err_l),
-            "生成失败，请重试");
+            _("生成失败，请重试"));
         gtk_widget_set_visible(d->err_l, TRUE);
         if (w) { g_free(w->comment); g_free(w); }
         return;
@@ -486,7 +487,7 @@ static void gen_done(GObject *src, GAsyncResult *res, gpointer ud)
     d->result_id = g_strdup(hb_obj_id(o));
     hb_obj_free(o);
 
-    toast = g_strdup_printf("已生成 %s",
+    toast = g_strdup_printf(_("已生成 %s"),
                             nm && *nm ? nm : "key");
     {
         GtkWidget *any = GTK_WIDGET(d->dlg);
@@ -494,7 +495,7 @@ static void gen_done(GObject *src, GAsyncResult *res, gpointer ud)
         GtkRoot *root = gtk_widget_get_root(any);
         HbWindow *w2 = HB_IS_WINDOW(root) ? HB_WINDOW(root) : NULL;
         if (w2)
-            hb_window_toast_action2(w2, toast, "复制公钥", 6,
+            hb_window_toast_action2(w2, toast, _("复制公钥"), 6,
                 (GCallback)pub_copy_cb, g_free,
                 g_strdup(w->info.public_line));
         else
@@ -581,10 +582,10 @@ void hb_keychain_generate_dialog(GtkWidget *parent, HbStore *st,
     d->st = st;
     d->cb = done_cb;
     d->ud = ud;
-    d->dlg = hb_modal_new("New key", &body, &foot);
+    d->dlg = hb_modal_new(_("New key"), &body, &foot);
 
     /* 名称 */
-    l = gtk_label_new("名称");
+    l = gtk_label_new(_("名称"));
     gtk_widget_add_css_class(l, "hb-form-label");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(body), l);
@@ -593,7 +594,7 @@ void hb_keychain_generate_dialog(GtkWidget *parent, HbStore *st,
     gtk_box_append(GTK_BOX(body), d->name_e);
 
     /* 类型 */
-    l = gtk_label_new("类型");
+    l = gtk_label_new(_("类型"));
     gtk_widget_add_css_class(l, "hb-form-label");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(body), l);
@@ -607,7 +608,7 @@ void hb_keychain_generate_dialog(GtkWidget *parent, HbStore *st,
     gtk_box_append(GTK_BOX(body), d->type_dd);
 
     /* 注释 */
-    l = gtk_label_new("注释");
+    l = gtk_label_new(_("注释"));
     gtk_widget_add_css_class(l, "hb-form-label");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(body), l);
@@ -622,8 +623,8 @@ void hb_keychain_generate_dialog(GtkWidget *parent, HbStore *st,
     swr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
         GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-        GtkWidget *t = gtk_label_new("使用前确认");
-        GtkWidget *s = gtk_label_new("每次用此密钥签名前先弹确认框");
+        GtkWidget *t = gtk_label_new(_("使用前确认"));
+        GtkWidget *s = gtk_label_new(_("每次用此密钥签名前先弹确认框"));
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_label_set_xalign(GTK_LABEL(s), 0);
         gtk_widget_add_css_class(s, "hb-dim");
@@ -657,13 +658,13 @@ void hb_keychain_generate_dialog(GtkWidget *parent, HbStore *st,
     gtk_widget_set_visible(d->spin, FALSE);
     gtk_box_append(GTK_BOX(f), d->spin);
     {
-        GtkWidget *c = gtk_button_new_with_label("取消");
+        GtkWidget *c = gtk_button_new_with_label(_("取消"));
         gtk_widget_add_css_class(c, "hb-btn");
         g_signal_connect_swapped(c, "clicked",
             G_CALLBACK(adw_dialog_close), d->dlg);
         gtk_box_append(GTK_BOX(f), c);
     }
-    d->gen_btn = gtk_button_new_with_label("生成");
+    d->gen_btn = gtk_button_new_with_label(_("生成"));
     gtk_widget_add_css_class(d->gen_btn, "hb-btn");
     gtk_widget_add_css_class(d->gen_btn, "primary");
     g_signal_connect(d->gen_btn, "clicked", G_CALLBACK(gen_start), d);
@@ -751,20 +752,20 @@ static void imp_refresh(ImpDlg *d)
         gboolean is_der = d->src_len > 0 &&
                           (unsigned char)d->src[0] == 0x30;
         if (pw && *pw) {
-            gtk_label_set_text(GTK_LABEL(d->pw_err), "口令错误");
+            gtk_label_set_text(GTK_LABEL(d->pw_err), _("口令错误"));
             gtk_widget_set_visible(d->pw_err, TRUE);
         }
         gtk_widget_set_visible(d->pw_row, TRUE);
         gtk_label_set_text(GTK_LABEL(d->pw_note),
-            is_der ? "PKCS#12 密码（必需）" : "私钥口令");
+            is_der ? _("PKCS#12 密码（必需）") : _("私钥口令"));
         gtk_label_set_text(GTK_LABEL(d->info_l),
-            "已识别为加密私钥 —— 请输入口令");
+            _("已识别为加密私钥 —— 请输入口令"));
         gtk_widget_set_visible(d->pw_row, TRUE);
         return;
     }
     if (d->info_err != HB_OK) {
         gtk_label_set_text(GTK_LABEL(d->err_l),
-            "不是受支持的私钥（OpenSSH / PEM / PKCS#8 / PKCS#12）");
+            _("不是受支持的私钥（OpenSSH / PEM / PKCS#8 / PKCS#12）"));
         gtk_widget_set_visible(d->err_l, TRUE);
         gtk_widget_set_visible(d->pw_row, FALSE);
         return;
@@ -776,20 +777,20 @@ static void imp_refresh(ImpDlg *d)
         char tb[48];
         if (d->info.bits)
             g_snprintf(tb, sizeof tb, "%s %d%s · %s", kind, d->info.bits,
-                       d->info.encrypted ? "（加密）" : "",
+                       d->info.encrypted ? _("（加密）") : "",
                        fmt_str(d->info.format));
         else
             g_snprintf(tb, sizeof tb, "%s%s · %s", kind,
-                       d->info.encrypted ? "（加密）" : "",
+                       d->info.encrypted ? _("（加密）") : "",
                        fmt_str(d->info.format));
         desc = g_strdup(tb);
     }
     if (d->info.fingerprint) {
-        mk = g_strdup_printf("%s\n指纹 %s", desc, d->info.fingerprint);
+        mk = g_strdup_printf(_("%s\n指纹 %s"), desc, d->info.fingerprint);
         g_free(desc);
         desc = mk;
     } else if (d->info.encrypted) {
-        mk = g_strdup_printf("%s\n指纹首次使用后显示", desc);
+        mk = g_strdup_printf(_("%s\n指纹首次使用后显示"), desc);
         g_free(desc);
         desc = mk;
     }
@@ -801,8 +802,8 @@ static void imp_refresh(ImpDlg *d)
     if (need_pw) {
         gtk_label_set_text(GTK_LABEL(d->pw_note),
             d->info.format == HB_KEYFMT_PKCS12
-                ? "PKCS#12 密码（必需）"
-                : "可留空，首次连接时询问");
+                ? _("PKCS#12 密码（必需）")
+                : _("可留空，首次连接时询问"));
     }
 
     /* 重复检测：同指纹 */
@@ -812,7 +813,7 @@ static void imp_refresh(ImpDlg *d)
             const char *fp = hb_obj_get_str(ks[i], "fingerprint");
             if (fp && *fp && !strcmp(fp, d->info.fingerprint)) {
                 const char *onm = hb_obj_get_str(ks[i], "name");
-                char *t = g_strdup_printf("该密钥已存在：%s",
+                char *t = g_strdup_printf(_("该密钥已存在：%s"),
                                           onm && *onm ? onm : "key");
                 gtk_label_set_text(GTK_LABEL(d->err_l), t);
                 g_free(t);
@@ -891,8 +892,8 @@ static void imp_file_done(GObject *src, GAsyncResult *res, gpointer ud)
     } else {
         g_free(data);
         gtk_label_set_text(GTK_LABEL(d->err_l),
-                           ok ? "无法读取该文件"
-                              : "仅支持普通文件，且不超过 1 MiB");
+                           ok ? _("无法读取该文件")
+                              : _("仅支持普通文件，且不超过 1 MiB"));
         gtk_widget_set_visible(d->err_l, TRUE);
     }
     imp_refresh(d);
@@ -950,7 +951,7 @@ static void imp_save(GtkButton *b, gpointer ud)
     rem = gtk_check_button_get_active(GTK_CHECK_BUTTON(d->pw_rem));
     if (pw && *pw && rem)
         hb_vault_set_secret(v, hb_obj_id(o), "passphrase", pw);
-    t = g_strdup_printf("已导入 %s", hb_obj_get_str(o, "name"));
+    t = g_strdup_printf(_("已导入 %s"), hb_obj_get_str(o, "name"));
     hb_obj_free(o);
     hb_toast(GTK_WIDGET(d->dlg), t);
     g_free(t);
@@ -982,16 +983,16 @@ static void open_import(HbKeychainView *v)
 
     d->st = v->store;
     d->info_err = HB_ERR_INVALID;
-    d->dlg = hb_modal_new("导入私钥", &body, &foot);
+    d->dlg = hb_modal_new(_("导入私钥"), &body, &foot);
 
     /* 源 */
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
-        GtkWidget *pick = gtk_button_new_with_label("选择文件…");
+        GtkWidget *pick = gtk_button_new_with_label(_("选择文件…"));
         gtk_widget_add_css_class(pick, "hb-btn");
         g_signal_connect(pick, "clicked", G_CALLBACK(imp_pick), d);
         gtk_box_append(GTK_BOX(row), pick);
-        GtkWidget *orl = gtk_label_new("或粘贴私钥内容（PEM / OpenSSH）：");
+        GtkWidget *orl = gtk_label_new(_("或粘贴私钥内容（PEM / OpenSSH）："));
         gtk_widget_add_css_class(orl, "hb-dim");
         gtk_widget_set_valign(orl, GTK_ALIGN_CENTER);
         gtk_box_append(GTK_BOX(row), orl);
@@ -1010,7 +1011,7 @@ static void open_import(HbKeychainView *v)
     gtk_box_append(GTK_BOX(body), sw);
 
     /* 名称 */
-    l = gtk_label_new("名称");
+    l = gtk_label_new(_("名称"));
     gtk_widget_add_css_class(l, "hb-form-label");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(body), l);
@@ -1035,13 +1036,13 @@ static void open_import(HbKeychainView *v)
         g_signal_connect(d->pw_e, "changed",
                          G_CALLBACK(imp_pw_changed), d);
         gtk_box_append(GTK_BOX(pr), d->pw_e);
-        d->pw_note = gtk_label_new("可留空，首次连接时询问");
+        d->pw_note = gtk_label_new(_("可留空，首次连接时询问"));
         gtk_widget_add_css_class(d->pw_note, "hb-dim");
         gtk_widget_set_valign(d->pw_note, GTK_ALIGN_CENTER);
         gtk_box_append(GTK_BOX(pr), d->pw_note);
         gtk_box_append(GTK_BOX(d->pw_row), pr);
         d->pw_rem = gtk_check_button_new_with_label(
-            "记住口令（加密保存）");
+            _("记住口令（加密保存）"));
         gtk_widget_add_css_class(d->pw_rem, "check-row");
         gtk_widget_set_halign(d->pw_rem, GTK_ALIGN_START);
         gtk_box_append(GTK_BOX(d->pw_row), d->pw_rem);
@@ -1069,12 +1070,12 @@ static void open_import(HbKeychainView *v)
     gtk_widget_set_margin_end(f, 20);
     gtk_widget_set_margin_top(f, 4);
     gtk_widget_set_margin_bottom(f, 16);
-    c = gtk_button_new_with_label("取消");
+    c = gtk_button_new_with_label(_("取消"));
     gtk_widget_add_css_class(c, "hb-btn");
     g_signal_connect_swapped(c, "clicked",
         G_CALLBACK(adw_dialog_close), d->dlg);
     gtk_box_append(GTK_BOX(f), c);
-    d->imp_btn = gtk_button_new_with_label("导入");
+    d->imp_btn = gtk_button_new_with_label(_("导入"));
     gtk_widget_add_css_class(d->imp_btn, "hb-btn");
     gtk_widget_add_css_class(d->imp_btn, "primary");
     gtk_widget_set_sensitive(d->imp_btn, FALSE);
@@ -1147,7 +1148,7 @@ static void det_clear_pw(GtkButton *b, gpointer ud)
     hb_vault_set_secret(hb_store_vault(d->v->store),
                         d->key_id, "passphrase", NULL);
     gtk_widget_set_visible(d->clear_pw, FALSE);
-    hb_toast(GTK_WIDGET(d->dlg), "已清除保存的口令");
+    hb_toast(GTK_WIDGET(d->dlg), _("已清除保存的口令"));
 }
 
 static void det_save(GtkButton *b, gpointer ud)
@@ -1164,7 +1165,7 @@ static void det_save(GtkButton *b, gpointer ud)
         hb_vault_put(hb_store_vault(d->v->store), d->obj);
     }
     adw_dialog_close(d->dlg);
-    hb_toast(GTK_WIDGET(d->v), "密钥已保存");
+    hb_toast(GTK_WIDGET(d->v), _("密钥已保存"));
 }
 
 static void det_del(GtkButton *b, gpointer ud)
@@ -1186,7 +1187,7 @@ static void det_copy_pub(GtkButton *b, gpointer ud)
     pub = d->obj ? hb_obj_get_str(d->obj, "public") : NULL;
     if (pub && *pub) {
         copy_text(GTK_WIDGET(d->dlg), pub);
-        hb_toast(GTK_WIDGET(d->dlg), "公钥已复制");
+        hb_toast(GTK_WIDGET(d->dlg), _("公钥已复制"));
     }
 }
 
@@ -1265,11 +1266,11 @@ static void open_detail(HbKeychainView *v, const char *key_id)
 
     d->v = v;
     d->key_id = g_strdup(key_id);
-    d->dlg = hb_modal_new(hb_obj_get_str(d->obj, "name") ?: "密钥",
+    d->dlg = hb_modal_new(hb_obj_get_str(d->obj, "name") ?: _("密钥"),
                           &body, &foot);
 
     /* 名称 / 注释 / 使用确认 —— 可编辑 */
-    l = gtk_label_new("名称");
+    l = gtk_label_new(_("名称"));
     gtk_widget_add_css_class(l, "hb-form-label");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(body), l);
@@ -1278,7 +1279,7 @@ static void open_detail(HbKeychainView *v, const char *key_id)
     gtk_editable_set_text(GTK_EDITABLE(d->name_e), s ? s : "");
     gtk_box_append(GTK_BOX(body), d->name_e);
 
-    l = gtk_label_new("注释");
+    l = gtk_label_new(_("注释"));
     gtk_widget_add_css_class(l, "hb-form-label");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(body), l);
@@ -1289,7 +1290,7 @@ static void open_detail(HbKeychainView *v, const char *key_id)
 
     {
         GtkWidget *swr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-        GtkWidget *t = gtk_label_new("使用前确认");
+        GtkWidget *t = gtk_label_new(_("使用前确认"));
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_widget_set_hexpand(t, TRUE);
         gtk_box_append(GTK_BOX(swr), t);
@@ -1311,7 +1312,7 @@ static void open_detail(HbKeychainView *v, const char *key_id)
         g_snprintf(buf, sizeof buf, "%s · %s",
                    key_type_label(d->obj, tb, sizeof tb),
                    format_label(d->obj));
-        gtk_box_append(GTK_BOX(body), det_row("类型", det_val(buf)));
+        gtk_box_append(GTK_BOX(body), det_row(_("类型"), det_val(buf)));
     }
     {
         int64_t cr = hb_obj_get_int(d->obj, "created", 0);
@@ -1324,12 +1325,12 @@ static void open_detail(HbKeychainView *v, const char *key_id)
             g_free(ds);
             if (dt) g_date_time_unref(dt);
         } else g_strlcpy(buf, "—", sizeof buf);
-        gtk_box_append(GTK_BOX(body), det_row("创建时间", det_val(buf)));
+        gtk_box_append(GTK_BOX(body), det_row(_("创建时间"), det_val(buf)));
     }
 
     s = hb_obj_get_str(d->obj, "fingerprint");
     gtk_box_append(GTK_BOX(body),
-        det_row("指纹", det_val(s && *s ? s : "（加密 · 首次使用后显示）")));
+        det_row(_("指纹"), det_val(s && *s ? s : _("（加密 · 首次使用后显示）"))));
     art = randomart_for(d->obj);
     if (art) {
         GtkWidget *al = gtk_label_new(art);
@@ -1354,17 +1355,17 @@ static void open_detail(HbKeychainView *v, const char *key_id)
         gtk_widget_add_css_class(sw, "codebox");
         gtk_widget_set_size_request(sw, -1, 74);
         gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sw), tv);
-        gtk_box_append(GTK_BOX(body), det_row("公钥", sw));
+        gtk_box_append(GTK_BOX(body), det_row(_("公钥"), sw));
         br = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         gtk_widget_set_halign(br, GTK_ALIGN_END);
         {
-            GtkWidget *cb2 = gtk_button_new_with_label("复制公钥");
+            GtkWidget *cb2 = gtk_button_new_with_label(_("复制公钥"));
             gtk_widget_add_css_class(cb2, "hb-btn");
             gtk_widget_add_css_class(cb2, "sm");
             g_signal_connect(cb2, "clicked",
                 G_CALLBACK(det_copy_pub), d);
             gtk_box_append(GTK_BOX(br), cb2);
-            GtkWidget *eb = gtk_button_new_with_label("导出公钥…");
+            GtkWidget *eb = gtk_button_new_with_label(_("导出公钥…"));
             gtk_widget_add_css_class(eb, "hb-btn");
             gtk_widget_add_css_class(eb, "sm");
             g_signal_connect(eb, "clicked",
@@ -1377,7 +1378,7 @@ static void open_detail(HbKeychainView *v, const char *key_id)
     /* 清除已保存口令 */
     {
         char *pw = hb_vault_get_secret(vault, key_id, "passphrase");
-        d->clear_pw = gtk_button_new_with_label("清除已保存口令");
+        d->clear_pw = gtk_button_new_with_label(_("清除已保存口令"));
         gtk_widget_add_css_class(d->clear_pw, "hb-link");
         gtk_widget_set_halign(d->clear_pw, GTK_ALIGN_START);
         g_signal_connect(d->clear_pw, "clicked",
@@ -1397,14 +1398,14 @@ static void open_detail(HbKeychainView *v, const char *key_id)
             const char *kid = hb_obj_get_str(hs[i], "key_id");
             if (kid && !strcmp(kid, key_id)) {
                 const char *hn = hb_obj_get_str(hs[i], "name");
-                if (names->len) g_string_append(names, "、");
+                if (names->len) g_string_append(names, _("、"));
                 g_string_append(names, hn && *hn ? hn : "?");
             }
         }
         if (hs) hb_obj_list_free(hs, n);
         gtk_box_append(GTK_BOX(body),
-            det_row("被引用",
-                det_val(names->len ? names->str : "（无主机使用）")));
+            det_row(_("被引用"),
+                det_val(names->len ? names->str : _("（无主机使用）"))));
         g_string_free(names, TRUE);
     }
 
@@ -1416,7 +1417,7 @@ static void open_detail(HbKeychainView *v, const char *key_id)
     gtk_widget_set_margin_top(f, 4);
     gtk_widget_set_margin_bottom(f, 16);
     {
-        GtkWidget *del = gtk_button_new_with_label("删除");
+        GtkWidget *del = gtk_button_new_with_label(_("删除"));
         gtk_widget_add_css_class(del, "hb-btn");
         gtk_widget_add_css_class(del, "danger");
         g_signal_connect(del, "clicked", G_CALLBACK(det_del), d);
@@ -1424,12 +1425,12 @@ static void open_detail(HbKeychainView *v, const char *key_id)
         GtkWidget *sp = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
         gtk_widget_set_hexpand(sp, TRUE);
         gtk_box_append(GTK_BOX(f), sp);
-        c = gtk_button_new_with_label("取消");
+        c = gtk_button_new_with_label(_("取消"));
         gtk_widget_add_css_class(c, "hb-btn");
         g_signal_connect_swapped(c, "clicked",
             G_CALLBACK(adw_dialog_close), d->dlg);
         gtk_box_append(GTK_BOX(f), c);
-        GtkWidget *sv = gtk_button_new_with_label("保存");
+        GtkWidget *sv = gtk_button_new_with_label(_("保存"));
         gtk_widget_add_css_class(sv, "hb-btn");
         gtk_widget_add_css_class(sv, "primary");
         g_signal_connect(sv, "clicked", G_CALLBACK(det_save), d);
@@ -1466,7 +1467,7 @@ static void expall_done(GObject *src, GAsyncResult *res, gpointer ud)
         G_FILE_CREATE_NONE, NULL, NULL, NULL);
     g_object_unref(gf);
     g_string_free(out, TRUE);
-    t = g_strdup_printf("已导出 %d 个公钥（私钥不会导出）", (int)n);
+    t = g_strdup_printf(ngettext("已导出 %d 个公钥（私钥不会导出）", "已导出 %d 个公钥（私钥不会导出）", n), (int)n);
     hb_toast(GTK_WIDGET(v), t);
     g_free(t);
 }
@@ -1536,7 +1537,7 @@ static GtkWidget *build_toolbar(HbKeychainView *v)
         GtkWidget *newb, *menub;
         GMenu *m = g_menu_new();
         gtk_widget_add_css_class(split, "linked");
-        newb = gtk_button_new_with_label("New key");
+        newb = gtk_button_new_with_label(_("New key"));
         gtk_widget_add_css_class(newb, "hb-btn");
         gtk_widget_add_css_class(newb, "primary");
         g_signal_connect(newb, "clicked", G_CALLBACK(on_newkey_click), v);
@@ -1545,9 +1546,9 @@ static GtkWidget *build_toolbar(HbKeychainView *v)
         gtk_menu_button_set_label(GTK_MENU_BUTTON(menub), "▾");
         gtk_widget_add_css_class(menub, "hb-btn");
         gtk_widget_add_css_class(menub, "primary");
-        g_menu_append(m, "生成新密钥", "key.newkey");
-        g_menu_append(m, "导入私钥…", "key.importkey");
-        g_menu_append(m, "导出全部公钥…", "key.exportpub");
+        g_menu_append(m, _("生成新密钥"), "key.newkey");
+        g_menu_append(m, _("导入私钥…"), "key.importkey");
+        g_menu_append(m, _("导出全部公钥…"), "key.exportpub");
         gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menub),
                                        G_MENU_MODEL(m));
         g_object_unref(m);
@@ -1557,7 +1558,7 @@ static GtkWidget *build_toolbar(HbKeychainView *v)
 
     /* ghost：Certificate / FIDO2（后续版本） */
     {
-        const char *txt[] = { "Certificate", "FIDO2" };
+        const char *txt[] = { _("Certificate"), _("FIDO2") };
         const char *ico[] = { "cert", "fido" };
         int i;
         for (i = 0; i < 2; i++) {
@@ -1568,7 +1569,7 @@ static GtkWidget *build_toolbar(HbKeychainView *v)
             gtk_button_set_child(GTK_BUTTON(b), r);
             gtk_widget_add_css_class(b, "hb-btn");
             gtk_widget_set_sensitive(b, FALSE);
-            gtk_widget_set_tooltip_text(b, "后续版本提供");
+            gtk_widget_set_tooltip_text(b, _("后续版本提供"));
             gtk_box_append(GTK_BOX(bar), b);
         }
     }
@@ -1579,7 +1580,7 @@ static GtkWidget *build_toolbar(HbKeychainView *v)
 
     v->search = gtk_search_entry_new();
     gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(v->search),
-                                          "搜索密钥…");
+                                          _("搜索密钥…"));
     gtk_widget_set_size_request(v->search, 220, -1);
     gtk_widget_set_valign(v->search, GTK_ALIGN_CENTER);
     g_signal_connect(v->search, "search-changed",
@@ -1594,11 +1595,11 @@ static GtkWidget *build_table_head(void)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     struct { const char *txt; int w; gboolean grow; } cols[] = {
-        { "名称",     160,        TRUE  },
-        { "类型",     COL_TYPE_W, FALSE },
-        { "指纹",     COL_FP_W,   FALSE },
-        { "使用确认", COL_CONF_W, FALSE },
-        { "被引用",   COL_REF_W,  FALSE },
+        { _("名称"),     160,        TRUE  },
+        { _("类型"),     COL_TYPE_W, FALSE },
+        { _("指纹"),     COL_FP_W,   FALSE },
+        { _("使用确认"), COL_CONF_W, FALSE },
+        { _("被引用"),   COL_REF_W,  FALSE },
         { "",         COL_ACT_W,  FALSE },
     };
     int i;
@@ -1635,11 +1636,11 @@ static GtkWidget *build_empty(HbKeychainView *v, gboolean nomatch)
     gtk_box_append(GTK_BOX(ico), ic);
     gtk_box_append(GTK_BOX(box), ico);
 
-    t = gtk_label_new(nomatch ? "无匹配密钥" : "Keychain 中还没有密钥");
+    t = gtk_label_new(nomatch ? _("无匹配密钥") : _("Keychain 中还没有密钥"));
     gtk_widget_add_css_class(t, "hb-e-title");
     gtk_box_append(GTK_BOX(box), t);
-    s = gtk_label_new(nomatch ? "试试其他关键词，或清除筛选"
-                              : "生成或导入一个私钥用于主机认证");
+    s = gtk_label_new(nomatch ? _("试试其他关键词，或清除筛选")
+                              : _("生成或导入一个私钥用于主机认证"));
     gtk_widget_add_css_class(s, "hb-e-sub");
     gtk_box_append(GTK_BOX(box), s);
 
@@ -1648,12 +1649,12 @@ static GtkWidget *build_empty(HbKeychainView *v, gboolean nomatch)
         GtkWidget *g, *im;
         gtk_widget_set_halign(r, GTK_ALIGN_CENTER);
         gtk_widget_set_margin_top(r, 8);
-        g = gtk_button_new_with_label("生成新密钥");
+        g = gtk_button_new_with_label(_("生成新密钥"));
         gtk_widget_add_css_class(g, "hb-btn");
         gtk_widget_add_css_class(g, "primary");
         g_signal_connect(g, "clicked", G_CALLBACK(on_newkey_click), v);
         gtk_box_append(GTK_BOX(r), g);
-        im = gtk_button_new_with_label("导入私钥");
+        im = gtk_button_new_with_label(_("导入私钥"));
         gtk_widget_add_css_class(im, "hb-btn");
         g_signal_connect_swapped(im, "clicked",
             G_CALLBACK(open_import), v);
@@ -1735,14 +1736,14 @@ GtkWidget *hb_keychain_view_new(HbStore *st)
         gtk_widget_add_css_class(hint, "hintbox");
         gtk_widget_add_css_class(hint, "amber");
         hl = gtk_label_new(
-            "未检测到系统密钥环，数据密钥保存在本机 0600 文件中");
+            _("未检测到系统密钥环，数据密钥保存在本机 0600 文件中"));
     } else {
         gtk_widget_add_css_class(hint, "hintbox");
         gtk_widget_add_css_class(hint, "plain");
         hl = gtk_label_new(
-            "私钥以 XChaCha20-Poly1305 加密存于本机 Vault，数据密钥由"
+            _("私钥以 XChaCha20-Poly1305 加密存于本机 Vault，数据密钥由"
             "系统密钥环（libsecret）保护；明文仅在连接时进入锁定内存"
-            "并随即擦除。");
+            "并随即擦除。"));
     }
     gtk_box_append(GTK_BOX(hint), hb_icon_new("info", 15));
     gtk_label_set_wrap(GTK_LABEL(hl), TRUE);

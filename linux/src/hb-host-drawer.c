@@ -5,6 +5,7 @@
 #include <adwaita.h>
 #include <harbor/harbor_core.h>
 #include <string.h>
+#include <glib/gi18n.h>
 
 struct _HbHostDrawer {
     HbStore   *st;
@@ -118,7 +119,7 @@ static char *chain_text(HbStore *st, hb_obj *h)
                 vn = hb_obj_get_str(vh, "name");
                 if (!vn || !*vn) vn = hb_obj_get_str(vh, "address");
             }
-            g_string_printf(s, "经 %s 隧道 → %s:%d",
+            g_string_printf(s, _("经 %s 隧道 → %s:%d"),
                             vn ? vn : "?",
                             ad ? ad : "?",
                             (int)hb_obj_get_int(h, "port",
@@ -126,11 +127,11 @@ static char *chain_text(HbStore *st, hb_obj *h)
                                                 ? 3389 : 5901));
             if (vh) hb_obj_free(vh);
         } else {
-            g_string_assign(s, "直连");
+            g_string_assign(s, _("直连"));
         }
     } else {
-        if (s->len) g_string_append(s, " → 目标");
-        else g_string_assign(s, "直连");
+        if (s->len) g_string_append(s, _(" → 目标"));
+        else g_string_assign(s, _("直连"));
     }
     return g_string_free(s, FALSE);
 }
@@ -140,12 +141,12 @@ static char *auth_text(HbStore *st, hb_obj *h)
     hb_vault *v = hb_store_vault(st);
     const char *a = hb_obj_get_str(h, "auth");
     const char *kid;
-    if (!a || !strcmp(a, "auto")) return g_strdup("自动");
+    if (!a || !strcmp(a, "auto")) return g_strdup(_("自动"));
     if (!strcmp(a, "password")) {
         char *sec = hb_vault_get_secret(v, hb_obj_id(h), "password");
         gboolean has = sec != NULL;
         if (sec) hb_secret_free(sec);
-        return g_strdup(has ? "密码（已保存）" : "密码");
+        return g_strdup(has ? _("密码（已保存）") : _("密码"));
     }
     if (!strcmp(a, "key")) {
         kid = hb_obj_get_str(h, "key_id");
@@ -155,7 +156,7 @@ static char *auth_text(HbStore *st, hb_obj *h)
             char *out;
             if (hb_vault_get(v, kid, &k) == HB_OK && k)
                 kn = hb_obj_get_str(k, "name");
-            out = g_strdup_printf("密钥 · %s", kn ? kn : kid);
+            out = g_strdup_printf(_("密钥 · %s"), kn ? kn : kid);
             if (k) hb_obj_free(k);
             return out;
         }
@@ -163,14 +164,14 @@ static char *auth_text(HbStore *st, hb_obj *h)
             const char *idf = hb_obj_get_str(h, "identity_file");
             if (idf && *idf) {
                 const char *base = strrchr(idf, '/');
-                return g_strdup_printf("私钥文件 · %s",
+                return g_strdup_printf(_("私钥文件 · %s"),
                                        base ? base + 1 : idf);
             }
         }
-        return g_strdup("密钥");
+        return g_strdup(_("密钥"));
     }
-    if (!strcmp(a, "agent")) return g_strdup("Agent");
-    if (!strcmp(a, "none")) return g_strdup("无");
+    if (!strcmp(a, "agent")) return g_strdup(_("Agent"));
+    if (!strcmp(a, "none")) return g_strdup(_("无"));
     return g_strdup(a);
 }
 
@@ -195,7 +196,7 @@ static char *fp_text(HbStore *st, hb_obj *h)
         }
     }
     if (ks) hb_obj_list_free(ks, n);
-    if (!out) out = g_strdup("尚未信任主机指纹");
+    if (!out) out = g_strdup(_("尚未信任主机指纹"));
     return out;
 }
 
@@ -204,7 +205,7 @@ static const char *proto_text(const char *p)
     if (!p) return "SSH";
     if (!strcmp(p, "rdp")) return "RDP";
     if (!strcmp(p, "vnc")) return "VNC";
-    if (!strcmp(p, "local")) return "Local";
+    if (!strcmp(p, "local")) return _("Local");
     return "SSH";
 }
 
@@ -248,13 +249,13 @@ static void refresh(HbHostDrawer *d)
         nb = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
         gtk_widget_set_hexpand(nb, TRUE);
         gtk_widget_set_valign(nb, GTK_ALIGN_CENTER);
-        nm = gtk_label_new(name && *name ? name : (ad ? ad : "host"));
+        nm = gtk_label_new(name && *name ? name : (ad ? ad : _("host")));
         gtk_widget_add_css_class(nm, "hb-drawer-name");
         gtk_label_set_xalign(GTK_LABEL(nm), 0);
         gtk_label_set_ellipsize(GTK_LABEL(nm), PANGO_ELLIPSIZE_END);
         gtk_box_append(GTK_BOX(nb), nm);
         if (local) {
-            conn = g_strdup("本地终端");
+            conn = g_strdup(_("本地终端"));
         } else {
             conn = g_strdup_printf("%s%s%s:%d",
                                    u && *u ? u : "", u && *u ? "@" : "",
@@ -285,12 +286,12 @@ static void refresh(HbHostDrawer *d)
         const char *via = hb_obj_get_str(h, "via");
         const char **tags = NULL;
         size_t nt, i;
-        if (local) { gtk_box_append(GTK_BOX(chips), chip("本地"));
+        if (local) { gtk_box_append(GTK_BOX(chips), chip(_("本地")));
                      any = TRUE; }
-        if (via)   { gtk_box_append(GTK_BOX(chips), chip("SSH 隧道"));
+        if (via)   { gtk_box_append(GTK_BOX(chips), chip(_("SSH 隧道")));
                      any = TRUE; }
         if (grp && *grp) {
-            char *g = g_strdup_printf("分组 · %s", grp);
+            char *g = g_strdup_printf(_("分组 · %s"), grp);
             gtk_box_append(GTK_BOX(chips), chip(g));
             g_free(g);
             any = TRUE;
@@ -311,44 +312,44 @@ static void refresh(HbHostDrawer *d)
     {
         GtkWidget *rows = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
         gtk_widget_add_css_class(rows, "hb-drawer-rows");
-        drow_append(rows, "协议", proto_text(proto));
+        drow_append(rows, _("协议"), proto_text(proto));
         if (!local) {
             char buf[64];
             const char *u = hb_obj_get_str(h, "user");
             const char *grp = hb_obj_get_str(h, "group");
             const char *os = hb_obj_get_str(h, "os");
             char *t;
-            drow_append(rows, "地址",
+            drow_append(rows, _("地址"),
                         hb_obj_get_str(h, "address"));
             snprintf(buf, sizeof buf, "%d",
                      (int)hb_obj_get_int(h, "port", 22));
-            drow_append(rows, "端口", buf);
-            drow_append(rows, "用户名", u && *u ? u : "—");
+            drow_append(rows, _("端口"), buf);
+            drow_append(rows, _("用户名"), u && *u ? u : "—");
             if (!proto || !strcmp(proto, "ssh")) {
                 t = auth_text(d->st, h);
-                drow_append(rows, "认证", t);
+                drow_append(rows, _("认证"), t);
                 g_free(t);
-                snprintf(buf, sizeof buf, "%d 秒%s",
+                snprintf(buf, sizeof buf, _("%d 秒%s"),
                          (int)hb_obj_get_int(h, "keepalive", 30),
                          hb_obj_has(h, "keepalive") &&
                          hb_obj_get_int(h, "keepalive", 30) == 0
-                         ? "（关闭）" : "");
-                drow_append(rows, "保活间隔", buf);
+                         ? _("（关闭）") : "");
+                drow_append(rows, _("保活间隔"), buf);
             }
             {
                 static const char *osmap[] = {
-                    "自动检测", "ubuntu", "debian", "generic", "windows" };
-                const char *ost = "自动检测";
+                    N_("自动检测"), "ubuntu", "debian", "generic", "windows" };
+                const char *ost = _("自动检测");
                 if (os && !strcmp(os, "ubuntu")) ost = "Ubuntu";
                 else if (os && !strcmp(os, "debian")) ost = "Debian";
-                else if (os && !strcmp(os, "generic")) ost = "通用";
+                else if (os && !strcmp(os, "generic")) ost = _("通用");
                 else if (os && !strcmp(os, "windows")) ost = "Windows";
                 (void)osmap;
-                drow_append(rows, "操作系统", ost);
+                drow_append(rows, _("操作系统"), ost);
             }
-            drow_append(rows, "分组", grp && *grp ? grp : "—");
+            drow_append(rows, _("分组"), grp && *grp ? grp : "—");
             t = chain_text(d->st, h);
-            drow_append(rows, "跳板 / 隧道", t);
+            drow_append(rows, _("跳板 / 隧道"), t);
             g_free(t);
             /* 最近连接 */
             {
@@ -370,13 +371,13 @@ static void refresh(HbHostDrawer *d)
                         }
                     }
                 }
-                drow_append(rows, "最近连接",
-                            ll.found ? ll.text : "尚未连接");
+                drow_append(rows, _("最近连接"),
+                            ll.found ? ll.text : _("尚未连接"));
             }
             if (!proto || !strcmp(proto, "ssh")) {
                 t = fp_text(d->st, h);
                 gtk_box_append(GTK_BOX(rows),
-                               drow("主机指纹", t, TRUE));
+                               drow(_("主机指纹"), t, TRUE));
                 g_free(t);
             }
         }
@@ -496,10 +497,10 @@ HbHostDrawer *hb_host_drawer_new(HbStore *st)
     /* footer：连接 / 编辑 / 复制 / … / 删除 */
     foot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(foot, "hb-drawer-foot");
-    gtk_box_append(GTK_BOX(foot), foot_btn(d, "连接", NULL, "connect", "primary"));
+    gtk_box_append(GTK_BOX(foot), foot_btn(d, _("连接"), NULL, "connect", "primary"));
     gtk_box_append(GTK_BOX(foot), foot_btn(d, "SFTP", NULL, "sftp", NULL));
-    gtk_box_append(GTK_BOX(foot), foot_btn(d, "编辑", NULL, "edit", NULL));
-    gtk_box_append(GTK_BOX(foot), foot_btn(d, "复制", NULL, "dup", NULL));
+    gtk_box_append(GTK_BOX(foot), foot_btn(d, _("编辑"), NULL, "edit", NULL));
+    gtk_box_append(GTK_BOX(foot), foot_btn(d, _("复制"), NULL, "dup", NULL));
     sp = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_hexpand(sp, TRUE);
     gtk_box_append(GTK_BOX(foot), sp);

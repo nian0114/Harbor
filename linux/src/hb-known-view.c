@@ -16,6 +16,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <glib/gi18n.h>
 
 struct _HbKnownView {
     GtkBox parent;
@@ -42,7 +43,7 @@ static char *default_kh_path(void)
 
 static void show_import_result(HbKnownView *v, hb_import_result *r)
 {
-    char *msg = g_strdup_printf("已导入 %zu 条，跳过 %zu 条",
+    char *msg = g_strdup_printf(_("已导入 %zu 条，跳过 %zu 条"),
                                 r->created, r->skipped);
     hb_toast(GTK_WIDGET(v), msg);
     g_free(msg);
@@ -51,7 +52,7 @@ static void show_import_result(HbKnownView *v, hb_import_result *r)
         size_t i;
         for (i = 0; i < r->nwarn; i++)
             g_string_append_printf(s, "• %s\n", r->warnings[i]);
-        hb_dialog_text(GTK_WIDGET(v), "导入警告", s->str);
+        hb_dialog_text(GTK_WIDGET(v), _("导入警告"), s->str);
         g_string_free(s, TRUE);
     }
 }
@@ -61,7 +62,7 @@ static void import_path(HbKnownView *v, const char *path)
     hb_import_result r;
     memset(&r, 0, sizeof r);
     if (hb_known_import_file(hb_store_vault(v->store), path, &r) != HB_OK) {
-        hb_toast(GTK_WIDGET(v), "导入失败（无法读取文件）");
+        hb_toast(GTK_WIDGET(v), _("导入失败（无法读取文件）"));
         return;
     }
     show_import_result(v, &r);
@@ -86,7 +87,7 @@ static void imp_file_done(GObject *src, GAsyncResult *res, gpointer ud)
     if (!gf) return;
     p = g_file_get_path(gf);
     if (p) import_path(v, p);
-    else   hb_toast(GTK_WIDGET(v), "无法读取该文件");
+    else   hb_toast(GTK_WIDGET(v), _("无法读取该文件"));
     g_free(p);
     g_object_unref(gf);
 }
@@ -97,7 +98,7 @@ static void on_import_file(GtkButton *b, gpointer ud)
     GtkFileDialog *d;
     (void)b;
     d = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(d, "选择 known_hosts 文件");
+    gtk_file_dialog_set_title(d, _("选择 known_hosts 文件"));
     gtk_file_dialog_open(d, NULL, NULL, imp_file_done, v);
     g_object_unref(d);
 }
@@ -116,10 +117,10 @@ static void exp_done(GObject *src, GAsyncResult *res, gpointer ud)
         !out ||
         !g_file_replace_contents(gf, out, strlen(out), NULL, FALSE,
                                  G_FILE_CREATE_NONE, NULL, NULL, &err)) {
-        hb_toast(GTK_WIDGET(v), "导出失败");
+        hb_toast(GTK_WIDGET(v), _("导出失败"));
         if (err) g_error_free(err);
     } else {
-        hb_toast(GTK_WIDGET(v), "Known hosts 已导出");
+        hb_toast(GTK_WIDGET(v), _("Known hosts 已导出"));
     }
     g_free(out);
     g_object_unref(gf);
@@ -131,7 +132,7 @@ static void on_export(GtkButton *b, gpointer ud)
     GtkFileDialog *d;
     (void)b;
     d = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(d, "导出 known_hosts");
+    gtk_file_dialog_set_title(d, _("导出 known_hosts"));
     gtk_file_dialog_set_initial_name(d, "known_hosts");
     gtk_file_dialog_save(d, NULL, NULL, exp_done, v);
     g_object_unref(d);
@@ -203,7 +204,7 @@ static void do_write_known(HbKnownView *v)
         /* 目标不存在：确保父目录（如 ~/.ssh）存在，0700 */
         char *dir = g_path_get_dirname(path);
         if (g_mkdir_with_parents(dir, 0700) != 0) {
-            hb_toast(GTK_WIDGET(v), "无法创建 .ssh 目录");
+            hb_toast(GTK_WIDGET(v), _("无法创建 .ssh 目录"));
             g_free(dir);
             goto out;
         }
@@ -222,7 +223,7 @@ static void do_write_known(HbKnownView *v)
             if (!g_file_set_contents_full(bak, cur, (gssize)clen,
                                           G_FILE_SET_CONTENTS_CONSISTENT,
                                           mode, &err)) {
-                hb_toast(GTK_WIDGET(v), "备份失败，已中止写入");
+                hb_toast(GTK_WIDGET(v), _("备份失败，已中止写入"));
                 g_error_free(err);
                 g_free(bak); goto out;
             }
@@ -245,7 +246,7 @@ static void do_write_known(HbKnownView *v)
     if (objs) hb_obj_list_free(objs, n);
 
     if (!added) {
-        hb_toast(GTK_WIDGET(v), "无新条目需要写入");
+        hb_toast(GTK_WIDGET(v), _("无新条目需要写入"));
         goto out;
     }
     {
@@ -259,15 +260,15 @@ static void do_write_known(HbKnownView *v)
         if (!g_file_set_contents_full(path, all->str, (gssize)all->len,
                                       G_FILE_SET_CONTENTS_CONSISTENT,
                                       mode, &err)) {
-            hb_toast(GTK_WIDGET(v), "写入失败");
+            hb_toast(GTK_WIDGET(v), _("写入失败"));
             g_error_free(err);
             g_string_free(all, TRUE);
             goto out;
         }
         g_string_free(all, TRUE);
     }
-    msg = g_strdup_printf("已向 known_hosts 追加 %zu 条（备份 .harbor-bak）",
-                          added);
+    msg = g_strdup_printf(ngettext("已向 known_hosts 追加 %zu 条（备份 .harbor-bak）", "已向 known_hosts 追加 %zu 条（备份 .harbor-bak）",
+                          added), added);
     hb_toast(GTK_WIDGET(v), msg);
     g_free(msg);
 
@@ -288,11 +289,11 @@ static void on_write_known(GtkButton *b, gpointer ud)
 {
     HbKnownView *v = ud;
     (void)b;
-    hb_dialog_confirm(GTK_WIDGET(v), "写入 ~/.ssh/known_hosts",
-                      "将把 Vault 中尚未出现的指纹追加到 "
+    hb_dialog_confirm(GTK_WIDGET(v), _("写入 ~/.ssh/known_hosts"),
+                      _("将把 Vault 中尚未出现的指纹追加到 "
                       "<tt>~/.ssh/known_hosts</tt>；"
-                      "原文件先备份为 <tt>known_hosts.harbor-bak</tt>。",
-                      "写入", FALSE, write_known_done, v);
+                      "原文件先备份为 <tt>known_hosts.harbor-bak</tt>。"),
+                      _("写入"), FALSE, write_known_done, v);
 }
 
 /* ============================ 删除 ============================ */
@@ -320,7 +321,7 @@ static void known_del_done(gboolean ok, gpointer ud)
     char *msg;
     if (!ok) { known_undo_free(d); return; }
     hb_vault_delete(hb_store_vault(d->v->store), d->id);
-    msg = g_strdup_printf("已删除 %s 的指纹记录", d->host ? d->host : "");
+    msg = g_strdup_printf(_("已删除 %s 的指纹记录"), d->host ? d->host : "");
     hb_toast_undo_destroy(GTK_WIDGET(d->v), msg,
                           known_undo_cb, known_undo_free, d);
     g_free(msg);
@@ -339,11 +340,11 @@ static void on_del(GtkButton *b, gpointer ud)
     d->v = v;
     d->id = g_strdup(id);
     d->host = g_strdup(host);
-    msg = g_strdup_printf("确定删除 <b>%s</b> 的指纹记录？"
-                          "删除后 9 秒内可撤销。",
+    msg = g_strdup_printf(_("确定删除 <b>%s</b> 的指纹记录？"
+                          "删除后 9 秒内可撤销。"),
                           host ? host : "");
-    hb_dialog_confirm(GTK_WIDGET(v), "删除 known hosts 条目", msg,
-                      "删除", TRUE, known_del_done, d);
+    hb_dialog_confirm(GTK_WIDGET(v), _("删除 known hosts 条目"), msg,
+                      _("删除"), TRUE, known_del_done, d);
     g_free(msg);
 }
 
@@ -353,11 +354,11 @@ static GtkWidget *row_head(void)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     struct { const char *txt; int w; gboolean grow; } cols[] = {
-        { "主机",    200, TRUE  },
-        { "端口",     60, FALSE },
-        { "密钥类型", 110, FALSE },
-        { "指纹",    200, TRUE  },
-        { "添加时间", 110, FALSE },
+        { _("主机"),    200, TRUE  },
+        { _("端口"),     60, FALSE },
+        { _("密钥类型"), 110, FALSE },
+        { _("指纹"),    200, TRUE  },
+        { _("添加时间"), 110, FALSE },
         { "",         50, FALSE },
     };
     int i;
@@ -378,7 +379,7 @@ static char *host_disp(const char *host)
 {
     if (host && !strncmp(host, "|1|", 3)) {
         char *pre = g_strndup(host, 12);
-        char *out = g_strdup_printf("（hashed）%s…", pre);
+        char *out = g_strdup_printf(_("（hashed）%s…"), pre);
         g_free(pre);
         return out;
     }
@@ -457,7 +458,7 @@ static GtkWidget *known_row(HbKnownView *v, hb_obj *o)
     db = gtk_button_new();
     gtk_widget_add_css_class(db, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(db), hb_icon_new("trash", 13));
-    gtk_widget_set_tooltip_text(db, "删除");
+    gtk_widget_set_tooltip_text(db, _("删除"));
     gtk_widget_set_margin_start(db, 14);
     gtk_widget_set_size_request(db, 50, -1);
     gtk_widget_set_valign(db, GTK_ALIGN_CENTER);
@@ -502,7 +503,7 @@ static void fill_rows(HbKnownView *v)
     if (objs) hb_obj_list_free(objs, n);
     if (!shown) {
         GtkWidget *l = gtk_label_new(q && *q ?
-            "无匹配条目" : "暂无 known hosts — 导入或首次连接时记录");
+            _("无匹配条目") : _("暂无 known hosts — 导入或首次连接时记录"));
         gtk_widget_add_css_class(l, "hb-e-sub");
         gtk_widget_set_margin_top(l, 26);
         gtk_widget_set_margin_bottom(l, 26);
@@ -536,10 +537,10 @@ static void build(HbKnownView *v)
     /* Import split ▾：主按钮 = 默认 ~/.ssh/known_hosts */
     split = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(split, "linked");
-    ib = gtk_button_new_with_label("导入 known_hosts");
+    ib = gtk_button_new_with_label(_("导入 known_hosts"));
     gtk_widget_add_css_class(ib, "hb-btn");
     gtk_widget_add_css_class(ib, "primary");
-    gtk_widget_set_tooltip_text(ib, "默认 ~/.ssh/known_hosts");
+    gtk_widget_set_tooltip_text(ib, _("默认 ~/.ssh/known_hosts"));
     g_signal_connect(ib, "clicked", G_CALLBACK(on_import_default), v);
     gtk_box_append(GTK_BOX(split), ib);
     mb = gtk_menu_button_new();
@@ -548,7 +549,7 @@ static void build(HbKnownView *v)
     gtk_widget_add_css_class(mb, "primary");
     {
         GMenu *m = g_menu_new();
-        g_menu_append(m, "选择文件…", "known.pick");
+        g_menu_append(m, _("选择文件…"), "known.pick");
         gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(mb),
                                        G_MENU_MODEL(m));
         g_object_unref(m);
@@ -569,7 +570,7 @@ static void build(HbKnownView *v)
     /* 搜索 */
     v->search = gtk_search_entry_new();
     gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(v->search),
-                                          "搜索主机 / 指纹…");
+                                          _("搜索主机 / 指纹…"));
     gtk_widget_set_size_request(v->search, 240, -1);
     gtk_widget_set_valign(v->search, GTK_ALIGN_CENTER);
     g_signal_connect(v->search, "search-changed",
@@ -583,14 +584,14 @@ static void build(HbKnownView *v)
     }
 
     /* 写入 ~/.ssh/known_hosts… */
-    wb = gtk_button_new_with_label("写入 ~/.ssh/known_hosts…");
+    wb = gtk_button_new_with_label(_("写入 ~/.ssh/known_hosts…"));
     gtk_widget_add_css_class(wb, "hb-btn");
     gtk_widget_add_css_class(wb, "ghost");
     g_signal_connect(wb, "clicked", G_CALLBACK(on_write_known), v);
     gtk_box_append(GTK_BOX(bar), wb);
 
     /* 导出 */
-    eb = gtk_button_new_with_label("导出");
+    eb = gtk_button_new_with_label(_("导出"));
     gtk_widget_add_css_class(eb, "hb-btn");
     gtk_widget_add_css_class(eb, "ghost");
     g_signal_connect(eb, "clicked", G_CALLBACK(on_export), v);
@@ -622,8 +623,8 @@ static void build(HbKnownView *v)
         gtk_widget_add_css_class(hb2, "hintbox");
         gtk_widget_add_css_class(hb2, "plain");
         gtk_box_append(GTK_BOX(hb2), hb_icon_new("info", 14));
-        txt = gtk_label_new("首次连接未知主机时会弹出指纹确认（TOFU）；"
-                            "指纹变更会红色告警并阻断连接，防中间人攻击。");
+        txt = gtk_label_new(_("首次连接未知主机时会弹出指纹确认（TOFU）；"
+                            "指纹变更会红色告警并阻断连接，防中间人攻击。"));
         gtk_label_set_wrap(GTK_LABEL(txt), TRUE);
         gtk_label_set_xalign(GTK_LABEL(txt), 0);
         gtk_box_append(GTK_BOX(hb2), txt);

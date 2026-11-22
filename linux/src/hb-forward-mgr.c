@@ -17,6 +17,7 @@
 #include <harbor/ssh.h>
 #include <glib-unix.h>
 #include <string.h>
+#include <glib/gi18n.h>
 
 struct _HbForwardMgr {
     GObject   parent;
@@ -111,7 +112,7 @@ static char *rule_desc(hb_obj *o)
         ba && *ba ? ba : "127.0.0.1", bp);
     char *out;
     if (kind && !strcmp(kind, "remote"))
-        out = g_strdup_printf("服务器 %s → %s:%d", bind,
+        out = g_strdup_printf(_("服务器 %s → %s:%d"), bind,
                               da && *da ? da : "127.0.0.1", dp);
     else if (kind && !strcmp(kind, "dynamic"))
         out = g_strdup_printf("%s → SOCKS5", bind);
@@ -236,7 +237,7 @@ static gboolean retry_cb(gpointer ud)
         return G_SOURCE_REMOVE;
     /* 重试瞬间 via 主机可能已被删除 → 判失败（不可重试） */
     if (!host_exists(r->m, r->via)) {
-        fail_permanent(r, "经由主机不存在或已删除", NULL);
+        fail_permanent(r, _("经由主机不存在或已删除"), NULL);
         return G_SOURCE_REMOVE;
     }
     r->state = HB_FWD_CONNECTING;
@@ -255,7 +256,7 @@ static void notify_failed(FwdRun *r, const char *details)
         o && !hb_obj_tombstone(o))
         desc = rule_desc(o);
     if (o) hb_obj_free(o);
-    t = g_strdup_printf("转发规则启动失败 · %s",
+    t = g_strdup_printf(_("转发规则启动失败 · %s"),
                         desc ? desc : r->id);
     hb_notify_post("err", t, details && *details ? details : "", NULL);
     g_free(t);
@@ -346,7 +347,7 @@ static void on_ctl_failed(HbConnCtl *c, int code, const char *title,
     }
     /* AUTH / HOSTKEY_* / CANCELLED / FORWARD / code 0（绑定冲突、
      * 密钥被拒、跳板缺失…） → 永久失败 */
-    fail_permanent(r, title ? title : "启动失败", details);
+    fail_permanent(r, title ? title : _("启动失败"), details);
 }
 
 static void on_ctl_disconn(HbConnCtl *c, gpointer ud)
@@ -401,13 +402,13 @@ static void run_start(HbForwardMgr *m, const char *id, gboolean persist)
         return;
     }
     if (!m->window) {   /* 对话框无处挂 → 连接会无声挂死 */
-        fail_permanent(r, "窗口未就绪", NULL);
+        fail_permanent(r, _("窗口未就绪"), NULL);
         hb_obj_free(o);
         return;
     }
     via = hb_obj_get_str(o, "via");
     if (!host_exists(m, via)) {
-        fail_permanent(r, "经由主机不存在或已删除", NULL);
+        fail_permanent(r, _("经由主机不存在或已删除"), NULL);
         hb_obj_free(o);
         return;
     }
@@ -455,7 +456,7 @@ static void run_restart(FwdRun *r, hb_obj *o)
     hb_pf_rule rule;
 
     if (!host_exists(r->m, via)) {
-        fail_permanent(r, "经由主机不存在或已删除", NULL);
+        fail_permanent(r, _("经由主机不存在或已删除"), NULL);
         return;
     }
     ensure_ctl(r);

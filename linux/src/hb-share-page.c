@@ -9,6 +9,7 @@
 #include "hb-term-theme.h"
 
 #include <string.h>
+#include <glib/gi18n.h>
 
 struct _HbSharePage {
     GtkBox             parent;
@@ -48,7 +49,7 @@ static void update_banner(HbSharePage *p)
 {
     int perm = hb_share_peer_ctx_perm(p->ctx);
     gtk_label_set_label(GTK_LABEL(p->perm_lbl),
-        perm == HB_SHARE_COLLAB ? "可协作" : "只读");
+        perm == HB_SHARE_COLLAB ? _("可协作") : _("只读"));
     gtk_widget_remove_css_class(p->perm_lbl, "collab");
     if (perm == HB_SHARE_COLLAB)
         gtk_widget_add_css_class(p->perm_lbl, "collab");
@@ -83,11 +84,11 @@ static void show_ended(HbSharePage *p, const char *reason)
     if (p->ended) return;
     p->ended = TRUE;
     if (!reason) reason = "stopped";
-    if (!strcmp(reason, "stopped"))      txt = "所有者已停止共享";
-    else if (!strcmp(reason, "kicked"))  txt = "已被移除";
-    else if (!strcmp(reason, "owner_gone")) txt = "所有者已离线";
-    else if (!strcmp(reason, "expired")) txt = "共享已过期";
-    else                                 txt = "共享已结束";
+    if (!strcmp(reason, "stopped"))      txt = _("所有者已停止共享");
+    else if (!strcmp(reason, "kicked"))  txt = _("已被移除");
+    else if (!strcmp(reason, "owner_gone")) txt = _("所有者已离线");
+    else if (!strcmp(reason, "expired")) txt = _("共享已过期");
+    else                                 txt = _("共享已结束");
     gtk_label_set_label(GTK_LABEL(p->end_reason), txt);
     gtk_widget_set_visible(p->overlay_end, TRUE);
 }
@@ -97,7 +98,7 @@ static void on_dead_input(HbTerminal *t, const gchar *utf8,
 {
     (void)t; (void)utf8;
     if (!p->ended)
-        show_notice(p, "只读模式，输入未生效");
+        show_notice(p, _("只读模式，输入未生效"));
 }
 
 static void on_peer_event(HbShareService *s, gpointer ctx,
@@ -123,17 +124,17 @@ static void on_peer_event(HbShareService *s, gpointer ctx,
         show_ended(p, ev->text);
         break;
     case HB_SH_EV_PAKE_FAIL:
-        show_notice(p, "配对码错误");
+        show_notice(p, _("配对码错误"));
         break;
     case HB_SH_EV_LOCKED:
         show_notice(p,
-            "尝试次数过多，请让所有者重新生成配对码");
+            _("尝试次数过多，请让所有者重新生成配对码"));
         show_ended(p, "expired");
         gtk_label_set_label(GTK_LABEL(p->end_reason),
-            "尝试次数过多，请让所有者重新生成配对码");
+            _("尝试次数过多，请让所有者重新生成配对码"));
         break;
     case HB_SH_EV_ERROR:
-        show_notice(p, ev->text ? ev->text : "共享出错");
+        show_notice(p, ev->text ? ev->text : _("共享出错"));
         break;
     default:
         hb_terminal_external_poke(HB_TERMINAL(p->term));
@@ -191,7 +192,7 @@ void hb_share_open_viewer(GtkWidget *win, hb_share_peer_ctx *ctx,
     pg = hb_share_page_new(ctx);
     g_object_set_data_full(G_OBJECT(pg), "tab-id", g_strdup(id), g_free);
     hb_window_add_tab(HB_WINDOW(win), id,
-                      (title && *title) ? title : "共享",
+                      (title && *title) ? title : _("共享"),
                       "broadcast", pg, TRUE, FALSE);
     hb_window_switch_tab(HB_WINDOW(win), id);
 }
@@ -261,24 +262,24 @@ GtkWidget *hb_share_page_new(hb_share_peer_ctx *ctx)
 
     gtk_box_append(GTK_BOX(p->banner), hb_icon_new("broadcast", 14));
     title = hb_share_peer_ctx_title(ctx);
-    btxt = g_strdup_printf("正在观看 %s",
-                           (title && *title) ? title : "共享会话");
+    btxt = g_strdup_printf(_("正在观看 %s"),
+                           (title && *title) ? title : _("共享会话"));
     title_l = gtk_label_new(btxt);
     g_free(btxt);
     gtk_widget_add_css_class(title_l, "hb-share-banner-title");
     gtk_box_append(GTK_BOX(p->banner), title_l);
 
-    p->perm_lbl = gtk_label_new("只读");
+    p->perm_lbl = gtk_label_new(_("只读"));
     gtk_widget_add_css_class(p->perm_lbl, "hb-share-pill");
     gtk_box_append(GTK_BOX(p->banner), p->perm_lbl);
 
-    e2e = gtk_label_new("端到端加密");
+    e2e = gtk_label_new(_("端到端加密"));
     gtk_widget_add_css_class(e2e, "hb-term-muted");
     gtk_widget_set_hexpand(e2e, TRUE);
     gtk_label_set_xalign(GTK_LABEL(e2e), 1);
     gtk_box_append(GTK_BOX(p->banner), e2e);
 
-    leave = gtk_button_new_with_label("离开");
+    leave = gtk_button_new_with_label(_("离开"));
     gtk_widget_add_css_class(leave, "tbtn");
     g_signal_connect(leave, "clicked", G_CALLBACK(on_leave), p);
     gtk_box_append(GTK_BOX(p->banner), leave);
@@ -349,10 +350,10 @@ GtkWidget *hb_share_page_new(hb_share_peer_ctx *ctx)
             gtk_box_append(GTK_BOX(p->overlay_end), ic);
             gtk_widget_add_css_class(ic, "hb-share-ended-ico");
         }
-        p->end_reason = gtk_label_new("共享已结束");
+        p->end_reason = gtk_label_new(_("共享已结束"));
         gtk_widget_add_css_class(p->end_reason, "hb-share-ended-txt");
         gtk_box_append(GTK_BOX(p->overlay_end), p->end_reason);
-        endbox = gtk_button_new_with_label("关闭");
+        endbox = gtk_button_new_with_label(_("关闭"));
         gtk_widget_add_css_class(endbox, "pill");
         gtk_widget_set_halign(endbox, GTK_ALIGN_CENTER);
         g_signal_connect(endbox, "clicked",

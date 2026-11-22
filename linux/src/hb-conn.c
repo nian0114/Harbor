@@ -7,6 +7,7 @@
 #include <harbor/keys.h>
 #include <string.h>
 #include <stdlib.h>
+#include <glib/gi18n.h>
 
 /* ==================================================================
  * HbConnCtl — SSH/SFTP 连接流程控制器（从 hb-ssh-page 抽出的安全流）。
@@ -634,7 +635,7 @@ static void on_key_confirm(gboolean ok, gpointer ud)
         /* 拒绝 → 不建会话（secret 从未被读）。
          * c->reuse_vt 不动：它属于下一次成功连接，不由本次拒绝销毁。 */
         g_signal_emit(c, sigs[SIG_FAILED], 0, 0,
-                      "已拒绝使用密钥，连接已取消", NULL);
+                      _("已拒绝使用密钥，连接已取消"), NULL);
         log_finish(c, "cancelled", "key confirm denied");
         c->log_id = 0;
     }
@@ -687,7 +688,7 @@ static void continue_connect(HbConnCtl *c, int rows, int cols)
         }
     }
     if (x && x->missing_jump) {
-        char *m = g_strdup_printf("跳板主机不存在或已删除（%s）",
+        char *m = g_strdup_printf(_("跳板主机不存在或已删除（%s）"),
                                   x->missing_jump);
         g_signal_emit(c, sigs[SIG_FAILED], 0, 0, m, NULL);
         g_free(m);
@@ -702,7 +703,7 @@ static void continue_connect(HbConnCtl *c, int rows, int cols)
         log_finish(c, "error", "host object missing");
         c->log_id = 0;
         g_signal_emit(c, sigs[SIG_FAILED], 0, 0,
-                      "无法读取主机信息", NULL);
+                      _("无法读取主机信息"), NULL);
         if (reuse) hb_vt_free(reuse);
         conn_ctx_free(x);
         if (thost) hb_obj_free(thost);
@@ -721,7 +722,7 @@ static void continue_connect(HbConnCtl *c, int rows, int cols)
         c->sess = hb_session_new_forward(&x->o, &c->rule, NULL, &ferr);
         if (!c->sess) {
             /* 绑定冲突等（code=0：不可重试，由 owner 置 FAILED） */
-            char *t = g_strdup_printf("无法监听 %s:%d",
+            char *t = g_strdup_printf(_("无法监听 %s:%d"),
                 c->rule.bind_addr && *c->rule.bind_addr
                     ? c->rule.bind_addr : "127.0.0.1",
                 c->rule.bind_port);
@@ -745,8 +746,8 @@ static void continue_connect(HbConnCtl *c, int rows, int cols)
         log_finish(c, "error", "session alloc failed");
         c->log_id = 0;
         g_signal_emit(c, sigs[SIG_FAILED], 0, 0,
-                      "无法创建 SSH 会话",
-                      "主机配置缺少必填字段（如用户名）");
+                      _("无法创建 SSH 会话"),
+                      _("主机配置缺少必填字段（如用户名）"));
         if (reuse) hb_vt_free(reuse);
         return;
     }
@@ -839,22 +840,22 @@ void hb_conn_ctl_start(HbConnCtl *c, const char *host_id,
             KeyConfirmCtx *cc = g_new0(KeyConfirmCtx, 1);
             GString *mk = g_string_new(NULL);
             size_t i;
-            g_string_append(mk, "以下密钥开启了<b>使用前确认</b>：\n");
+            g_string_append(mk, _("以下密钥开启了<b>使用前确认</b>：\n"));
             for (i = 0; i < cf->len; i++) {
                 char *e = g_markup_escape_text(
                     (char *)g_ptr_array_index(cf, i), -1);
                 g_string_append_printf(mk, "  • %s\n", e);
                 g_free(e);
             }
-            g_string_append(mk, "允许使用这些密钥登录吗？");
+            g_string_append(mk, _("允许使用这些密钥登录吗？"));
             cc->c = c;
             cc->rows = rows;
             cc->cols = cols;
             cc->lines = cf;
             g_object_ref(c);   /* 对话框期间保活 */
             set_open_dialog(c,
-                hb_dialog_confirm(c->dialog_parent, "使用密钥",
-                                  mk->str, "允许使用", FALSE,
+                hb_dialog_confirm(c->dialog_parent, _("使用密钥"),
+                                  mk->str, _("允许使用"), FALSE,
                                   on_key_confirm, cc));
             g_string_free(mk, TRUE);
             return;
@@ -942,7 +943,7 @@ static void on_hostkey_ev(HbConnCtl *c, const hb_sess_event *ev)
     g_object_ref(c);   /* 对话框存活期间保活（done cb 里 unref） */
     if (ev->code == 1) {
         /* 需要旧指纹：从 vault 里查 */
-        char *oldfp = g_strdup("(未知)");
+        char *oldfp = g_strdup(_("(未知)"));
         {
             char host[256]; int port = 22;
             /* hp 形如 "h:p" 或 "[h]:p" */
@@ -965,7 +966,7 @@ static void on_hostkey_ev(HbConnCtl *c, const hb_sess_event *ev)
             {
                 hb_obj **ob; size_t n, i;
                 g_free(oldfp);
-                oldfp = g_strdup("(无本地记录)");
+                oldfp = g_strdup(_("(无本地记录)"));
                 ob = hb_store_list(c->store, "known", &n);
                 for (i = 0; i < n; i++) {
                     const char *oh = hb_obj_get_str(ob[i], "host");
@@ -974,7 +975,7 @@ static void on_hostkey_ev(HbConnCtl *c, const hb_sess_event *ev)
                         const char *f = hb_obj_get_str(ob[i],
                                                        "fingerprint");
                         g_free(oldfp);
-                        oldfp = g_strdup(f ? f : "(无)");
+                        oldfp = g_strdup(f ? f : _("(无)"));
                         break;
                     }
                 }
@@ -1097,7 +1098,7 @@ static void on_error_ev(HbConnCtl *c, const hb_sess_event *ev)
 {
     /* 红色日志行先走 stage（mark='e'，idx=-1 不推进节点） */
     g_signal_emit(c, sigs[SIG_STAGE], 0, -1,
-                  ev->text ? ev->text : "连接失败", (gchar)'e');
+                  ev->text ? ev->text : _("连接失败"), (gchar)'e');
     /* 连接没成功 → 记住的凭据不再有用，立刻抹掉明文 */
     wipe_free(c->pend_secret);
     c->pend_secret = NULL;

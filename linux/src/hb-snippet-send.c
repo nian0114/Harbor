@@ -11,12 +11,13 @@
 
 #include <harbor/snippet.h>
 #include <harbor/keys.h>
+#include <glib/gi18n.h>
 
 gboolean hb_snippet_scope_match(const char *scope, const char *host_id,
                                 const char *group)
 {
     if (!scope || !*scope ||
-        !strcmp(scope, "global") || !strcmp(scope, "全局"))
+        !strcmp(scope, "global") || !strcmp(scope, _("全局")))
         return TRUE;
     if (!strncmp(scope, "host:", 5))
         return host_id && !strcmp(scope + 5, host_id);
@@ -88,8 +89,8 @@ static void bc_confirmed(gboolean ok, gpointer ud)
 static void maybe_send(SendCtx *c)
 {
     if (c->ws) {
-        char *msg = g_strdup_printf("将发送到 %u 个分屏", c->npanes);
-        hb_dialog_confirm(c->win, "Broadcast 已开启", msg, "发送", FALSE,
+        char *msg = g_strdup_printf(ngettext("将发送到 %u 个分屏", "将发送到 %u 个分屏", c->npanes), c->npanes);
+        hb_dialog_confirm(c->win, _("Broadcast 已开启"), msg, _("发送"), FALSE,
                           bc_confirmed, c);
         g_free(msg);
         return;
@@ -158,7 +159,7 @@ static void open_var_dialog(SendCtx *c, char **names, char **defs, size_t n)
     v->names = names;
     v->n = n;
     v->entries = g_new0(GtkWidget *, n);
-    v->dlg = hb_modal_new("填写变量", &body, &foot);
+    v->dlg = hb_modal_new(_("填写变量"), &body, &foot);
     memo = last_for(hb_obj_id(c->snip), FALSE);
 
     for (i = 0; i < n; i++) {
@@ -183,12 +184,12 @@ static void open_var_dialog(SendCtx *c, char **names, char **defs, size_t n)
     f = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(f, "hb-modal-footer");
     gtk_widget_set_halign(f, GTK_ALIGN_END);
-    cancel = gtk_button_new_with_label("取消");
+    cancel = gtk_button_new_with_label(_("取消"));
     gtk_widget_add_css_class(cancel, "hb-btn");
     g_signal_connect_swapped(cancel, "clicked",
                              G_CALLBACK(adw_dialog_close), v->dlg);
     gtk_box_append(GTK_BOX(f), cancel);
-    ok = gtk_button_new_with_label("发送");
+    ok = gtk_button_new_with_label(_("发送"));
     gtk_widget_add_css_class(ok, "hb-btn");
     gtk_widget_add_css_class(ok, "primary");
     g_signal_connect(ok, "clicked", G_CALLBACK(var_ok), v);
@@ -230,12 +231,12 @@ static void send_common(GtkWidget *win, hb_session *sess, HbWorkspace *ws,
 
     if (hb_vault_get(hb_store_vault(store), snippet_id, &snip) != HB_OK ||
         !snip) {
-        hb_toast(win, "Snippet 不存在");
+        hb_toast(win, _("Snippet 不存在"));
         if (snip) hb_obj_free(snip);
         return;
     }
     if (!sess && !ws) {
-        hb_toast(win, "没有活动终端");
+        hb_toast(win, _("没有活动终端"));
         hb_obj_free(snip);
         return;
     }
@@ -280,7 +281,7 @@ void hb_snippet_send_to_session(GtkWidget *parent, hb_session *sess,
     if (!parent || !store || !snippet_id)
         return;
     if (!sess || !hb_session_alive(sess)) {
-        hb_toast(parent, "没有活动终端");
+        hb_toast(parent, _("没有活动终端"));
         return;
     }
     send_common(parent, sess, NULL, store, snippet_id);

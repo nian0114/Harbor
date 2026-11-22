@@ -28,6 +28,15 @@ if get_option('linux')
     subdir('linux')
 endif
 
+# FR-15 i18n coverage gate: any CJK string literal in core/src or
+# linux/src that is not wrapped for gettext fails this test.
+python3 = find_program('python3', required: false)
+if python3.found()
+    test('i18n-coverage', python3,
+         args: [files('scripts/check-i18n.py'), meson.project_source_root()],
+         suite: 'lint')
+endif
+
 if get_option('server')
     subdir('server')
 endif

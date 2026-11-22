@@ -3,6 +3,7 @@
 
 #include <harbor/ssh.h>
 #include <string.h>
+#include <glib/gi18n.h>
 
 /* 连接视图（从 hb-ssh-page 抽出，纯展示，行为原样）：
  * avatar 头 + 3 节点 stepper + 阶段日志 + 错误卡 + Close/Start over。 */
@@ -115,7 +116,7 @@ void hb_connect_view_error(HbConnectView *v, const char *msg,
     gtk_widget_set_size_request(card, 430, -1);
 
     markup = g_markup_printf_escaped("<b>%s</b>",
-                                     msg ? msg : "连接失败");
+                                     msg ? msg : _("连接失败"));
     title = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(title), markup);
     g_free(markup);
@@ -125,14 +126,14 @@ void hb_connect_view_error(HbConnectView *v, const char *msg,
 
     if (code == HB_SSH_ERR_HOSTKEY_CHANGED) {
         GtkWidget *w = gtk_label_new(
-            "为安全起见已阻断连接 —— 主机密钥与本地记录不符。");
+            _("为安全起见已阻断连接 —— 主机密钥与本地记录不符。"));
         gtk_widget_add_css_class(w, "hb-red");
         gtk_label_set_wrap(GTK_LABEL(w), TRUE);
         gtk_label_set_xalign(GTK_LABEL(w), 0);
         gtk_box_append(GTK_BOX(card), w);
     }
     if (detail && *detail) {
-        GtkWidget *exp = gtk_expander_new("技术详情");
+        GtkWidget *exp = gtk_expander_new(_("技术详情"));
         GtkWidget *dl = gtk_label_new(detail);
         gtk_label_set_wrap(GTK_LABEL(dl), TRUE);
         gtk_label_set_xalign(GTK_LABEL(dl), 0);
@@ -144,19 +145,19 @@ void hb_connect_view_error(HbConnectView *v, const char *msg,
     foot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(foot, GTK_ALIGN_END);
     {
-        GtkWidget *c = gtk_button_new_with_label("Close");
+        GtkWidget *c = gtk_button_new_with_label(_("Close"));
         gtk_widget_add_css_class(c, "hb-btn");
         g_signal_connect(c, "clicked", G_CALLBACK(on_err_close), v);
         gtk_box_append(GTK_BOX(foot), c);
     }
     if (v->show_edit) {
-        GtkWidget *e = gtk_button_new_with_label("编辑主机");
+        GtkWidget *e = gtk_button_new_with_label(_("编辑主机"));
         gtk_widget_add_css_class(e, "hb-btn");
         g_signal_connect(e, "clicked", G_CALLBACK(on_err_edit), v);
         gtk_box_append(GTK_BOX(foot), e);
     }
     {
-        GtkWidget *r = gtk_button_new_with_label("重试");
+        GtkWidget *r = gtk_button_new_with_label(_("重试"));
         gtk_widget_add_css_class(r, "hb-btn");
         gtk_widget_add_css_class(r, "primary");
         g_signal_connect(r, "clicked", G_CALLBACK(on_err_retry), v);
@@ -224,7 +225,7 @@ static void on_hide_log(GtkButton *b, gpointer ud)
 {
     HbConnectView *v = ud;
     v->hide_log = !v->hide_log;
-    gtk_button_set_label(b, v->hide_log ? "Show logs" : "Hide logs");
+    gtk_button_set_label(b, v->hide_log ? _("Show logs") : _("Hide logs"));
     gtk_widget_set_visible(v->log_scroll, !v->hide_log);
 }
 
@@ -265,7 +266,7 @@ static void hb_connect_view_init(HbConnectView *v)
         gtk_widget_set_hexpand(sp, TRUE);
         gtk_box_append(GTK_BOX(head), sp);
     }
-    v->hide_btn = gtk_button_new_with_label("Hide logs");
+    v->hide_btn = gtk_button_new_with_label(_("Hide logs"));
     gtk_widget_add_css_class(v->hide_btn, "hb-btn");
     gtk_widget_add_css_class(v->hide_btn, "sm");
     gtk_widget_set_valign(v->hide_btn, GTK_ALIGN_CENTER);
@@ -321,13 +322,13 @@ static void hb_connect_view_init(HbConnectView *v)
     gtk_widget_set_halign(foot, GTK_ALIGN_CENTER);
     gtk_widget_set_margin_top(foot, 18);
     {
-        GtkWidget *c = gtk_button_new_with_label("Close");
+        GtkWidget *c = gtk_button_new_with_label(_("Close"));
         gtk_widget_add_css_class(c, "hb-btn");
         g_signal_connect(c, "clicked", G_CALLBACK(on_foot_close), v);
         gtk_box_append(GTK_BOX(foot), c);
     }
     {
-        GtkWidget *r = gtk_button_new_with_label("Start over");
+        GtkWidget *r = gtk_button_new_with_label(_("Start over"));
         gtk_widget_add_css_class(r, "hb-btn");
         gtk_widget_add_css_class(r, "primary");
         g_signal_connect(r, "clicked", G_CALLBACK(on_foot_retry), v);

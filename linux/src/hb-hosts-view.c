@@ -11,6 +11,7 @@
 #include <harbor/hostio.h>
 
 #include <stdio.h>
+#include <glib/gi18n.h>
 
 /* ------------------------- HbHostItem（GObject 包装 hb_obj） ------------------------- */
 
@@ -497,7 +498,7 @@ static void on_card_right(GtkGestureClick *g, int n_press,
     select_card(hv, hid);
 
     m = g_menu_new();
-    it = g_menu_item_new("连接", NULL);
+    it = g_menu_item_new(_("连接"), NULL);
     g_menu_item_set_action_and_target_value(it, "host.connect",
         g_variant_new_string(hid));
     g_menu_append_item(m, it);
@@ -507,17 +508,17 @@ static void on_card_right(GtkGestureClick *g, int n_press,
         g_variant_new_string(hid));
     g_menu_append_item(m, it);
     g_object_unref(it);
-    it = g_menu_item_new("编辑", NULL);
+    it = g_menu_item_new(_("编辑"), NULL);
     g_menu_item_set_action_and_target_value(it, "host.edit",
         g_variant_new_string(hid));
     g_menu_append_item(m, it);
     g_object_unref(it);
-    it = g_menu_item_new("复制", NULL);
+    it = g_menu_item_new(_("复制"), NULL);
     g_menu_item_set_action_and_target_value(it, "host.dup",
         g_variant_new_string(hid));
     g_menu_append_item(m, it);
     g_object_unref(it);
-    it = g_menu_item_new("删除", NULL);
+    it = g_menu_item_new(_("删除"), NULL);
     g_menu_item_set_action_and_target_value(it, "host.del",
         g_variant_new_string(hid));
     g_menu_append_item(m, it);
@@ -620,7 +621,7 @@ static void on_new_group_done(const char *text, gpointer ud)
 static void act_newgroup(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    hb_dialog_prompt(GTK_WIDGET(ud), "新建分组", "分组名称", NULL,
+    hb_dialog_prompt(GTK_WIDGET(ud), _("新建分组"), _("分组名称"), NULL,
                      on_new_group_done, ud);
 }
 
@@ -755,14 +756,14 @@ static void host_sub(const HbHostItem *h, char *buf, size_t buflen)
 {
     size_t off = 0;
     if (h->via && *h->via) {
-        off = (size_t)snprintf(buf, buflen, "%s · 经由 %s 隧道",
+        off = (size_t)snprintf(buf, buflen, _("%s · 经由 %s 隧道"),
                                h->proto ? h->proto : "",
                                h->via_name ? h->via_name : "?");
     } else if (h->local) {
         const char *sh = g_getenv("SHELL");
         const char *base = sh ? g_strrstr(sh, "/") : NULL;
         base = base ? base + 1 : (sh && *sh ? sh : "sh");
-        off = (size_t)snprintf(buf, buflen, "本机 shell · %s", base);
+        off = (size_t)snprintf(buf, buflen, _("本机 shell · %s"), base);
     } else {
         off = (size_t)snprintf(buf, buflen, "%s, %s",
                                h->proto ? h->proto : "",
@@ -831,7 +832,7 @@ static GtkWidget *card_shell(void)
 
     gtk_widget_add_css_class(go, "hb-card-go");
     gtk_widget_set_valign(go, GTK_ALIGN_CENTER);
-    gtk_widget_set_tooltip_text(go, "连接");
+    gtk_widget_set_tooltip_text(go, _("连接"));
     gtk_button_set_child(GTK_BUTTON(go), hb_icon_new("chev", 15));
     gtk_widget_set_visible(go, FALSE);         /* hover 显示 */
     gtk_box_append(GTK_BOX(card), go);
@@ -881,9 +882,9 @@ static void card_bind(HbHostsView *hv, GtkWidget *card, HbHostItem *h)
     while ((ch = gtk_widget_get_first_child(tags)))
         gtk_box_remove(GTK_BOX(tags), ch);
     if (h->tun)
-        gtk_box_append(GTK_BOX(tags), tag_lbl("SSH 隧道", TRUE));
+        gtk_box_append(GTK_BOX(tags), tag_lbl(_("SSH 隧道"), TRUE));
     if (h->local)
-        gtk_box_append(GTK_BOX(tags), tag_lbl("本地", TRUE));
+        gtk_box_append(GTK_BOX(tags), tag_lbl(_("本地"), TRUE));
 
     host_sub(h, subbuf, sizeof subbuf);
     gtk_label_set_label(GTK_LABEL(sub), subbuf);
@@ -961,19 +962,19 @@ static GtkWidget *row_shell(void)
     bc = gtk_button_new();
     gtk_widget_add_css_class(bc, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(bc), hb_icon_new("chev", 13));
-    gtk_widget_set_tooltip_text(bc, "连接");
+    gtk_widget_set_tooltip_text(bc, _("连接"));
     g_signal_connect(bc, "clicked", G_CALLBACK(on_row_btn), "connect");
     gtk_box_append(GTK_BOX(act), bc);
     be = gtk_button_new();
     gtk_widget_add_css_class(be, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(be), hb_icon_new("pencil", 13));
-    gtk_widget_set_tooltip_text(be, "编辑");
+    gtk_widget_set_tooltip_text(be, _("编辑"));
     g_signal_connect(be, "clicked", G_CALLBACK(on_row_btn), "edit");
     gtk_box_append(GTK_BOX(act), be);
     bd = gtk_button_new();
     gtk_widget_add_css_class(bd, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(bd), hb_icon_new("trash", 13));
-    gtk_widget_set_tooltip_text(bd, "删除");
+    gtk_widget_set_tooltip_text(bd, _("删除"));
     g_signal_connect(bd, "clicked", G_CALLBACK(on_row_btn), "del");
     gtk_box_append(GTK_BOX(act), bd);
     gtk_box_append(GTK_BOX(row), act);
@@ -1084,7 +1085,7 @@ static gboolean chip_drop(GtkDropTarget *t, const GValue *v,
     hb_obj_set_str(o, "group", grp);
     hb_vault_put(hb_store_vault(hv->store), o);
     hb_obj_free(o);
-    toast = g_strdup_printf("已移到分组「%s」", grp);
+    toast = g_strdup_printf(_("已移到分组「%s」"), grp);
     hb_toast(GTK_WIDGET(hv), toast);
     g_free(toast);
     return TRUE;
@@ -1124,7 +1125,7 @@ static void rebuild_chips(HbHostsView *hv)
         gtk_box_remove(GTK_BOX(hv->chiprow), ch);
 
     {
-        GtkWidget *b = chip_btn(hv, "全部", NULL);
+        GtkWidget *b = chip_btn(hv, _("全部"), NULL);
         if (!hv->chip) gtk_widget_add_css_class(b, "on");
         gtk_box_append(GTK_BOX(hv->chiprow), b);
     }
@@ -1163,7 +1164,7 @@ static void rebuild_chips(HbHostsView *hv)
     g_ptr_array_unref(groups);
 
     {
-        GtkWidget *b = chip_btn(hv, "SSH 隧道", "tun");
+        GtkWidget *b = chip_btn(hv, _("SSH 隧道"), "tun");
         if (g_strcmp0(hv->chip, "tun") == 0)
             gtk_widget_add_css_class(b, "on");
         gtk_box_append(GTK_BOX(hv->chiprow), b);
@@ -1215,7 +1216,7 @@ static void imp_toast_result(HbHostsView *hv, hb_import_result *r)
     u->ids = g_new0(char *, u->n + 1);
     for (size_t i = 0; i < u->n; i++)
         u->ids[i] = g_strdup(r->created_ids[i]);
-    t = g_strdup_printf("已导入 %u 台主机（新建跳板 %u 台，跳过 %u 台）",
+    t = g_strdup_printf(ngettext("已导入 %u 台主机（新建跳板 %u 台，跳过 %u 台）", "已导入 %u 台主机（新建跳板 %u 台，跳过 %u 台）", r->created),
                         (unsigned)r->created, (unsigned)r->jumps_created,
                         (unsigned)r->skipped);
     {
@@ -1238,7 +1239,7 @@ static void imp_do(ImpUd *u)
     hb_err e = hb_hosts_import_sshcfg(hb_store_vault(u->hv->store),
                                       u->cfg, &r);
     if (e != HB_OK) {
-        hb_toast(GTK_WIDGET(u->hv), "导入失败");
+        hb_toast(GTK_WIDGET(u->hv), _("导入失败"));
     } else {
         imp_toast_result(u->hv, &r);
         if (r.nwarn) {
@@ -1247,7 +1248,7 @@ static void imp_do(ImpUd *u)
             for (size_t i = 0; i < r.nwarn && i < 20; i++)
                 g_string_append_printf(w, "%s\n", r.warnings[i]);
             /* 警告含文件路径/主机名 —— 纯文本对话框，不解析 markup */
-            hb_dialog_text(GTK_WIDGET(u->hv), "导入警告", w->str);
+            hb_dialog_text(GTK_WIDGET(u->hv), _("导入警告"), w->str);
             g_string_free(w, TRUE);
         }
     }
@@ -1277,7 +1278,7 @@ static void imp_build_preview(ImpUd *u)
                 { nskip++; break; }
         }
 
-    t = g_strdup_printf("发现 %u 个 Host（%u 个已存在，将跳过）",
+    t = g_strdup_printf(ngettext("发现 %u 个 Host（%u 个已存在，将跳过）", "发现 %u 个 Host（%u 个已存在，将跳过）", c->n),
                         (unsigned)c->n, (unsigned)nskip);
     sum = gtk_label_new(t);
     g_free(t);
@@ -1301,7 +1302,7 @@ static void imp_build_preview(ImpUd *u)
         gtk_widget_add_css_class(w, "hb-imp-row");
         gtk_box_append(GTK_BOX(list), w);
         if (h->proxy_jump) {
-            GString *j = g_string_new("    跳板: ");
+            GString *j = g_string_new(_("    跳板: "));
             for (size_t k = 0; h->proxy_jump[k]; k++) {
                 if (k) g_string_append(j, " → ");
                 g_string_append(j, h->proxy_jump[k]);
@@ -1314,7 +1315,7 @@ static void imp_build_preview(ImpUd *u)
         }
         if (h->identity_file) {
             const char *base = strrchr(h->identity_file, '/');
-            char *il = g_strdup_printf("    密钥: %s",
+            char *il = g_strdup_printf(_("    密钥: %s"),
                                        base ? base + 1 : h->identity_file);
             w = gtk_label_new(il);
             g_free(il);
@@ -1328,7 +1329,7 @@ static void imp_build_preview(ImpUd *u)
     if (c->nwarn) {
         GtkWidget *exp = gtk_expander_new(NULL);
         GtkWidget *wb = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-        char *et = g_strdup_printf("警告（%u）", (unsigned)c->nwarn);
+        char *et = g_strdup_printf(_("警告（%u）"), (unsigned)c->nwarn);
         gtk_expander_set_label(GTK_EXPANDER(exp), et);
         g_free(et);
         for (i = 0; i < c->nwarn; i++) {
@@ -1348,7 +1349,7 @@ static void imp_build_preview(ImpUd *u)
     while ((ch = gtk_widget_get_first_child(f)))
         gtk_box_remove(GTK_BOX(f), ch);
     {
-        GtkWidget *other = gtk_button_new_with_label("选择其它文件…");
+        GtkWidget *other = gtk_button_new_with_label(_("选择其它文件…"));
         gtk_widget_add_css_class(other, "hb-btn");
         g_signal_connect(other, "clicked",
                          G_CALLBACK(on_imp_pick_other), u);
@@ -1360,11 +1361,11 @@ static void imp_build_preview(ImpUd *u)
         gtk_widget_set_hexpand(sp, TRUE);
         gtk_box_append(GTK_BOX(f), sp);
     }
-    cancel = gtk_button_new_with_label("取消");
+    cancel = gtk_button_new_with_label(_("取消"));
     gtk_widget_add_css_class(cancel, "hb-btn");
     g_signal_connect(cancel, "clicked", G_CALLBACK(on_imp_cancel), u);
     gtk_box_append(GTK_BOX(f), cancel);
-    t = g_strdup_printf("导入 %u 台", (unsigned)(c->n - nskip));
+    t = g_strdup_printf(ngettext("导入 %u 台", "导入 %u 台", c->n - nskip), (unsigned)(c->n - nskip));
     ok = gtk_button_new_with_label(t);
     g_free(t);
     gtk_widget_add_css_class(ok, "hb-btn");
@@ -1390,7 +1391,7 @@ static void imp_set_file(ImpUd *u, const char *path)
     hb_sshcfg tmp = {0};
     if (u->cfg) { hb_sshcfg_free(u->cfg); u->cfg = NULL; }
     if (hb_sshcfg_parse_file(path, &tmp) != HB_OK) {
-        hb_toast(GTK_WIDGET(u->hv), "无法解析该 ssh_config 文件");
+        hb_toast(GTK_WIDGET(u->hv), _("无法解析该 ssh_config 文件"));
         return;
     }
     u->cfg = g_new0(hb_sshcfg, 1);
@@ -1434,7 +1435,7 @@ static void act_import_cfg(GSimpleAction *a, GVariant *p, gpointer ud)
 
     u = g_new0(ImpUd, 1);
     u->hv = hv;
-    u->dlg = hb_modal_new("从 ssh_config 导入", &body, &foot);
+    u->dlg = hb_modal_new(_("从 ssh_config 导入"), &body, &foot);
     u->body = body;
     /* footer 容器（imp_build_preview 里重建按钮） */
     footbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -1483,11 +1484,11 @@ static void exp_save_done(GObject *src, GAsyncResult *res, gpointer ud)
         !json ||
         !g_file_replace_contents(gf, json, strlen(json), NULL, FALSE,
                                  G_FILE_CREATE_NONE, NULL, NULL, &err)) {
-        hb_toast(GTK_WIDGET(hv), "导出失败");
+        hb_toast(GTK_WIDGET(hv), _("导出失败"));
         if (err) g_error_free(err);
     } else {
         objs = hb_store_list(hv->store, "host", &n);
-        t = g_strdup_printf("已导出 %u 台主机（不含密码与私钥）", (unsigned)n);
+        t = g_strdup_printf(ngettext("已导出 %u 台主机（不含密码与私钥）", "已导出 %u 台主机（不含密码与私钥）", n), (unsigned)n);
         hb_toast(GTK_WIDGET(hv), t);
         g_free(t);
         if (objs) hb_obj_list_free(objs, n);
@@ -1534,7 +1535,7 @@ static void json_show_warnings(gpointer ud)
     size_t i;
     for (i = 0; i < j->res.nwarn; i++)
         g_string_append_printf(w, "%s\n", j->res.warnings[i]);
-    hb_dialog_text(GTK_WIDGET(j->hv), "导入警告", w->str);
+    hb_dialog_text(GTK_WIDGET(j->hv), _("导入警告"), w->str);
     g_string_free(w, TRUE);
 }
 
@@ -1545,18 +1546,18 @@ static void json_import_text(HbHostsView *hv, const char *text)
     j->hv = hv;
     if (hb_hosts_import_json(hb_store_vault(hv->store), text,
                              &j->res) != HB_OK) {
-        hb_toast(GTK_WIDGET(hv), "不是有效的 Harbor 主机文件");
+        hb_toast(GTK_WIDGET(hv), _("不是有效的 Harbor 主机文件"));
         g_free(j);
         return;
     }
-    t = g_strdup_printf("已导入 %u 台主机（跳过 %u 台）",
+    t = g_strdup_printf(ngettext("已导入 %u 台主机（跳过 %u 台）", "已导入 %u 台主机（跳过 %u 台）", j->res.created),
                         (unsigned)j->res.created,
                         (unsigned)j->res.skipped);
     if (j->res.nwarn) {
         GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(hv));
         if (HB_IS_WINDOW(root)) {
             /* 查看 → warnings dialog；结果对象随回调保留 */
-            hb_window_toast_action(HB_WINDOW(root), t, "查看", 9,
+            hb_window_toast_action(HB_WINDOW(root), t, _("查看"), 9,
                                    G_CALLBACK(json_show_warnings), j);
             /* 撤销需要单独一份 ids（res 归 j 管） */
             {
@@ -1568,7 +1569,7 @@ static void json_import_text(HbHostsView *hv, const char *text)
                     u->ids[i] = g_strdup(j->res.created_ids[i]);
                 /* 查看按钮已占用 toast 按钮；撤销靠第二个 toast */
                 hb_window_toast_undo(HB_WINDOW(root),
-                                     "撤销导入？", G_CALLBACK(imp_undo), u);
+                                     _("撤销导入？"), G_CALLBACK(imp_undo), u);
             }
         } else {
             hb_toast(GTK_WIDGET(hv), t);
@@ -1595,7 +1596,7 @@ static void json_open_done(GObject *src, GAsyncResult *res, gpointer ud)
     if (g_file_load_contents(gf, NULL, &text, &len, NULL, NULL) && text)
         json_import_text(hv, text);
     else
-        hb_toast(GTK_WIDGET(hv), "不是有效的 Harbor 主机文件");
+        hb_toast(GTK_WIDGET(hv), _("不是有效的 Harbor 主机文件"));
     g_free(text);
     g_object_unref(gf);
 }
@@ -1813,8 +1814,8 @@ static GtkWidget *build_quickbar(HbHostsView *hv)
     {
         GtkWidget *kb = gtk_button_new();
         gtk_widget_add_css_class(kb, "kbd-btn");
-        gtk_widget_set_tooltip_text(kb, "命令面板 (Ctrl+K)");
-        kbd = gtk_label_new("Ctrl K");
+        gtk_widget_set_tooltip_text(kb, _("命令面板 (Ctrl+K)"));
+        kbd = gtk_label_new(_("Ctrl K"));
         gtk_widget_add_css_class(kbd, "kbd");
         gtk_button_set_child(GTK_BUTTON(kb), kbd);
         g_signal_connect(kb, "clicked",
@@ -1822,7 +1823,7 @@ static GtkWidget *build_quickbar(HbHostsView *hv)
         gtk_box_append(GTK_BOX(bar), kb);
     }
 
-    conn = gtk_button_new_with_label("Connect");
+    conn = gtk_button_new_with_label(_("Connect"));
     gtk_widget_add_css_class(conn, "hb-btn");
     gtk_widget_add_css_class(conn, "primary");
     g_signal_connect(conn, "clicked", G_CALLBACK(on_connect_clicked), hv);
@@ -1843,7 +1844,7 @@ static GtkWidget *build_toolbar(HbHostsView *hv)
     GtkWidget *newb;
     GtkWidget *sort;
     GtkWidget *spacer;
-    const char *sort_opts[] = { "按名称", "按最近连接", "按协议", NULL };
+    const char *sort_opts[] = { _("按名称"), _("按最近连接"), _("按协议"), NULL };
 
     /* New host 分割按钮：主键 → 表单；▾ → 分组/导入/导出 */
     {
@@ -1851,7 +1852,7 @@ static GtkWidget *build_toolbar(HbHostsView *hv)
         GtkWidget *menub = gtk_menu_button_new();
         GMenu *m = g_menu_new();
         gtk_widget_add_css_class(split, "linked");
-        newb = gtk_button_new_with_label("New host");
+        newb = gtk_button_new_with_label(_("New host"));
         gtk_widget_add_css_class(newb, "hb-btn");
         gtk_widget_add_css_class(newb, "primary");
         g_signal_connect(newb, "clicked", G_CALLBACK(on_new_click), hv);
@@ -1859,10 +1860,10 @@ static GtkWidget *build_toolbar(HbHostsView *hv)
         gtk_menu_button_set_label(GTK_MENU_BUTTON(menub), "▾");
         gtk_widget_add_css_class(menub, "hb-btn");
         gtk_widget_add_css_class(menub, "primary");
-        g_menu_append(m, "新建分组…", "host.newgroup");
-        g_menu_append(m, "从 ~/.ssh/config 导入…", "host.importcfg");
-        g_menu_append(m, "导入 JSON…", "host.importjson");
-        g_menu_append(m, "导出 JSON…", "host.exportjson");
+        g_menu_append(m, _("新建分组…"), "host.newgroup");
+        g_menu_append(m, _("从 ~/.ssh/config 导入…"), "host.importcfg");
+        g_menu_append(m, _("导入 JSON…"), "host.importjson");
+        g_menu_append(m, _("导出 JSON…"), "host.exportjson");
         gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menub),
                                        G_MENU_MODEL(m));
         g_object_unref(m);
@@ -1876,7 +1877,7 @@ static GtkWidget *build_toolbar(HbHostsView *hv)
 
     sort = gtk_drop_down_new_from_strings(sort_opts);
     gtk_widget_add_css_class(sort, "hb-sortsel");
-    gtk_widget_set_tooltip_text(sort, "排序");
+    gtk_widget_set_tooltip_text(sort, _("排序"));
     gtk_drop_down_set_selected(GTK_DROP_DOWN(sort), hv->sort_mode);
     g_signal_connect(sort, "notify::selected",
                      G_CALLBACK(on_sort_sel), hv);
@@ -1890,13 +1891,13 @@ static GtkWidget *build_toolbar(HbHostsView *hv)
         hv->btn_grid = gtk_button_new();
         gtk_widget_add_css_class(hv->btn_grid, "hb-viewbtn");
         gtk_button_set_child(GTK_BUTTON(hv->btn_grid), hb_icon_new("grid", 15));
-        gtk_widget_set_tooltip_text(hv->btn_grid, "网格视图");
+        gtk_widget_set_tooltip_text(hv->btn_grid, _("网格视图"));
         g_signal_connect(hv->btn_grid, "clicked", G_CALLBACK(on_mode_grid), hv);
         gtk_box_append(GTK_BOX(tog), hv->btn_grid);
         hv->btn_list = gtk_button_new();
         gtk_widget_add_css_class(hv->btn_list, "hb-viewbtn");
         gtk_button_set_child(GTK_BUTTON(hv->btn_list), hb_icon_new("list", 15));
-        gtk_widget_set_tooltip_text(hv->btn_list, "列表视图");
+        gtk_widget_set_tooltip_text(hv->btn_list, _("列表视图"));
         g_signal_connect(hv->btn_list, "clicked", G_CALLBACK(on_mode_list), hv);
         gtk_box_append(GTK_BOX(tog), hv->btn_list);
         gtk_box_append(GTK_BOX(bar), tog);
@@ -1910,9 +1911,9 @@ static GtkWidget *build_empty(HbHostsView *hv)
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     GtkWidget *ico = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     GtkWidget *ic = hb_icon_new("search", 24);
-    GtkWidget *t = gtk_label_new("没有匹配的主机");
-    GtkWidget *s = gtk_label_new("试试其他关键词，或清除筛选");
-    GtkWidget *btn = gtk_button_new_with_label("清除筛选");
+    GtkWidget *t = gtk_label_new(_("没有匹配的主机"));
+    GtkWidget *s = gtk_label_new(_("试试其他关键词，或清除筛选"));
+    GtkWidget *btn = gtk_button_new_with_label(_("清除筛选"));
 
     gtk_widget_add_css_class(box, "hb-empty");
     gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
@@ -1942,9 +1943,9 @@ static GtkWidget *build_table_head(void)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     struct { const char *txt; int w; gboolean grow; } cols[] = {
-        { "名称", COL_NAME_MIN, TRUE }, { "用户", COL_USER_W, FALSE },
-        { "端口", COL_PORT_W, FALSE }, { "协议", COL_PROTO_W, FALSE },
-        { "分组", COL_GROUP_W, FALSE }, { "", COL_ACT_W, FALSE },
+        { _("名称"), COL_NAME_MIN, TRUE }, { _("用户"), COL_USER_W, FALSE },
+        { _("端口"), COL_PORT_W, FALSE }, { _("协议"), COL_PROTO_W, FALSE },
+        { _("分组"), COL_GROUP_W, FALSE }, { "", COL_ACT_W, FALSE },
     };
     int i;
     gtk_widget_add_css_class(row, "hb-table-head");

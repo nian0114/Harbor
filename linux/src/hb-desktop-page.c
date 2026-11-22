@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <glib/gi18n.h>
 
 /* ============================ 画布 ============================ */
 /* 只负责渲染：FRAME 事件标脏 + queue_draw；snapshot 时（每个 frame
@@ -279,8 +280,8 @@ static const char *quality_str(hb_rd_quality q)
 
 static const char *quality_label(hb_rd_quality q)
 {
-    return q == HB_RD_Q_FAST ? "流畅" :
-           q == HB_RD_Q_HIGH ? "高清" : "均衡";
+    return q == HB_RD_Q_FAST ? _("流畅") :
+           q == HB_RD_Q_HIGH ? _("高清") : _("均衡");
 }
 
 static hb_rd_quality quality_of(const char *s)
@@ -455,7 +456,7 @@ static gboolean bo_tick(gpointer ud)
         reconnect_now(p);
         return G_SOURCE_REMOVE;
     }
-    char *t = g_strdup_printf("连接中断 · %ds 后重连", p->countdown);
+    char *t = g_strdup_printf(_("连接中断 · %ds 后重连"), p->countdown);
     show_disc(p, t);
     g_free(t);
     return G_SOURCE_CONTINUE;
@@ -468,7 +469,7 @@ static void start_backoff(HbDesktopPage *p)
     char *t;
     p->bo_k++;
     p->countdown = d;
-    t = g_strdup_printf("连接中断 · %ds 后重连", d);
+    t = g_strdup_printf(_("连接中断 · %ds 后重连"), d);
     show_disc(p, t);
     g_free(t);
     stop_backoff(p);
@@ -483,7 +484,7 @@ static void reconnect_now(HbDesktopPage *p)
     p->gen++;
     force_close_own_dialog(p);
     p->connecting_now = TRUE;
-    show_disc(p, "正在重连…");
+    show_disc(p, _("正在重连…"));
     detach_session(p);
     start_attempt(p, TRUE);
 }
@@ -544,7 +545,7 @@ static gboolean load_host(HbDesktopPage *p, GError **err_out)
 
     if (hb_vault_get(v, p->host_id, &h) != HB_OK || !h) {
         g_set_error(err_out, g_quark_from_static_string("rd"), 1,
-                    "主机对象不存在或已删除");
+                    _("主机对象不存在或已删除"));
         return FALSE;
     }
     g_free(p->hname);
@@ -572,7 +573,7 @@ static gboolean load_host(HbDesktopPage *p, GError **err_out)
         if (hb_vault_get(v, p->via_id, &via) != HB_OK || !via) {
             hb_obj_free(h);
             g_set_error(err_out, g_quark_from_static_string("rd"), 2,
-                        "经由 SSH 主机不存在或已删除");
+                        _("经由 SSH 主机不存在或已删除"));
             return FALSE;
         }
         const char *vn = hb_obj_get_str(via, "name");
@@ -683,24 +684,24 @@ static void show_prompt(HbDesktopPage *p, int code, const char *text)
     force_close_own_dialog(p);
     d->p = p;
     d->gen = p->gen;
-    d->dlg = hb_modal_new(rdp ? "RDP 凭据" : "VNC 密码", &body, &foot);
+    d->dlg = hb_modal_new(rdp ? _("RDP 凭据") : _("VNC 密码"), &body, &foot);
     p->open_dlg = d->dlg;
 
     l = gtk_label_new(text && *text ? text :
-                      (rdp ? "远程桌面需要登录凭据"
-                           : "服务器要求 VNC 密码"));
+                      (rdp ? _("远程桌面需要登录凭据")
+                           : _("服务器要求 VNC 密码")));
     gtk_label_set_wrap(GTK_LABEL(l), TRUE);
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(body), l);
 
     if (code == 1) {
-        gtk_box_append(GTK_BOX(body), gtk_label_new("用户名"));
+        gtk_box_append(GTK_BOX(body), gtk_label_new(_("用户名")));
         d->user_e = gtk_entry_new();
         if (p->huser)
             gtk_editable_set_text(GTK_EDITABLE(d->user_e), p->huser);
         gtk_box_append(GTK_BOX(body), d->user_e);
     }
-    gtk_box_append(GTK_BOX(body), gtk_label_new("密码"));
+    gtk_box_append(GTK_BOX(body), gtk_label_new(_("密码")));
     d->pw_e = gtk_password_entry_new();
     gtk_password_entry_set_show_peek_icon(
         GTK_PASSWORD_ENTRY(d->pw_e), TRUE);
@@ -708,13 +709,13 @@ static void show_prompt(HbDesktopPage *p, int code, const char *text)
                      G_CALLBACK(rp_activate), d);
     gtk_box_append(GTK_BOX(body), d->pw_e);
     if (code == 1) {
-        gtk_box_append(GTK_BOX(body), gtk_label_new("域（可空）"));
+        gtk_box_append(GTK_BOX(body), gtk_label_new(_("域（可空）")));
         d->dom_e = gtk_entry_new();
         if (p->hdomain)
             gtk_editable_set_text(GTK_EDITABLE(d->dom_e), p->hdomain);
         gtk_box_append(GTK_BOX(body), d->dom_e);
     }
-    d->save_ck = gtk_check_button_new_with_label("保存到 Vault");
+    d->save_ck = gtk_check_button_new_with_label(_("保存到 Vault"));
     gtk_widget_add_css_class(d->save_ck, "check-row");
     gtk_widget_set_halign(d->save_ck, GTK_ALIGN_START);
     gtk_box_append(GTK_BOX(body), d->save_ck);
@@ -722,11 +723,11 @@ static void show_prompt(HbDesktopPage *p, int code, const char *text)
     f = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(f, "hb-modal-footer");
     gtk_widget_set_halign(f, GTK_ALIGN_END);
-    cancel = gtk_button_new_with_label("取消");
+    cancel = gtk_button_new_with_label(_("取消"));
     gtk_widget_add_css_class(cancel, "hb-btn");
     g_signal_connect(cancel, "clicked", G_CALLBACK(rp_cancel), d);
     gtk_box_append(GTK_BOX(f), cancel);
-    ok = gtk_button_new_with_label("连接");
+    ok = gtk_button_new_with_label(_("连接"));
     gtk_widget_add_css_class(ok, "hb-btn");
     gtk_widget_add_css_class(ok, "primary");
     g_signal_connect(ok, "clicked", G_CALLBACK(rp_ok), d);
@@ -808,8 +809,8 @@ static void show_cert(HbDesktopPage *p, int code, const char *fp,
     d->p = p;
     d->gen = p->gen;
     d->new_fp = g_strdup(fp);
-    d->dlg = hb_modal_new(changed ? "警告：远程桌面证书已变更"
-                                  : "验证远程桌面证书",
+    d->dlg = hb_modal_new(changed ? _("警告：远程桌面证书已变更")
+                                  : _("验证远程桌面证书"),
                           &body, &foot);
     p->open_dlg = d->dlg;
 
@@ -818,9 +819,9 @@ static void show_cert(HbDesktopPage *p, int code, const char *fp,
     gtk_widget_add_css_class(hb, changed ? "red" : "amber");
     gtk_box_append(GTK_BOX(hb), hb_icon_new("shield", 16));
     l = gtk_label_new(changed
-        ? "远程主机的证书与本地记录不一致。这可能是重装或配置变更，"
-          "也可能是中间人攻击——除非已带外核实，否则应断开。"
-        : "该远程桌面证书未受信任。请通过带外渠道核对指纹后再信任。");
+        ? _("远程主机的证书与本地记录不一致。这可能是重装或配置变更，"
+          "也可能是中间人攻击——除非已带外核实，否则应断开。")
+        : _("该远程桌面证书未受信任。请通过带外渠道核对指纹后再信任。"));
     gtk_label_set_wrap(GTK_LABEL(l), TRUE);
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_widget_set_hexpand(l, TRUE);
@@ -836,12 +837,12 @@ static void show_cert(HbDesktopPage *p, int code, const char *fp,
         if (hb_vault_get(hb_store_vault(p->store), p->host_id,
                          &h) == HB_OK && h)
             oldfp = hb_obj_get_str(h, "rdp_cert_fp");
-        l = gtk_label_new("旧指纹");
+        l = gtk_label_new(_("旧指纹"));
         gtk_widget_add_css_class(l, "hb-dim");
         gtk_label_set_xalign(GTK_LABEL(l), 0);
         gtk_grid_attach(GTK_GRID(grid), l, 0, 0, 1, 1);
         gtk_grid_attach(GTK_GRID(grid), code_lbl(oldfp), 1, 0, 1, 1);
-        l = gtk_label_new("新指纹");
+        l = gtk_label_new(_("新指纹"));
         gtk_widget_add_css_class(l, "hb-dim");
         gtk_label_set_xalign(GTK_LABEL(l), 0);
         gtk_grid_attach(GTK_GRID(grid), l, 0, 1, 1, 1);
@@ -863,14 +864,14 @@ static void show_cert(HbDesktopPage *p, int code, const char *fp,
     f = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(f, "hb-modal-footer");
     gtk_widget_set_halign(f, GTK_ALIGN_END);
-    cancel = gtk_button_new_with_label(changed ? "断开" : "取消");
+    cancel = gtk_button_new_with_label(changed ? _("断开") : _("取消"));
     gtk_widget_add_css_class(cancel, "hb-btn");
     if (changed)
         gtk_widget_add_css_class(cancel, "primary");
     g_signal_connect(cancel, "clicked", G_CALLBACK(rc_cancel), d);
     gtk_box_append(GTK_BOX(f), cancel);
-    ok = gtk_button_new_with_label(changed ? "我已核实，更新指纹并继续"
-                                           : "信任此证书");
+    ok = gtk_button_new_with_label(changed ? _("我已核实，更新指纹并继续")
+                                           : _("信任此证书"));
     gtk_widget_add_css_class(ok, "hb-btn");
     gtk_widget_add_css_class(ok, changed ? "danger" : "primary");
     g_signal_connect(ok, "clicked", G_CALLBACK(rc_ok), d);
@@ -917,7 +918,7 @@ static void rd_disconnect(HbDesktopPage *p)
     if (p->ever_connected)
         start_backoff(p);
     else
-        show_error(p, "连接中断", NULL);
+        show_error(p, _("连接中断"), NULL);
 }
 
 static void rd_error(HbDesktopPage *p, const hb_rd_event *ev)
@@ -929,17 +930,17 @@ static void rd_error(HbDesktopPage *p, const hb_rd_event *ev)
         rd_disconnect(p);
         break;
     case HB_RD_ERR_AUTH:
-        show_error(p, "认证失败：用户名或密码错误", ev->text2);
+        show_error(p, _("认证失败：用户名或密码错误"), ev->text2);
         break;
     case HB_RD_ERR_CERT_REJECTED:
-        show_error(p, "证书被拒绝", ev->text2);
+        show_error(p, _("证书被拒绝"), ev->text2);
         break;
     case HB_RD_ERR_CANCELLED:
-        show_error(p, "已取消", ev->text2);
+        show_error(p, _("已取消"), ev->text2);
         break;
     default:
         /* REFUSED/TIMEOUT/TLS/PROTOCOL：错误卡（可手动重试） */
-        show_error(p, ev->text ? ev->text : "连接失败", ev->text2);
+        show_error(p, ev->text ? ev->text : _("连接失败"), ev->text2);
         break;
     }
 }
@@ -1070,7 +1071,7 @@ static void start_rd(HbDesktopPage *p, const char *host, int port)
     if (sec) hb_secret_free(sec);
     g_free(cfg);
     if (!p->rd) {
-        show_error(p, "无法创建远程桌面会话", NULL);
+        show_error(p, _("无法创建远程桌面会话"), NULL);
         return;
     }
     p->rd_live = TRUE;
@@ -1099,13 +1100,13 @@ static gboolean tun_ev_cb(int fd, GIOCondition cond, gpointer ud)
                                                 : p->haddr;
                 p->bound_port = ev.pf->bound_port;
                 line = g_strdup_printf(
-                    "开通 Local 转发 127.0.0.1:%d → %s:%d",
+                    _("开通 Local 转发 127.0.0.1:%d → %s:%d"),
                     p->bound_port, dest, p->hport);
                 hb_connect_view_stage(HB_CONNECT_VIEW(p->conn_view),
                                       3, line, ' ');
                 g_free(line);
                 banner_refresh(p);
-                line = g_strdup_printf("%s 握手中…",
+                line = g_strdup_printf(_("%s 握手中…"),
                     !strcmp(p->proto, "rdp") ? "RDP" : "VNC");
                 hb_connect_view_stage(HB_CONNECT_VIEW(p->conn_view),
                                       4, line, ' ');
@@ -1153,7 +1154,7 @@ static void on_tun_failed(HbConnCtl *c, int code, const char *title,
     (void)c; (void)code;
     /* 隧道侧失败一律不重试：错误卡 + 重试/编辑主机 */
     show_error(p, title,
-               details && *details ? details : "连接失败");
+               details && *details ? details : _("连接失败"));
 }
 
 static void on_tun_disconn(HbConnCtl *c, gpointer ud)
@@ -1163,7 +1164,7 @@ static void on_tun_disconn(HbConnCtl *c, gpointer ud)
     if (p->ever_connected)
         start_backoff(p);
     else
-        show_error(p, "SSH 隧道断开", NULL);
+        show_error(p, _("SSH 隧道断开"), NULL);
 }
 
 static void on_tun_connected(HbConnCtl *c, gpointer ud)
@@ -1199,18 +1200,18 @@ static void start_attempt(HbDesktopPage *p, gboolean is_reconnect)
     tab_dot(p, NULL);
 
     if (!load_host(p, &err)) {
-        show_error(p, err ? err->message : "主机配置错误", NULL);
+        show_error(p, err ? err->message : _("主机配置错误"), NULL);
         g_clear_error(&err);
         return;
     }
     hb_connect_view_set_head(HB_CONNECT_VIEW(p->conn_view), "monitor",
         p->hname,
         p->use_tunnel ? (strcmp(p->proto, "rdp")
-            ? "VNC · 经由 SSH 隧道" : "RDP · 经由 SSH 隧道")
+            ? _("VNC · 经由 SSH 隧道") : _("RDP · 经由 SSH 隧道"))
                       : (strcmp(p->proto, "rdp") ? "VNC" : "RDP"));
 
     if (!p->use_tunnel) {
-        char *line = g_strdup_printf("正在连接 %s:%d…",
+        char *line = g_strdup_printf(_("正在连接 %s:%d…"),
                                      p->haddr, p->hport);
         hb_connect_view_stage(HB_CONNECT_VIEW(p->conn_view),
                               0, line, ' ');
@@ -1278,8 +1279,8 @@ static void on_quality_check(GtkCheckButton *b, gpointer ud)
             w = page_win(p);
             if (w)
                 hb_window_toast_action2(
-                    w, "RDP 画质将在重连后生效",
-                    "立即重连", 9,
+                    w, _("RDP 画质将在重连后生效"),
+                    _("立即重连"), 9,
                     (GCallback)rd_reconnect_toast_cb,
                     (GDestroyNotify)g_object_unref,
                     g_object_ref(p));   /* toast 可能比页面活得久 */
@@ -1641,28 +1642,28 @@ static GtkWidget *build_menu(HbDesktopPage *p)
     gtk_widget_set_margin_top(vb, 6);
     gtk_widget_set_margin_bottom(vb, 6);
 
-    b = gtk_button_new_with_label("发送 Ctrl+Alt+Del");
+    b = gtk_button_new_with_label(_("发送 Ctrl+Alt+Del"));
     gtk_widget_add_css_class(b, "hb-pop-btn");
     g_signal_connect(b, "clicked", G_CALLBACK(on_menu_cad), p);
     gtk_box_append(GTK_BOX(vb), b);
 
-    b = gtk_button_new_with_label("发送 Win");
+    b = gtk_button_new_with_label(_("发送 Win"));
     gtk_widget_add_css_class(b, "hb-pop-btn");
     g_signal_connect(b, "clicked", G_CALLBACK(on_menu_win), p);
     gtk_box_append(GTK_BOX(vb), b);
 
-    b = gtk_check_button_new_with_label("只读观看");
+    b = gtk_check_button_new_with_label(_("只读观看"));
     gtk_widget_add_css_class(b, "check-row");
     g_signal_connect(b, "toggled", G_CALLBACK(on_ro_toggle), p);
     gtk_box_append(GTK_BOX(vb), b);
 
-    b = gtk_check_button_new_with_label("适应窗口（取消=原始大小）");
+    b = gtk_check_button_new_with_label(_("适应窗口（取消=原始大小）"));
     gtk_widget_add_css_class(b, "check-row");
     gtk_check_button_set_active(GTK_CHECK_BUTTON(b), TRUE);
     g_signal_connect(b, "toggled", G_CALLBACK(on_fit_toggle), p);
     gtk_box_append(GTK_BOX(vb), b);
 
-    b = gtk_check_button_new_with_label("快捷键透传");
+    b = gtk_check_button_new_with_label(_("快捷键透传"));
     gtk_widget_add_css_class(b, "check-row");
     g_signal_connect(b, "toggled", G_CALLBACK(on_pass_toggle), p);
     gtk_box_append(GTK_BOX(vb), b);
@@ -1688,12 +1689,12 @@ static GtkWidget *build_banner(HbDesktopPage *p)
                           PANGO_ELLIPSIZE_MIDDLE);
     gtk_box_append(GTK_BOX(bar), p->banner_lbl);
 
-    p->pass_hint = gtk_label_new("快捷键透传中");
+    p->pass_hint = gtk_label_new(_("快捷键透传中"));
     gtk_widget_add_css_class(p->pass_hint, "hb-rd-hint");
     gtk_widget_set_visible(p->pass_hint, FALSE);
     gtk_box_append(GTK_BOX(bar), p->pass_hint);
 
-    p->ro_pill = gtk_label_new("只读");
+    p->ro_pill = gtk_label_new(_("只读"));
     gtk_widget_add_css_class(p->ro_pill, "hb-tag");
     gtk_widget_set_visible(p->ro_pill, FALSE);
     gtk_box_append(GTK_BOX(bar), p->ro_pill);
@@ -1713,7 +1714,7 @@ static GtkWidget *build_banner(HbDesktopPage *p)
         gtk_widget_add_css_class(p->q_mb, "tbtn");
         gtk_menu_button_set_label(GTK_MENU_BUTTON(p->q_mb),
                                   quality_label(p->quality));
-        gtk_widget_set_tooltip_text(p->q_mb, "画质档位");
+        gtk_widget_set_tooltip_text(p->q_mb, _("画质档位"));
         pop = gtk_popover_new();
         vb = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
         gtk_widget_set_margin_start(vb, 8);
@@ -1751,7 +1752,7 @@ static GtkWidget *build_banner(HbDesktopPage *p)
         gtk_box_append(GTK_BOX(bar), mb);
     }
 
-    b = gtk_button_new_with_label("断开");
+    b = gtk_button_new_with_label(_("断开"));
     gtk_widget_add_css_class(b, "hb-btn");
     gtk_widget_add_css_class(b, "sm");
     g_signal_connect(b, "clicked", G_CALLBACK(on_disconnect), p);
@@ -1765,13 +1766,13 @@ static void banner_refresh(HbDesktopPage *p)
     if (p->use_tunnel) {
         const char *dest = p->via_same ? "127.0.0.1" : p->haddr;
         t = g_strdup_printf(
-            "经由 %s@%s SSH 隧道 · 127.0.0.1:%d → 目标 %s:%d · "
-            "目标服务未暴露公网",
+            _("经由 %s@%s SSH 隧道 · 127.0.0.1:%d → 目标 %s:%d · "
+            "目标服务未暴露公网"),
             p->via_user && *p->via_user ? p->via_user : "?",
             p->via_name ? p->via_name : "?",
             p->bound_port, dest, p->hport);
     } else {
-        t = g_strdup_printf("直连 %s:%d", p->haddr, p->hport);
+        t = g_strdup_printf(_("直连 %s:%d"), p->haddr, p->hport);
     }
     gtk_label_set_label(GTK_LABEL(p->banner_lbl), t);
     g_free(t);
@@ -1816,16 +1817,16 @@ static void build_desktop_view(HbDesktopPage *p, GtkWidget *box)
         GtkWidget *db = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
         GtkWidget *br = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         GtkWidget *bn;
-        p->disc_lbl = gtk_label_new("连接中断");
+        p->disc_lbl = gtk_label_new(_("连接中断"));
         gtk_widget_add_css_class(p->disc_lbl, "hb-rd-disc");
         gtk_box_append(GTK_BOX(db), p->disc_lbl);
-        bn = gtk_button_new_with_label("立即重连");
+        bn = gtk_button_new_with_label(_("立即重连"));
         gtk_widget_add_css_class(bn, "hb-btn");
         gtk_widget_add_css_class(bn, "primary");
         g_signal_connect(bn, "clicked",
                          G_CALLBACK(on_reconn_btn), p);
         gtk_box_append(GTK_BOX(br), bn);
-        bn = gtk_button_new_with_label("关闭");
+        bn = gtk_button_new_with_label(_("关闭"));
         gtk_widget_add_css_class(bn, "hb-btn");
         g_signal_connect(bn, "clicked",
                          G_CALLBACK(on_disc_close_btn), p);

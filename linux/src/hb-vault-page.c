@@ -12,18 +12,19 @@
 #include "hb-share-view.h"
 
 #include <stdio.h>
+#include <glib/gi18n.h>
 
 /* 与 prototype SECTIONS 顺序/标签一致；icon 为 P 表键，"{ }" 走 mono glyph */
 static const struct { const char *id, *label, *icon, *fr; } SECTIONS[] = {
-    { "hosts",       "Hosts",          "grid",      NULL     },
-    { "keys",        "Keychain",       "key",       "FR-04"  },
-    { "fwd",         "Port Forwarding","fwd",       "FR-11"  },
-    { "snippets",    "Snippets",       "{ }",       "FR-17"  },
-    { "known_hosts", "Known Hosts",    "shield",    "FR-05"  },
-    { "logs",        "Logs",           "clock",     "FR-16"  },
-    { "share",       "共享会话",        "broadcast", "FR-14"  },
-    { "appearance",  "外观与终端",      "palette",   "FR-13"  },
-    { "account",     "账号与同步",      "cloud",     "FR-19"  },
+    { "hosts",       N_("Hosts"),          "grid",      NULL     },
+    { "keys",        N_("Keychain"),       "key",       "FR-04"  },
+    { "fwd",         N_("Port Forwarding"),"fwd",       "FR-11"  },
+    { "snippets",    N_("Snippets"),       "{ }",       "FR-17"  },
+    { "known_hosts", N_("Known Hosts"),    "shield",    "FR-05"  },
+    { "logs",        N_("Logs"),           "clock",     "FR-16"  },
+    { "share",       N_("共享会话"),        "broadcast", "FR-14"  },
+    { "appearance",  N_("外观与终端"),      "palette",   "FR-13"  },
+    { "account",     N_("账号与同步"),      "cloud",     "FR-19"  },
 };
 #define N_SECTIONS (sizeof(SECTIONS) / sizeof(SECTIONS[0]))
 
@@ -71,7 +72,7 @@ static GtkWidget *empty_page(const char *id, const char *label,
     gtk_widget_add_css_class(t, "hb-e-title");
     gtk_box_append(GTK_BOX(box), t);
 
-    snprintf(sub, sizeof sub, "%s · 该功能将在后续迭代中实现", fr);
+    snprintf(sub, sizeof sub, _("%s · 该功能将在后续迭代中实现"), fr);
     s = gtk_label_new(sub);
     gtk_widget_add_css_class(s, "hb-e-sub");
     gtk_box_append(GTK_BOX(box), s);
@@ -146,7 +147,7 @@ static GtkWidget *build_sidebar(HbVaultPage *vp)
             gtk_box_append(GTK_BOX(slot), ic);
             gtk_box_append(GTK_BOX(row), slot);
         }
-        gtk_box_append(GTK_BOX(row), gtk_label_new(SECTIONS[i].label));
+        gtk_box_append(GTK_BOX(row), gtk_label_new(_(SECTIONS[i].label)));
         gtk_button_set_child(GTK_BUTTON(btn), row);
         g_object_set_data(G_OBJECT(btn), "sec", (gpointer)SECTIONS[i].id);
         g_signal_connect(btn, "clicked", G_CALLBACK(on_section_click), vp);
@@ -186,11 +187,11 @@ static GtkWidget *build_sidebar(HbVaultPage *vp)
         }
         gtk_box_append(GTK_BOX(row), av);
         vb = gtk_box_new(GTK_ORIENTATION_VERTICAL, 1);
-        n = gtk_label_new("未登录");
+        n = gtk_label_new(_("未登录"));
         gtk_widget_add_css_class(n, "hb-a-name");
         gtk_label_set_xalign(GTK_LABEL(n), 0);
         gtk_box_append(GTK_BOX(vb), n);
-        s = gtk_label_new("点击登录");
+        s = gtk_label_new(_("点击登录"));
         gtk_widget_add_css_class(s, "hb-a-sub");
         gtk_label_set_xalign(GTK_LABEL(s), 0);
         gtk_box_append(GTK_BOX(vb), s);

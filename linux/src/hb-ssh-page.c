@@ -18,6 +18,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <glib/gi18n.h>
 
 /* ==================================================================
  * SSH 连接页：连接进度（节点+日志）→ 原地切换终端 → 断线自动重连。
@@ -227,7 +228,7 @@ static gboolean backoff_tick(gpointer ud)
     HbSshPage *p = ud;
     char *t;
     if (--p->countdown > 0) {
-        t = g_strdup_printf("连接已断开 · %d 秒后重连（第 %d 次）",
+        t = g_strdup_printf(_("连接已断开 · %d 秒后重连（第 %d 次）"),
                             p->countdown, p->backoff_k);
         strip_set(p, t);
         g_free(t);
@@ -245,11 +246,11 @@ static void start_backoff(HbSshPage *p)
     char *t;
     p->backoff_k++;
     p->countdown = d;
-    t = g_strdup_printf("连接已断开 · %d 秒后重连（第 %d 次）", d, p->backoff_k);
+    t = g_strdup_printf(_("连接已断开 · %d 秒后重连（第 %d 次）"), d, p->backoff_k);
     strip_set(p, t);
     g_free(t);
     gtk_widget_set_visible(p->strip, TRUE);
-    set_status(p, "● 连接已断开", "hb-term-warn");
+    set_status(p, _("● 连接已断开"), "hb-term-warn");
     tab_dot(p, "err");
     if (p->backoff_src) g_source_remove(p->backoff_src);
     p->backoff_src = g_timeout_add_seconds(1, backoff_tick, p);
@@ -269,7 +270,7 @@ static void on_reconn_cancel(GtkButton *b, gpointer ud)
     stop_backoff(p);
     p->backoff_k = 0;
     p->dead = TRUE;
-    set_status(p, "● 会话已结束", "hb-term-ended");
+    set_status(p, _("● 会话已结束"), "hb-term-ended");
     gtk_widget_set_visible(p->dead_lbl, TRUE);
     gtk_widget_set_visible(p->reconn_btn, TRUE);
     g_string_set_size(p->inbuf, 0);
@@ -291,7 +292,7 @@ static void on_dead_input(HbTerminal *t, const char *utf8, gpointer ud)
 /* 偷出旧 vt、喂入重连提示行、起新会话（reuse_vt），重绑终端。 */
 static void reconnect_now(HbSshPage *p)
 {
-    static const char *mark = "\r\n\e[2m[重新连接…]\e[0m\r\n";
+    char mark[128];
     hb_session *sess = hb_conn_ctl_session(p->ctl);
 
     if (p->backoff_src) {
@@ -300,13 +301,16 @@ static void reconnect_now(HbSshPage *p)
     }
     if (sess && !hb_session_alive(sess)) {
         p->reuse_vt = hb_session_steal_vt(sess);
-        if (p->reuse_vt)
+        if (p->reuse_vt) {
+            g_snprintf(mark, sizeof mark, "\r\n\e[2m%s\e[0m\r\n",
+                       _("[重新连接…]"));
             hb_vt_feed(p->reuse_vt, mark, strlen(mark));
+        }
     }
     /* ctl 在 start 里收掉旧会话；先解绑终端 */
     if (sess)
         hb_terminal_set_session(HB_TERMINAL(p->term), NULL);
-    strip_set(p, "正在重连…");
+    strip_set(p, _("正在重连…"));
     gtk_widget_set_visible(p->strip, TRUE);
     start_connect(p, TRUE);
 }
@@ -317,7 +321,7 @@ static void on_ctl_exited(HbConnCtl *c, int code, gpointer ud)
     HbSshPage *p = ud;
     (void)c; (void)code;
     p->dead = TRUE;
-    set_status(p, "● 会话已结束", "hb-term-ended");
+    set_status(p, _("● 会话已结束"), "hb-term-ended");
     tab_dot(p, NULL);
     gtk_widget_set_visible(p->dead_lbl, TRUE);
     gtk_widget_set_visible(p->reconn_btn, TRUE);
@@ -373,8 +377,8 @@ static void on_notify(HbTerminal *t, const char *title, const char *body,
             hb_obj_free(o);
         }
         if (host_only) {
-            char *tt = g_strdup_printf("终端通知 · %s", p->hname);
-            char *bb = g_strdup_printf("%s 上的任务有新通知", p->hname);
+            char *tt = g_strdup_printf(_("终端通知 · %s"), p->hname);
+            char *bb = g_strdup_printf(_("%s 上的任务有新通知"), p->hname);
             hb_notify_post("info", tt, bb, NULL);
             g_free(tt); g_free(bb);
         } else {
@@ -395,7 +399,7 @@ static void watch_refresh_ui(HbSshPage *p)
     bx = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_append(GTK_BOX(bx), hb_icon_new("eye", 13));
     gtk_box_append(GTK_BOX(bx),
-        gtk_label_new(p->watch_on ? "监控 开" : "监控 关"));
+        gtk_label_new(p->watch_on ? _("监控 开") : _("监控 关")));
     gtk_button_set_child(GTK_BUTTON(p->watch_btn), bx);
     if (p->watch_on) {
         gtk_widget_add_css_class(p->watch_btn, "on");
@@ -406,7 +410,7 @@ static void watch_refresh_ui(HbSshPage *p)
     }
     if (p->st_watch)
         gtk_label_set_label(GTK_LABEL(p->st_watch),
-                            t ? t : "监控: 关");
+                            t ? t : _("监控: 关"));
     g_free(t);
 }
 
@@ -502,7 +506,7 @@ static void on_ctl_connected(HbConnCtl *c, gpointer ud)
     }
 
     gtk_stack_set_visible_child_name(GTK_STACK(p->stack), "term");
-    set_status(p, "● 已连接", "hb-term-ok");
+    set_status(p, _("● 已连接"), "hb-term-ok");
     tab_dot(p, "ok");
     gtk_widget_set_visible(p->reconn_btn, FALSE);
     gtk_widget_set_visible(p->dead_lbl, FALSE);
@@ -518,10 +522,12 @@ static void on_ctl_connected(HbConnCtl *c, gpointer ud)
     /* 重连成功 → 注入提示行 + flush 缓冲输入 */
     if (p->reconnected_feed) {
         hb_vt *v = hb_session_vt(sess);
-        static const char *l1 = "\e[2m[重新连接成功]\e[0m\r\n";
-        static const char *l2 =
-            "\e[33m提示: 远端会话已丢失，建议在 tmux 内工作以便 attach 恢复\e[0m\r\n";
         if (v) {
+            char l1[128], l2[256];
+            g_snprintf(l1, sizeof l1, "\e[2m%s\e[0m\r\n",
+                       _("[重新连接成功]"));
+            g_snprintf(l2, sizeof l2, "\e[33m%s\e[0m\r\n",
+                _("提示: 远端会话已丢失，建议在 tmux 内工作以便 attach 恢复"));
             hb_vt_lock(v);
             hb_vt_feed(v, l1, strlen(l1));
             hb_vt_feed(v, l2, strlen(l2));
@@ -599,7 +605,7 @@ static void on_ctl_session(HbConnCtl *c, gpointer sess_p, gpointer ud)
                             GTK_WIDGET(p->win), p->tab_id);
     hb_session_set_history(sess, p->hist_on);
     watch_apply_session(p);       /* 监控状态随（重）连重挂 */
-    set_status(p, "● 连接中…", "hb-term-warn");
+    set_status(p, _("● 连接中…"), "hb-term-warn");
 }
 
 /* "failed"：连接期失败 / 需用户介入的错误 → 错误卡
@@ -707,7 +713,7 @@ static void apply_settings(HbSshPage *p)
             num[j++] = raw[i++];
         }
         num[j] = 0;
-        txt = g_strdup_printf("scrollback %s 行", num);
+        txt = g_strdup_printf(_("scrollback %s 行"), num);
         gtk_label_set_label(GTK_LABEL(p->st_sb), txt);
         g_free(txt);
     }
@@ -769,7 +775,7 @@ static GtkWidget *build_term_view(HbSshPage *p)
     {
         GtkWidget *fb = gtk_button_new();
         gtk_widget_add_css_class(fb, "tbtn");
-        gtk_widget_set_tooltip_text(fb, "在 scrollback 中搜索 (Ctrl+Shift+F)");
+        gtk_widget_set_tooltip_text(fb, _("在 scrollback 中搜索 (Ctrl+Shift+F)"));
         gtk_button_set_child(GTK_BUTTON(fb), hb_icon_new("search", 13));
         g_signal_connect(fb, "clicked",
                          G_CALLBACK(on_find_btn), p);
@@ -780,10 +786,10 @@ static GtkWidget *build_term_view(HbSshPage *p)
     g_signal_connect(p->watch_btn, "clicked",
                      G_CALLBACK(on_watch_btn), p);
     gtk_box_append(GTK_BOX(bar), p->watch_btn);
-    p->share_btn = gtk_button_new_with_label("共享");
+    p->share_btn = gtk_button_new_with_label(_("共享"));
     gtk_widget_add_css_class(p->share_btn, "tbtn");
     gtk_widget_set_tooltip_text(p->share_btn,
-                                "共享会话（端到端加密）");
+                                _("共享会话（端到端加密）"));
     g_signal_connect(p->share_btn, "clicked",
                      G_CALLBACK(on_share_btn), p);
     gtk_box_append(GTK_BOX(bar), p->share_btn);
@@ -792,7 +798,7 @@ static GtkWidget *build_term_view(HbSshPage *p)
     {
         GtkWidget *r = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
         gtk_box_append(GTK_BOX(r), hb_icon_new("refresh", 13));
-        gtk_box_append(GTK_BOX(r), gtk_label_new("重连"));
+        gtk_box_append(GTK_BOX(r), gtk_label_new(_("重连")));
         gtk_button_set_child(GTK_BUTTON(p->reconn_btn), r);
     }
     g_signal_connect(p->reconn_btn, "clicked",
@@ -807,19 +813,19 @@ static GtkWidget *build_term_view(HbSshPage *p)
         GtkWidget *vb = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
         GtkWidget *b;
         gtk_widget_add_css_class(mb, "tbtn");
-        gtk_widget_set_tooltip_text(mb, "分屏");
+        gtk_widget_set_tooltip_text(mb, _("分屏"));
         {
             GtkWidget *r = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
             gtk_box_append(GTK_BOX(r), hb_icon_new("cols", 13));
-            gtk_box_append(GTK_BOX(r), gtk_label_new("分屏"));
+            gtk_box_append(GTK_BOX(r), gtk_label_new(_("分屏")));
             gtk_menu_button_set_child(GTK_MENU_BUTTON(mb), r);
         }
-        b = gtk_button_new_with_label("向右分屏  Ctrl+Shift+D");
+        b = gtk_button_new_with_label(_("向右分屏  Ctrl+Shift+D"));
         gtk_widget_add_css_class(b, "hb-pop-btn");
         g_signal_connect(b, "clicked", G_CALLBACK(on_split_pick),
                          GINT_TO_POINTER(GTK_ORIENTATION_HORIZONTAL));
         gtk_box_append(GTK_BOX(vb), b);
-        b = gtk_button_new_with_label("向下分屏  Ctrl+Shift+E");
+        b = gtk_button_new_with_label(_("向下分屏  Ctrl+Shift+E"));
         gtk_widget_add_css_class(b, "hb-pop-btn");
         g_signal_connect(b, "clicked", G_CALLBACK(on_split_pick),
                          GINT_TO_POINTER(GTK_ORIENTATION_VERTICAL));
@@ -838,17 +844,17 @@ static GtkWidget *build_term_view(HbSshPage *p)
     /* 断线重连条 */
     strip = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(strip, "hb-disc-strip");
-    p->strip_label = gtk_label_new("连接已断开");
+    p->strip_label = gtk_label_new(_("连接已断开"));
     gtk_label_set_xalign(GTK_LABEL(p->strip_label), 0);
     gtk_widget_set_hexpand(p->strip_label, TRUE);
     gtk_box_append(GTK_BOX(strip), p->strip_label);
     {
-        GtkWidget *now = gtk_button_new_with_label("立即重连");
+        GtkWidget *now = gtk_button_new_with_label(_("立即重连"));
         gtk_widget_add_css_class(now, "hb-btn");
         gtk_widget_add_css_class(now, "sm");
         g_signal_connect(now, "clicked", G_CALLBACK(on_reconn_now), p);
         gtk_box_append(GTK_BOX(strip), now);
-        GtkWidget *cancel = gtk_button_new_with_label("取消");
+        GtkWidget *cancel = gtk_button_new_with_label(_("取消"));
         gtk_widget_add_css_class(cancel, "hb-btn");
         gtk_widget_add_css_class(cancel, "sm");
         g_signal_connect(cancel, "clicked", G_CALLBACK(on_reconn_cancel), p);
@@ -871,7 +877,7 @@ static GtkWidget *build_term_view(HbSshPage *p)
     gtk_widget_set_halign(sb, GTK_ALIGN_END);
     gtk_widget_set_valign(sb, GTK_ALIGN_FILL);
     gtk_overlay_add_overlay(GTK_OVERLAY(p->overlay), sb);
-    p->dead_lbl = gtk_label_new("[连接已关闭]");
+    p->dead_lbl = gtk_label_new(_("[连接已关闭]"));
     gtk_widget_add_css_class(p->dead_lbl, "hb-term-dead");
     gtk_widget_set_halign(p->dead_lbl, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(p->dead_lbl, GTK_ALIGN_END);
@@ -883,7 +889,7 @@ static GtkWidget *build_term_view(HbSshPage *p)
     hb_find_bar_bind(HB_FIND_BAR(p->find_bar), HB_TERMINAL(p->term));
 
     /* 缓冲输入提示 */
-    p->buf_hint = gtk_label_new("输入将在重连后发送");
+    p->buf_hint = gtk_label_new(_("输入将在重连后发送"));
     gtk_widget_add_css_class(p->buf_hint, "hb-disc-strip");
     gtk_label_set_xalign(GTK_LABEL(p->buf_hint), 0);
     gtk_widget_set_visible(p->buf_hint, FALSE);
@@ -893,7 +899,7 @@ static GtkWidget *build_term_view(HbSshPage *p)
     {
         GtkWidget *st = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 14);
         gtk_widget_add_css_class(st, "hb-term-status");
-        p->st_conn = gtk_label_new("● 连接中…");
+        p->st_conn = gtk_label_new(_("● 连接中…"));
         gtk_widget_add_css_class(p->st_conn, "hb-term-warn");
         gtk_box_append(GTK_BOX(st), p->st_conn);
         GtkWidget *tt = gtk_label_new("xterm-256color");
@@ -905,7 +911,7 @@ static GtkWidget *build_term_view(HbSshPage *p)
         GtkWidget *sp = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
         gtk_widget_set_hexpand(sp, TRUE);
         gtk_box_append(GTK_BOX(st), sp);
-        p->st_watch = gtk_label_new("监控: 关");
+        p->st_watch = gtk_label_new(_("监控: 关"));
         gtk_widget_add_css_class(p->st_watch, "hb-term-muted");
         gtk_box_append(GTK_BOX(st), p->st_watch);
         p->st_sb = gtk_label_new("");

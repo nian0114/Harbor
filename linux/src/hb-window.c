@@ -14,6 +14,7 @@
 #include "hb-application.h"
 
 #include <stdio.h>
+#include <glib/gi18n.h>
 
 typedef struct HbTabRec {
     HbWindow  *win;
@@ -340,7 +341,7 @@ void hb_window_toast(HbWindow *win, const char *text)
 void hb_window_toast_undo(HbWindow *win, const char *text,
                           GCallback undo_cb, gpointer ud)
 {
-    hb_window_toast_action(win, text, "撤销", 9, undo_cb, ud);
+    hb_window_toast_action(win, text, _("撤销"), 9, undo_cb, ud);
 }
 
 void hb_window_toast_action(HbWindow *win, const char *text,
@@ -505,8 +506,8 @@ static void rebuild_notif_list(GtkWidget *box)
         GtkWidget *empty = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
         GtkWidget *ico = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
         GtkWidget *ic = hb_icon_new("bell", 22);
-        GtkWidget *t = gtk_label_new("暂无通知");
-        GtkWidget *s = gtk_label_new("连接、任务与同步提醒会出现在这里");
+        GtkWidget *t = gtk_label_new(_("暂无通知"));
+        GtkWidget *s = gtk_label_new(_("连接、任务与同步提醒会出现在这里"));
         gtk_widget_add_css_class(empty, "hb-empty");
         gtk_widget_add_css_class(ico, "hb-e-ico");
         gtk_widget_add_css_class(t, "hb-e-title");
@@ -558,9 +559,9 @@ static GtkWidget *build_bell(HbWindow *win)
     GtkWidget *pop = gtk_popover_new();
     GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     GtkWidget *head = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    GtkWidget *title = gtk_label_new("通知中心");
-    GtkWidget *read = gtk_button_new_with_label("全部已读");
-    GtkWidget *clear = gtk_button_new_with_label("清空");
+    GtkWidget *title = gtk_label_new(_("通知中心"));
+    GtkWidget *read = gtk_button_new_with_label(_("全部已读"));
+    GtkWidget *clear = gtk_button_new_with_label(_("清空"));
     GtkWidget *sc = gtk_scrolled_window_new();
     GtkWidget *list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     GtkWidget *ov = gtk_overlay_new();
@@ -622,7 +623,7 @@ void hb_window_open_local(HbWindow *win, GtkWidget **page_out)
 
     page = hb_term_page_new_local(hb_store_default());
     g_snprintf(id, sizeof id, "term-local-%d", ++seq);
-    hb_window_add_tab(win, id, "Local", "terminal", page, TRUE, TRUE);
+    hb_window_add_tab(win, id, _("Local"), "terminal", page, TRUE, TRUE);
     hb_term_page_attach_tab(HB_TERM_PAGE(page), GTK_WIDGET(win), id);
     if (page_out)
         *page_out = page;
@@ -646,7 +647,7 @@ void hb_window_split_active(HbWindow *win, GtkOrientation o)
     if (!t || !t->page) return;
     if (HB_IS_WORKSPACE(t->page)) {
         if (!hb_workspace_split_focused(HB_WORKSPACE(t->page), o))
-            hb_window_toast(win, "最多 6 个分屏");
+            hb_window_toast(win, _("最多 6 个分屏"));
         return;
     }
     if (!HB_IS_SESSION_PAGE(t->page)) return;   /* Vault 等非终端页 */
@@ -668,7 +669,7 @@ void hb_window_split_active(HbWindow *win, GtkOrientation o)
     hb_workspace_seed(HB_WORKSPACE(ws), page);
     g_object_unref(page);
     hb_workspace_split_focused(HB_WORKSPACE(ws), o); /* 不会失败：<6 */
-    hb_window_set_tab_title(win, t->id, "Workspace");
+    hb_window_set_tab_title(win, t->id, _("Workspace"));
     hb_window_set_tab_icon(win, t->id, "cols");
     refresh_active(win);
 }
@@ -760,7 +761,7 @@ void hb_window_open_workspace(HbWindow *win, GList *pages)
             hb_workspace_add_pane(HB_WORKSPACE(ws), l->data,
                 GTK_ORIENTATION_HORIZONTAL, 1.0 / (n - i + 1));
     }
-    hb_window_add_tab(win, id, "Workspace", "cols", ws, TRUE, TRUE);
+    hb_window_add_tab(win, id, _("Workspace"), "cols", ws, TRUE, TRUE);
     hb_workspace_attach_tab(HB_WORKSPACE(ws), GTK_WIDGET(win), id);
 }
 
@@ -788,12 +789,12 @@ static GtkWidget *build_plus(HbWindow *win)
 
     gtk_widget_add_css_class(mb, "hb-icobtn");
     gtk_menu_button_set_child(GTK_MENU_BUTTON(mb), hb_icon_new("plus", 16));
-    gtk_widget_set_tooltip_text(mb, "新建标签页");
+    gtk_widget_set_tooltip_text(mb, _("新建标签页"));
 
     {
         GtkWidget *kbd = gtk_label_new("Ctrl+Shift+T");
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 24);
-        GtkWidget *name = gtk_label_new("Local 终端");
+        GtkWidget *name = gtk_label_new(_("Local 终端"));
         GtkWidget *btn;
         gtk_label_set_xalign(GTK_LABEL(name), 0);
         gtk_widget_set_hexpand(name, TRUE);
@@ -808,7 +809,7 @@ static GtkWidget *build_plus(HbWindow *win)
     }
     {
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 24);
-        GtkWidget *name = gtk_label_new("Workspace 分屏…");
+        GtkWidget *name = gtk_label_new(_("Workspace 分屏…"));
         GtkWidget *btn;
         gtk_label_set_xalign(GTK_LABEL(name), 0);
         gtk_widget_set_hexpand(name, TRUE);
@@ -923,7 +924,7 @@ static void hb_window_init(HbWindow *win)
     side = gtk_button_new();
     gtk_widget_add_css_class(side, "hb-icobtn");
     gtk_button_set_child(GTK_BUTTON(side), hb_icon_new("panel", 16));
-    gtk_widget_set_tooltip_text(side, "切换侧栏");
+    gtk_widget_set_tooltip_text(side, _("切换侧栏"));
     g_signal_connect(side, "clicked", G_CALLBACK(on_sidebar_toggle), win);
     gtk_box_append(GTK_BOX(titlebar), side);
 

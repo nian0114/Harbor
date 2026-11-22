@@ -8,6 +8,7 @@
 #include <sodium.h>
 #include <string.h>
 #include <glib-unix.h>
+#include <glib/gi18n.h>
 
 #define WS_PAYLOAD_MAX (8u * 1024 * 1024)   /* > relay 4 MiB 上限 */
 #define WS_PING_SEC 5
@@ -359,7 +360,7 @@ static void owner_post_done(guint st, const char *body, gsize n,
     (void)body; (void)n;
     if (st != 200) {
         if (c->cb)
-            c->cb(c->svc, NULL, "创建共享失败（服务器拒绝）",
+            c->cb(c->svc, NULL, _("创建共享失败（服务器拒绝）"),
                   c->cb_ud);
         g_hash_table_remove(c->svc->owners, c->share_id);
         return;
@@ -390,13 +391,13 @@ void hb_share_service_start(HbShareService *s, hb_session *sess,
     uint8_t *vk;
     char uuid[37], *meta, *body;
     if (!signed_in()) {
-        if (cb) cb(s, NULL, "未登录：请先在账号页登录", ud);
+        if (cb) cb(s, NULL, _("未登录：请先在账号页登录"), ud);
         return;
     }
     vk = sodium_malloc(32);
     if (!vk || !hb_sync_service_vk_copy(sync_svc(), vk)) {
         if (vk) { sodium_memzero(vk, 32); sodium_free(vk); }
-        if (cb) cb(s, NULL, "账号密钥不可用", ud);
+        if (cb) cb(s, NULL, _("账号密钥不可用"), ud);
         return;
     }
     {
@@ -418,7 +419,7 @@ void hb_share_service_start(HbShareService *s, hb_session *sess,
     sodium_memzero(vk, 32); sodium_free(vk);
     if (!c->eng) {
         owner_ctx_free(c);
-        if (cb) cb(s, NULL, "引擎创建失败", ud);
+        if (cb) cb(s, NULL, _("引擎创建失败"), ud);
         return;
     }
     g_hash_table_insert(s->owners, g_strdup(c->share_id), c);
@@ -644,7 +645,7 @@ static void list_done(guint st, const char *body, gsize n, gpointer ud)
     g_autoptr(JsonParser) jp = NULL;
     JsonObject *o; JsonArray *arr; guint i, na;
     if (st != 200 || !body) {
-        lc->cb(lc->s, NULL, "获取共享列表失败", lc->ud);
+        lc->cb(lc->s, NULL, _("获取共享列表失败"), lc->ud);
         g_free(lc); return;
     }
     jp = json_parser_new();
@@ -679,7 +680,7 @@ void hb_share_service_list(HbShareService *s, hb_share_list_cb cb,
 {
     ListCtx *lc;
     if (!signed_in()) {
-        cb(s, NULL, "未登录", ud);
+        cb(s, NULL, _("未登录"), ud);
         return;
     }
     lc = g_new0(ListCtx, 1);
@@ -865,13 +866,13 @@ void hb_share_service_join_member(HbShareService *s, const char *share_id,
     hb_err e;
     uint8_t *vk;
     if (!signed_in() || !share_id || !meta_b64) {
-        if (cb) cb(s, NULL, "未登录或参数缺失", ud);
+        if (cb) cb(s, NULL, _("未登录或参数缺失"), ud);
         return;
     }
     vk = sodium_malloc(32);
     if (!vk || !hb_sync_service_vk_copy(sync_svc(), vk)) {
         if (vk) { sodium_memzero(vk, 32); sodium_free(vk); }
-        if (cb) cb(s, NULL, "账号密钥不可用", ud);
+        if (cb) cb(s, NULL, _("账号密钥不可用"), ud);
         return;
     }
     c = g_new0(hb_share_peer_ctx, 1);
@@ -886,7 +887,7 @@ void hb_share_service_join_member(HbShareService *s, const char *share_id,
     sodium_memzero(vk, 32); sodium_free(vk);
     if (!c->eng) {
         peer_ctx_free(c);
-        if (cb) cb(s, NULL, "加入失败：无法解密共享信息", ud);
+        if (cb) cb(s, NULL, _("加入失败：无法解密共享信息"), ud);
         return;
     }
     g_ptr_array_add(s->peers, c);
@@ -901,7 +902,7 @@ void hb_share_service_join_guest(HbShareService *s, const char *link,
     hb_err e;
     const char *server;
     if (!link || !code) {
-        if (cb) cb(s, NULL, "需要链接和配对码", ud);
+        if (cb) cb(s, NULL, _("需要链接和配对码"), ud);
         return;
     }
     c = g_new0(hb_share_peer_ctx, 1);
@@ -911,7 +912,7 @@ void hb_share_service_join_guest(HbShareService *s, const char *link,
     c->eng = hb_share_peer_new_guest(link, code, &e);
     if (!c->eng) {
         peer_ctx_free(c);
-        if (cb) cb(s, NULL, "链接或配对码无效", ud);
+        if (cb) cb(s, NULL, _("链接或配对码无效"), ud);
         return;
     }
     c->share_id = g_strdup(hb_share_peer_share_id(c->eng));

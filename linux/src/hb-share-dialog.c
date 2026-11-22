@@ -8,6 +8,7 @@
 #include "hb-window.h"
 
 #include <string.h>
+#include <glib/gi18n.h>
 
 struct _HbShareDialog {
     AdwDialog    parent;
@@ -99,12 +100,12 @@ static void refresh_plist(HbShareDialog *d)
             gtk_widget_set_hexpand(nm, TRUE);
             gtk_box_append(GTK_BOX(row), nm);
             pill = gtk_label_new(r->perm == HB_SHARE_COLLAB
-                                 ? "可输入" : "只读");
+                                 ? _("可输入") : _("只读"));
             gtk_widget_add_css_class(pill, "hb-share-pill");
             if (r->perm == HB_SHARE_COLLAB)
                 gtk_widget_add_css_class(pill, "collab");
             gtk_box_append(GTK_BOX(row), pill);
-            rm = gtk_button_new_with_label("移除");
+            rm = gtk_button_new_with_label(_("移除"));
             gtk_widget_add_css_class(rm, "tbtn");
             g_object_set_data(G_OBJECT(rm), "pid",
                               GUINT_TO_POINTER(r->id));
@@ -364,12 +365,12 @@ static void hb_share_dialog_init(HbShareDialog *d)
 {
     GtkWidget *tb, *root, *hd, *swrow, *mrow, *lrow, *crow, *hint,
               *stopwrap, *join;
-    const char *modes[] = { "仅观看", "可协作输入", NULL };
+    const char *modes[] = { _("仅观看"), _("可协作输入"), NULL };
 
     tb = adw_toolbar_view_new();
     hd = adw_header_bar_new();
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(hd),
-        adw_window_title_new("共享会话", NULL));
+        adw_window_title_new(_("共享会话"), NULL));
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(tb), hd);
 
     root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
@@ -382,8 +383,8 @@ static void hb_share_dialog_init(HbShareDialog *d)
     /* 未登录提示 */
     d->signedout = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_box_append(GTK_BOX(d->signedout),
-        row_lbl("共享需要登录 Harbor 账号", "hb-share-hint-title"));
-    join = gtk_button_new_with_label("前往账号登录");
+        row_lbl(_("共享需要登录 Harbor 账号"), "hb-share-hint-title"));
+    join = gtk_button_new_with_label(_("前往账号登录"));
     gtk_widget_set_halign(join, GTK_ALIGN_CENTER);
     g_signal_connect(join, "clicked",
                      G_CALLBACK(on_goto_account), d);
@@ -393,7 +394,7 @@ static void hb_share_dialog_init(HbShareDialog *d)
     /* 开启云端共享 */
     swrow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(swrow),
-        row_lbl("开启云端共享", "hb-share-row-title"));
+        row_lbl(_("开启云端共享"), "hb-share-row-title"));
     d->sw = gtk_switch_new();
     gtk_widget_set_hexpand(d->sw, TRUE);
     gtk_widget_set_halign(d->sw, GTK_ALIGN_END);
@@ -406,7 +407,7 @@ static void hb_share_dialog_init(HbShareDialog *d)
     /* 参与权限 */
     mrow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append(GTK_BOX(mrow),
-        row_lbl("参与权限", "hb-share-row-title"));
+        row_lbl(_("参与权限"), "hb-share-row-title"));
     d->mode_dd = gtk_drop_down_new_from_strings(modes);
     gtk_widget_set_hexpand(d->mode_dd, TRUE);
     gtk_widget_set_halign(d->mode_dd, GTK_ALIGN_END);
@@ -421,7 +422,7 @@ static void hb_share_dialog_init(HbShareDialog *d)
 
     lrow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_box_append(GTK_BOX(lrow),
-        row_lbl("共享链接", "hb-share-row-title"));
+        row_lbl(_("共享链接"), "hb-share-row-title"));
     d->link_row = gtk_label_new("");
     gtk_label_set_selectable(GTK_LABEL(d->link_row), TRUE);
     gtk_label_set_ellipsize(GTK_LABEL(d->link_row),
@@ -433,7 +434,7 @@ static void hb_share_dialog_init(HbShareDialog *d)
         GtkWidget *cp = gtk_button_new();
         gtk_widget_add_css_class(cp, "tbtn");
         gtk_button_set_child(GTK_BUTTON(cp), hb_icon_new("copy", 13));
-        gtk_widget_set_tooltip_text(cp, "复制");
+        gtk_widget_set_tooltip_text(cp, _("复制"));
         g_signal_connect(cp, "clicked", G_CALLBACK(on_copy), d);
         gtk_box_append(GTK_BOX(lrow), cp);
     }
@@ -441,14 +442,14 @@ static void hb_share_dialog_init(HbShareDialog *d)
 
     crow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_box_append(GTK_BOX(crow),
-        row_lbl("配对码", "hb-share-row-title"));
+        row_lbl(_("配对码"), "hb-share-row-title"));
     d->code_lbl = gtk_label_new("");
     gtk_widget_add_css_class(d->code_lbl, "hb-share-code");
     gtk_box_append(GTK_BOX(crow), d->code_lbl);
     gtk_box_append(GTK_BOX(crow),
-        row_lbl("30 分钟内有效", "hb-term-muted"));
+        row_lbl(_("30 分钟内有效"), "hb-term-muted"));
     {
-        GtkWidget *rg = gtk_button_new_with_label("重新生成");
+        GtkWidget *rg = gtk_button_new_with_label(_("重新生成"));
         gtk_widget_add_css_class(rg, "tbtn");
         gtk_widget_set_hexpand(rg, TRUE);
         gtk_widget_set_halign(rg, GTK_ALIGN_END);
@@ -458,18 +459,18 @@ static void hb_share_dialog_init(HbShareDialog *d)
     gtk_box_append(GTK_BOX(d->body), crow);
 
     gtk_box_append(GTK_BOX(d->body),
-        row_lbl("参与者", "hb-share-row-title"));
-    d->empty_lbl = row_lbl("还没有人加入", "hb-term-muted");
+        row_lbl(_("参与者"), "hb-share-row-title"));
+    d->empty_lbl = row_lbl(_("还没有人加入"), "hb-term-muted");
     gtk_box_append(GTK_BOX(d->body), d->empty_lbl);
     d->plist = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_box_append(GTK_BOX(d->body), d->plist);
 
-    hint = row_lbl("共享期间对方可以看到终端内容；"
-                   "可随时停止。端到端加密。", "hb-term-muted");
+    hint = row_lbl(_("共享期间对方可以看到终端内容；"
+                   "可随时停止。端到端加密。"), "hb-term-muted");
     gtk_label_set_wrap(GTK_LABEL(hint), TRUE);
     gtk_box_append(GTK_BOX(d->body), hint);
 
-    d->stop_btn = gtk_button_new_with_label("停止共享");
+    d->stop_btn = gtk_button_new_with_label(_("停止共享"));
     gtk_widget_add_css_class(d->stop_btn, "destructive-action");
     gtk_widget_add_css_class(d->stop_btn, "pill");
     stopwrap = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);

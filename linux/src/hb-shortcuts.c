@@ -8,6 +8,7 @@
 #include "hb-workspace.h"
 
 #include <string.h>
+#include <glib/gi18n.h>
 
 #define SC_CTRL   GDK_CONTROL_MASK
 #define SC_SHIFT  GDK_SHIFT_MASK
@@ -17,26 +18,26 @@
 /* 单一快捷键表：窗口 capture controller 按它派发；设置页可遍历展示。
  * keyval 一律小写（匹配前对事件 keyval 取 gdk_keyval_to_lower）。 */
 static const HbShortcut SC[] = {
-    { "palette",    GDK_KEY_k,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+K",   "命令面板",              0 },
-    { "palette",    GDK_KEY_k,    SC_CTRL,          "Ctrl+K",         "命令面板（终端外）",    HB_SC_NOT_IN_TERM },
-    { "find",       GDK_KEY_f,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+F",   "在 scrollback 中搜索",  0 },
-    { "find",       GDK_KEY_f,    SC_CTRL,          "Ctrl+F",         "搜索（终端外）",        HB_SC_NOT_IN_TERM },
-    { "new-local",  GDK_KEY_t,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+T",   "新建本地终端",          0 },
-    { "close-tab",  GDK_KEY_w,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+W",   "关闭当前标签",          0 },
-    { "close-tab",  GDK_KEY_w,    SC_CTRL,          "Ctrl+W",         "关闭当前标签",          0 },
-    { "tab-next",   GDK_KEY_Page_Down, SC_CTRL,     "Ctrl+PgDn",      "下一个标签",            0 },
-    { "tab-prev",   GDK_KEY_Page_Up,   SC_CTRL,     "Ctrl+PgUp",      "上一个标签",            0 },
-    { "tab-next",   GDK_KEY_Tab,  SC_CTRL,          "Ctrl+Tab",       "下一个标签",            0 },
-    { "tab-prev",   GDK_KEY_ISO_Left_Tab, SC_CTRL|SC_SHIFT, "Ctrl+Shift+Tab", "上一个标签",    0 },
-    { "split-right",GDK_KEY_d,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+D",   "向右分屏",              0 },
-    { "split-down", GDK_KEY_e,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+E",   "向下分屏",              0 },
-    { "focus-mode", GDK_KEY_m,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+M",   "Focus 模式",            0 },
-    { "pane-left",  GDK_KEY_Left, SC_ALT,           "Alt+←",          "焦点移到左侧 pane",     0 },
-    { "pane-right", GDK_KEY_Right,SC_ALT,           "Alt+→",          "焦点移到右侧 pane",     0 },
-    { "pane-up",    GDK_KEY_Up,   SC_ALT,           "Alt+↑",          "焦点移到上方 pane",     0 },
-    { "pane-down",  GDK_KEY_Down, SC_ALT,           "Alt+↓",          "焦点移到下方 pane",     0 },
-    { "tab-n",      GDK_KEY_1,    SC_ALT,           "Alt+1…9",        "跳到标签 N（1=Vault）", 0 },
-    { "tab-n",      GDK_KEY_1,    SC_CTRL,          "Ctrl+1…9",       "跳到标签 N（1=Vault）", 0 },
+    { "palette",    GDK_KEY_k,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+K",   N_("命令面板"),              0 },
+    { "palette",    GDK_KEY_k,    SC_CTRL,          "Ctrl+K",         N_("命令面板（终端外）"),    HB_SC_NOT_IN_TERM },
+    { "find",       GDK_KEY_f,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+F",   N_("在 scrollback 中搜索"),  0 },
+    { "find",       GDK_KEY_f,    SC_CTRL,          "Ctrl+F",         N_("搜索（终端外）"),        HB_SC_NOT_IN_TERM },
+    { "new-local",  GDK_KEY_t,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+T",   N_("新建本地终端"),          0 },
+    { "close-tab",  GDK_KEY_w,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+W",   N_("关闭当前标签"),          0 },
+    { "close-tab",  GDK_KEY_w,    SC_CTRL,          "Ctrl+W",         N_("关闭当前标签"),          0 },
+    { "tab-next",   GDK_KEY_Page_Down, SC_CTRL,     "Ctrl+PgDn",      N_("下一个标签"),            0 },
+    { "tab-prev",   GDK_KEY_Page_Up,   SC_CTRL,     "Ctrl+PgUp",      N_("上一个标签"),            0 },
+    { "tab-next",   GDK_KEY_Tab,  SC_CTRL,          "Ctrl+Tab",       N_("下一个标签"),            0 },
+    { "tab-prev",   GDK_KEY_ISO_Left_Tab, SC_CTRL|SC_SHIFT, "Ctrl+Shift+Tab", N_("上一个标签"),    0 },
+    { "split-right",GDK_KEY_d,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+D",   N_("向右分屏"),              0 },
+    { "split-down", GDK_KEY_e,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+E",   N_("向下分屏"),              0 },
+    { "focus-mode", GDK_KEY_m,    SC_CTRL|SC_SHIFT, "Ctrl+Shift+M",   N_("Focus 模式"),            0 },
+    { "pane-left",  GDK_KEY_Left, SC_ALT,           "Alt+←",          N_("焦点移到左侧 pane"),     0 },
+    { "pane-right", GDK_KEY_Right,SC_ALT,           "Alt+→",          N_("焦点移到右侧 pane"),     0 },
+    { "pane-up",    GDK_KEY_Up,   SC_ALT,           "Alt+↑",          N_("焦点移到上方 pane"),     0 },
+    { "pane-down",  GDK_KEY_Down, SC_ALT,           "Alt+↓",          N_("焦点移到下方 pane"),     0 },
+    { "tab-n",      GDK_KEY_1,    SC_ALT,           "Alt+1…9",        N_("跳到标签 N（1=Vault）"), 0 },
+    { "tab-n",      GDK_KEY_1,    SC_CTRL,          "Ctrl+1…9",       N_("跳到标签 N（1=Vault）"), 0 },
 };
 
 const HbShortcut *hb_shortcuts(size_t *n)
@@ -82,7 +83,7 @@ gboolean hb_shortcut_accel_parse(const char *accel,
 char *hb_shortcut_accel_label(guint keyval, GdkModifierType mods)
 {
     if (!keyval)
-        return g_strdup("已禁用");
+        return g_strdup(_("已禁用"));
     return gtk_accelerator_get_label(keyval, mods);
 }
 

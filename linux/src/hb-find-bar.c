@@ -2,6 +2,7 @@
 #include "hb-icons.h"
 
 #include <adwaita.h>
+#include <glib/gi18n.h>
 
 struct _HbFindBar {
     GtkBox parent;
@@ -164,7 +165,7 @@ static void hb_find_bar_init(HbFindBar *b)
     b->entry = gtk_entry_new();
     gtk_widget_set_hexpand(b->entry, TRUE);
     g_object_set(b->entry, "placeholder-text",
-                 "在 scrollback 中搜索…", NULL);
+                 _("在 scrollback 中搜索…"), NULL);
     g_signal_connect(b->entry, "changed",
                      G_CALLBACK(on_search_changed), b);
     /* capture：entry 内部会先吃 Return/Escape，bubble 等不到 */
@@ -183,11 +184,11 @@ static void hb_find_bar_init(HbFindBar *b)
     gtk_widget_add_css_class(b->count, "f-count");
     gtk_box_append(GTK_BOX(b), b->count);
 
-    up = icon_btn("up", "上一个 (Shift+Enter)",
+    up = icon_btn("up", _("上一个 (Shift+Enter)"),
                   G_CALLBACK(on_step_btn), b, -1);
-    dn = icon_btn("down", "下一个 (Enter)",
+    dn = icon_btn("down", _("下一个 (Enter)"),
                   G_CALLBACK(on_step_btn), b, 1);
-    x  = icon_btn("x", "关闭 (Esc)", G_CALLBACK(on_close_btn), b, 0);
+    x  = icon_btn("x", _("关闭 (Esc)"), G_CALLBACK(on_close_btn), b, 0);
     gtk_box_append(GTK_BOX(b), up);
     gtk_box_append(GTK_BOX(b), dn);
     gtk_box_append(GTK_BOX(b), x);

@@ -12,6 +12,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <glib/gi18n.h>
 
 struct _HbLogsView {
     GtkBox parent;
@@ -45,13 +46,13 @@ static void result_disp(const hb_log *l, const char **txt,
 {
     const char *r = l->result ? l->result : "";
     if (l->duration_s < 0 || !strcmp(r, "connecting")) {
-        *txt = "进行中"; *css = "run";
+        *txt = _("进行中"); *css = "run";
     } else if (!strcmp(r, "ok")) {
-        *txt = "成功"; *css = "on";
+        *txt = _("成功"); *css = "on";
     } else if (!strcmp(r, "cancelled")) {
-        *txt = "已取消"; *css = "off";
+        *txt = _("已取消"); *css = "off";
     } else {
-        *txt = "失败"; *css = "err";
+        *txt = _("失败"); *css = "err";
     }
 }
 
@@ -61,17 +62,17 @@ static const char *reason_disp(const hb_log *l, char *buf, size_t bl)
     const char *r = l->reason && *l->reason ? l->reason
                                             : (l->result ? l->result : "");
     struct { const char *k, *zh; } map[] = {
-        { "auth_failed",        "认证失败"   },
-        { "unreachable",        "无法连接"   },
-        { "resolve",            "无法连接"   },
-        { "refused",            "无法连接"   },
-        { "hostkey_changed",    "主机密钥变更" },
-        { "hostkey_rejected",   "主机密钥被拒绝" },
-        { "timeout",            "超时"      },
-        { "cancelled",          "已取消"    },
-        { "key confirm denied", "已取消"    },
+        { "auth_failed",        _("认证失败")   },
+        { "unreachable",        _("无法连接")   },
+        { "resolve",            _("无法连接")   },
+        { "refused",            _("无法连接")   },
+        { "hostkey_changed",    _("主机密钥变更") },
+        { "hostkey_rejected",   _("主机密钥被拒绝") },
+        { "timeout",            _("超时")      },
+        { "cancelled",          _("已取消")    },
+        { "key confirm denied", _("已取消")    },
         { "ok",                 ""          },
-        { "connecting",         "进行中"    },
+        { "connecting",         _("进行中")    },
     };
     size_t i;
     if (!*r) return "";
@@ -94,7 +95,7 @@ static const char *reason_disp(const hb_log *l, char *buf, size_t bl)
 
 static char *dur_disp(int64_t s, char *buf, size_t bl)
 {
-    if (s < 0) { snprintf(buf, bl, "进行中"); return buf; }
+    if (s < 0) { snprintf(buf, bl, _("进行中")); return buf; }
     if (s < 60) { snprintf(buf, bl, "%llds", (long long)s); return buf; }
     snprintf(buf, bl, "%lldm %llds",
              (long long)(s / 60), (long long)(s % 60));
@@ -199,7 +200,7 @@ static bool log_row_cb(const hb_log *l, void *ud)
     gtk_widget_add_css_class(bm, "hb-iconbtn");
     if (l->saved) gtk_widget_add_css_class(bm, "saved");
     gtk_button_set_child(GTK_BUTTON(bm), hb_icon_new("bookmark", 13));
-    gtk_widget_set_tooltip_text(bm, l->saved ? "取消 Saved" : "标记 Saved");
+    gtk_widget_set_tooltip_text(bm, l->saved ? _("取消 Saved") : _("标记 Saved"));
     gtk_widget_set_margin_start(bm, 14);
     gtk_widget_set_size_request(bm, 50, -1);
     gtk_widget_set_valign(bm, GTK_ALIGN_CENTER);
@@ -217,14 +218,14 @@ static GtkWidget *row_head(void)
 {
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     struct { const char *txt; int w; gboolean grow; } cols[] = {
-        { "Date",   140, FALSE },
-        { "User",    90, FALSE },
-        { "Host",   130, TRUE  },
-        { "协议",    70, FALSE },
-        { "结果",    80, FALSE },
-        { "原因",   130, TRUE  },
-        { "时长",    80, FALSE },
-        { "Saved",   50, FALSE },
+        { _("Date"),   140, FALSE },
+        { _("User"),    90, FALSE },
+        { _("Host"),   130, TRUE  },
+        { _("协议"),    70, FALSE },
+        { _("结果"),    80, FALSE },
+        { _("原因"),   130, TRUE  },
+        { _("时长"),    80, FALSE },
+        { _("Saved"),   50, FALSE },
     };
     int i;
     gtk_widget_add_css_class(row, "hb-table-head");
@@ -253,7 +254,7 @@ static void fill_rows(HbLogsView *v)
                          log_row_cb, &f);
 
     if (!f.shown) {
-        GtkWidget *l = gtk_label_new("无匹配记录");
+        GtkWidget *l = gtk_label_new(_("无匹配记录"));
         gtk_widget_add_css_class(l, "hb-e-sub");
         gtk_widget_set_margin_top(l, 26);
         gtk_widget_set_margin_bottom(l, 26);
@@ -306,11 +307,11 @@ static void exp_done(GObject *src, GAsyncResult *res, gpointer ud)
     if (e != HB_OK || !out ||
         !g_file_replace_contents(gf, out, strlen(out), NULL, FALSE,
                                  G_FILE_CREATE_NONE, NULL, NULL, &err)) {
-        hb_toast(GTK_WIDGET(c->v), "导出失败");
+        hb_toast(GTK_WIDGET(c->v), _("导出失败"));
         if (err) g_error_free(err);
     } else {
         hb_toast(GTK_WIDGET(c->v),
-                 c->json ? "日志已导出 JSON" : "日志已导出 CSV");
+                 c->json ? _("日志已导出 JSON") : _("日志已导出 CSV"));
     }
     free(out);
     g_object_unref(gf);
@@ -326,7 +327,7 @@ static void on_export(GtkButton *b, gpointer ud)
     c->v = v;
     c->json = json;
     d = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(d, json ? "导出日志 JSON" : "导出日志 CSV");
+    gtk_file_dialog_set_title(d, json ? _("导出日志 JSON") : _("导出日志 CSV"));
     gtk_file_dialog_set_initial_name(d,
         json ? "harbor-logs.json" : "harbor-logs.csv");
     gtk_file_dialog_save(d, NULL, NULL, exp_done, c);
@@ -344,9 +345,9 @@ static void on_clear(GtkButton *b, gpointer ud)
 {
     HbLogsView *v = ud;
     (void)b;
-    hb_dialog_confirm(GTK_WIDGET(v), "清空连接日志",
-                      "确定删除全部连接日志？此操作不可撤销。",
-                      "清空", TRUE, clear_done, v);
+    hb_dialog_confirm(GTK_WIDGET(v), _("清空连接日志"),
+                      _("确定删除全部连接日志？此操作不可撤销。"),
+                      _("清空"), TRUE, clear_done, v);
 }
 
 /* ============================ retention ============================ */
@@ -398,7 +399,7 @@ static void build(HbLogsView *v)
 
     v->search = gtk_search_entry_new();
     gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(v->search),
-                                          "按主机 / 用户 / 结果筛选…");
+                                          _("按主机 / 用户 / 结果筛选…"));
     gtk_widget_set_size_request(v->search, 260, -1);
     gtk_widget_set_valign(v->search, GTK_ALIGN_CENTER);
     g_signal_connect(v->search, "search-changed",
@@ -406,7 +407,7 @@ static void build(HbLogsView *v)
     gtk_box_append(GTK_BOX(bar), v->search);
 
     /* 仅看 Saved */
-    v->saved_btn = gtk_toggle_button_new_with_label("仅看 Saved");
+    v->saved_btn = gtk_toggle_button_new_with_label(_("仅看 Saved"));
     gtk_widget_add_css_class(v->saved_btn, "hb-btn");
     gtk_widget_add_css_class(v->saved_btn, "ghost");
     g_signal_connect(v->saved_btn, "toggled",
@@ -421,16 +422,16 @@ static void build(HbLogsView *v)
     gtk_box_append(GTK_BOX(bar), v->sort_btn);
 
     /* retention dropdown */
-    rl = gtk_label_new("保留");
+    rl = gtk_label_new(_("保留"));
     gtk_widget_add_css_class(rl, "hb-dim");
     gtk_widget_set_valign(rl, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(bar), rl);
     sm = gtk_string_list_new(NULL);
-    gtk_string_list_append(sm, "30 天");
-    gtk_string_list_append(sm, "90 天");
-    gtk_string_list_append(sm, "180 天");
-    gtk_string_list_append(sm, "365 天");
-    gtk_string_list_append(sm, "永久");
+    gtk_string_list_append(sm, _("30 天"));
+    gtk_string_list_append(sm, _("90 天"));
+    gtk_string_list_append(sm, _("180 天"));
+    gtk_string_list_append(sm, _("365 天"));
+    gtk_string_list_append(sm, _("永久"));
     v->ret_dd = gtk_drop_down_new(G_LIST_MODEL(sm), NULL);
     /* sm 不 unref：dropdown 拆卸时 GTK 仍会读 model */
     gtk_widget_set_size_request(v->ret_dd, 100, -1);
@@ -455,18 +456,18 @@ static void build(HbLogsView *v)
     gtk_widget_set_hexpand(sp, TRUE);
     gtk_box_append(GTK_BOX(bar), sp);
 
-    csv = gtk_button_new_with_label("导出 CSV");
+    csv = gtk_button_new_with_label(_("导出 CSV"));
     gtk_widget_add_css_class(csv, "hb-btn");
     g_signal_connect(csv, "clicked", G_CALLBACK(on_export), v);
     gtk_box_append(GTK_BOX(bar), csv);
 
-    js = gtk_button_new_with_label("导出 JSON");
+    js = gtk_button_new_with_label(_("导出 JSON"));
     gtk_widget_add_css_class(js, "hb-btn");
     g_object_set_data(G_OBJECT(js), "json", GINT_TO_POINTER(1));
     g_signal_connect(js, "clicked", G_CALLBACK(on_export), v);
     gtk_box_append(GTK_BOX(bar), js);
 
-    clr = gtk_button_new_with_label("清空日志");
+    clr = gtk_button_new_with_label(_("清空日志"));
     gtk_widget_add_css_class(clr, "hb-btn");
     gtk_widget_add_css_class(clr, "ghost");
     g_signal_connect(clr, "clicked", G_CALLBACK(on_clear), v);

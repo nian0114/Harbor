@@ -16,6 +16,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <glib/gi18n.h>
 
 struct _HbSnippetsView {
     GtkBox parent;
@@ -126,7 +127,7 @@ static void edit_save(GtkButton *b, gpointer ud)
         if (o) hb_obj_free(o);
         o = hb_obj_new("snippet");
     }
-    hb_obj_set_str(o, "title", title && *title ? title : "未命名");
+    hb_obj_set_str(o, "title", title && *title ? title : _("未命名"));
     hb_obj_set_str(o, "body", body);
     hb_obj_set_str(o, "scope", scope);
     hb_obj_set_bool(o, "run",
@@ -164,25 +165,25 @@ static void open_edit_dialog(HbSnippetsView *v, hb_obj *obj,
     char want_host[64] = "", want_group[128] = "";
 
     e->v = v;
-    e->dlg = hb_modal_new(obj ? "编辑 Snippet" : "新建 Snippet",
+    e->dlg = hb_modal_new(obj ? _("编辑 Snippet") : _("新建 Snippet"),
                           &body, &foot);
     if (obj)
         e->edit_id = g_strdup(hb_obj_id(obj));
 
     /* 标题 */
-    l = gtk_label_new("标题");
+    l = gtk_label_new(_("标题"));
     gtk_widget_add_css_class(l, "hb-form-label");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(body), l);
     e->title_e = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(e->title_e), "重启服务");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(e->title_e), _("重启服务"));
     gtk_editable_set_text(GTK_EDITABLE(e->title_e),
         obj ? (hb_obj_get_str(obj, "title") ?: "") :
               (pref_title ? pref_title : ""));
     gtk_box_append(GTK_BOX(body), e->title_e);
 
     /* 正文 */
-    l = gtk_label_new("命令（支持 {{变量}} 占位）");
+    l = gtk_label_new(_("命令（支持 {{变量}} 占位）"));
     gtk_widget_add_css_class(l, "hb-form-label");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(body), l);
@@ -209,14 +210,14 @@ static void open_edit_dialog(HbSnippetsView *v, hb_obj *obj,
     }
 
     /* 作用范围 */
-    l = gtk_label_new("作用范围");
+    l = gtk_label_new(_("作用范围"));
     gtk_widget_add_css_class(l, "hb-form-label");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(body), l);
     sm = gtk_string_list_new(NULL);
-    gtk_string_list_append(sm, "全局");
-    gtk_string_list_append(sm, "指定主机");
-    gtk_string_list_append(sm, "分组");
+    gtk_string_list_append(sm, _("全局"));
+    gtk_string_list_append(sm, _("指定主机"));
+    gtk_string_list_append(sm, _("分组"));
     e->scope_dd = gtk_drop_down_new(G_LIST_MODEL(sm), NULL);
     /* sm 不 unref：GTK 拆卸 dropdown 时仍会读 model（host-form 同约定） */
     gtk_drop_down_set_selected(GTK_DROP_DOWN(e->scope_dd), sidx);
@@ -224,7 +225,7 @@ static void open_edit_dialog(HbSnippetsView *v, hb_obj *obj,
 
     /* 主机选择 */
     e->host_row = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    l = gtk_label_new("主机");
+    l = gtk_label_new(_("主机"));
     gtk_widget_add_css_class(l, "hb-form-label");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(e->host_row), l);
@@ -255,7 +256,7 @@ static void open_edit_dialog(HbSnippetsView *v, hb_obj *obj,
 
     /* 分组名 */
     e->group_row = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    l = gtk_label_new("分组名");
+    l = gtk_label_new(_("分组名"));
     gtk_widget_add_css_class(l, "hb-form-label");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(e->group_row), l);
@@ -271,11 +272,11 @@ static void open_edit_dialog(HbSnippetsView *v, hb_obj *obj,
     /* 执行开关 */
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     sw = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-    l = gtk_label_new("执行（追加回车）");
+    l = gtk_label_new(_("执行（追加回车）"));
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_box_append(GTK_BOX(sw), l);
     {
-        GtkWidget *sub = gtk_label_new("发送后自动回车执行命令");
+        GtkWidget *sub = gtk_label_new(_("发送后自动回车执行命令"));
         gtk_widget_add_css_class(sub, "hb-dim");
         gtk_label_set_xalign(GTK_LABEL(sub), 0);
         gtk_box_append(GTK_BOX(sw), sub);
@@ -294,12 +295,12 @@ static void open_edit_dialog(HbSnippetsView *v, hb_obj *obj,
     f = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(f, "hb-modal-footer");
     gtk_widget_set_halign(f, GTK_ALIGN_END);
-    cancel = gtk_button_new_with_label("取消");
+    cancel = gtk_button_new_with_label(_("取消"));
     gtk_widget_add_css_class(cancel, "hb-btn");
     g_signal_connect_swapped(cancel, "clicked",
                              G_CALLBACK(adw_dialog_close), e->dlg);
     gtk_box_append(GTK_BOX(f), cancel);
-    ok = gtk_button_new_with_label("保存");
+    ok = gtk_button_new_with_label(_("保存"));
     gtk_widget_add_css_class(ok, "hb-btn");
     gtk_widget_add_css_class(ok, "primary");
     g_signal_connect(ok, "clicked", G_CALLBACK(edit_save), e);
@@ -339,7 +340,7 @@ static void del_done(gboolean ok, gpointer ud)
     char *msg;
     if (!ok) { snip_undo_free(d); return; }
     hb_vault_delete(hb_store_vault(d->v->store), d->id);
-    msg = g_strdup_printf("已删除 Snippet「%s」",
+    msg = g_strdup_printf(_("已删除 Snippet「%s」"),
                           d->title ? d->title : "");
     hb_toast_undo_destroy(GTK_WIDGET(d->v), msg,
                           snip_undo_cb, snip_undo_free, d);
@@ -359,9 +360,9 @@ static void on_del_snip(GtkButton *b, gpointer ud)
     d->v = v;
     d->id = g_strdup(id);
     d->title = g_strdup(title);
-    msg = g_strdup_printf("确定删除 <b>%s</b>？删除后 9 秒内可撤销。",
+    msg = g_strdup_printf(_("确定删除 <b>%s</b>？删除后 9 秒内可撤销。"),
                           title ? title : "");
-    hb_dialog_confirm(GTK_WIDGET(v), "删除 Snippet", msg, "删除", TRUE,
+    hb_dialog_confirm(GTK_WIDGET(v), _("删除 Snippet"), msg, _("删除"), TRUE,
                       del_done, d);
     g_free(msg);
 }
@@ -408,15 +409,15 @@ static GtkWidget *snip_card(HbSnippetsView *v, hb_obj *s)
     gtk_widget_add_css_class(card, "snip-card");
 
     r1 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 7);
-    t = gtk_label_new(title && *title ? title : "未命名");
+    t = gtk_label_new(title && *title ? title : _("未命名"));
     gtk_widget_add_css_class(t, "snip-title");
     gtk_label_set_xalign(GTK_LABEL(t), 0);
     gtk_box_append(GTK_BOX(r1), t);
 
     if (scope && *scope) {
         const char *disp = scope;
-        if (!strcmp(scope, "global")) disp = "全局";
-        else if (!strncmp(scope, "host:", 5)) disp = "主机";
+        if (!strcmp(scope, "global")) disp = _("全局");
+        else if (!strncmp(scope, "host:", 5)) disp = _("主机");
         else if (!strncmp(scope, "group:", 6)) disp = scope + 6;
         /* host:<uuid> 显示 uuid 没意义 → 解析主机名 */
         if (!strncmp(scope, "host:", 5)) {
@@ -444,7 +445,7 @@ static GtkWidget *snip_card(HbSnippetsView *v, hb_obj *s)
     eb = gtk_button_new();
     gtk_widget_add_css_class(eb, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(eb), hb_icon_new("pencil", 13));
-    gtk_widget_set_tooltip_text(eb, "编辑");
+    gtk_widget_set_tooltip_text(eb, _("编辑"));
     g_object_set_data_full(G_OBJECT(eb), "sid",
                            g_strdup(hb_obj_id(s)), g_free);
     g_signal_connect(eb, "clicked", G_CALLBACK(on_edit_snip), v);
@@ -453,7 +454,7 @@ static GtkWidget *snip_card(HbSnippetsView *v, hb_obj *s)
     db = gtk_button_new();
     gtk_widget_add_css_class(db, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(db), hb_icon_new("trash", 13));
-    gtk_widget_set_tooltip_text(db, "删除");
+    gtk_widget_set_tooltip_text(db, _("删除"));
     g_object_set_data_full(G_OBJECT(db), "sid",
                            g_strdup(hb_obj_id(s)), g_free);
     g_object_set_data_full(G_OBJECT(db), "stitle",
@@ -478,7 +479,7 @@ static GtkWidget *snip_card(HbSnippetsView *v, hb_obj *s)
     g_object_set_data_full(G_OBJECT(card), "sid",
                            g_strdup(hb_obj_id(s)), g_free);
     g_signal_connect(card, "clicked", G_CALLBACK(on_card_click), v);
-    gtk_widget_set_tooltip_text(card, "点击发送到当前终端");
+    gtk_widget_set_tooltip_text(card, _("点击发送到当前终端"));
     return card;
 }
 
@@ -514,7 +515,7 @@ static void fill_snips(HbSnippetsView *v)
     if (objs) hb_obj_list_free(objs, n);
     if (!shown) {
         GtkWidget *l = gtk_label_new(q && *q ?
-            "无匹配 Snippet" : "暂无 Snippet — 新建一个开始");
+            _("无匹配 Snippet") : _("暂无 Snippet — 新建一个开始"));
         gtk_widget_add_css_class(l, "hb-e-sub");
         gtk_widget_set_margin_top(l, 30);
         gtk_box_append(GTK_BOX(v->list), l);
@@ -540,12 +541,12 @@ static void imp_done(GObject *src, GAsyncResult *res, gpointer ud)
     char *msg;
     if (!gf) return;
     if (!g_file_load_contents(gf, NULL, &data, &len, NULL, NULL)) {
-        hb_toast(GTK_WIDGET(v), "读取文件失败");
+        hb_toast(GTK_WIDGET(v), _("读取文件失败"));
         g_object_unref(gf);
         return;
     }
     hb_vault_import_json(hb_store_vault(v->store), "snippet", data, &n);
-    msg = g_strdup_printf("已导入 %zu 条 Snippet", n);
+    msg = g_strdup_printf(_("已导入 %zu 条 Snippet"), n);
     hb_toast(GTK_WIDGET(v), msg);
     g_free(msg);
     g_free(data);
@@ -558,7 +559,7 @@ static void on_import(GtkButton *b, gpointer ud)
     GtkFileDialog *d;
     (void)b;
     d = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(d, "导入 Snippets JSON");
+    gtk_file_dialog_set_title(d, _("导入 Snippets JSON"));
     gtk_file_dialog_open(d, NULL, NULL, imp_done, v);
     g_object_unref(d);
 }
@@ -575,10 +576,10 @@ static void exp_done(GObject *src, GAsyncResult *res, gpointer ud)
                              &out) != HB_OK || !out ||
         !g_file_replace_contents(gf, out, strlen(out), NULL, FALSE,
                                  G_FILE_CREATE_NONE, NULL, NULL, &err)) {
-        hb_toast(GTK_WIDGET(v), "导出失败");
+        hb_toast(GTK_WIDGET(v), _("导出失败"));
         if (err) g_error_free(err);
     } else {
-        hb_toast(GTK_WIDGET(v), "Snippets 已导出");
+        hb_toast(GTK_WIDGET(v), _("Snippets 已导出"));
     }
     g_free(out);
     g_object_unref(gf);
@@ -590,7 +591,7 @@ static void on_export(GtkButton *b, gpointer ud)
     GtkFileDialog *d;
     (void)b;
     d = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(d, "导出 Snippets");
+    gtk_file_dialog_set_title(d, _("导出 Snippets"));
     gtk_file_dialog_set_initial_name(d, "harbor-snippets.json");
     gtk_file_dialog_save(d, NULL, NULL, exp_done, v);
     g_object_unref(d);
@@ -602,11 +603,11 @@ static char *rel_time(int64_t ts_ms)
 {
     int64_t now = g_get_real_time() / 1000;
     int64_t d = now - ts_ms;
-    if (d < 60 * 1000) return g_strdup("刚刚");
-    if (d < 3600 * 1000) return g_strdup_printf("%d 分钟前", (int)(d / 60000));
-    if (d < 86400 * 1000) return g_strdup_printf("%d 小时前", (int)(d / 3600000));
+    if (d < 60 * 1000) return g_strdup(_("刚刚"));
+    if (d < 3600 * 1000) return g_strdup_printf(ngettext("%d 分钟前", "%d 分钟前", d / 60000), (int)(d / 60000));
+    if (d < 86400 * 1000) return g_strdup_printf(ngettext("%d 小时前", "%d 小时前", d / 3600000), (int)(d / 3600000));
     if (d < 30 * 86400LL * 1000)
-        return g_strdup_printf("%d 天前", (int)(d / 86400000));
+        return g_strdup_printf(ngettext("%d 天前", "%d 天前", d / 86400000), (int)(d / 86400000));
     {
         time_t t = (time_t)(ts_ms / 1000);
         char buf[32];
@@ -635,7 +636,7 @@ typedef struct {
 static const char *host_disp(HistFill *hf, const char *host_id)
 {
     const char *nm;
-    if (!host_id || !*host_id) return "Local";
+    if (!host_id || !*host_id) return _("Local");
     nm = g_hash_table_lookup(hf->names, host_id);
     if (nm) return nm;
     {
@@ -720,7 +721,7 @@ static bool hist_row_cb(const hb_history_entry *e, void *ud)
     b1 = gtk_button_new();
     gtk_widget_add_css_class(b1, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(b1), hb_icon_new("snippet", 13));
-    gtk_widget_set_tooltip_text(b1, "转为 Snippet");
+    gtk_widget_set_tooltip_text(b1, _("转为 Snippet"));
     g_object_set_data_full(G_OBJECT(b1), "cmd",
                          g_strdup(e->cmd ? e->cmd : ""), g_free);
     g_signal_connect(b1, "clicked", G_CALLBACK(on_hist_to_snip), v);
@@ -729,7 +730,7 @@ static bool hist_row_cb(const hb_history_entry *e, void *ud)
     b2 = gtk_button_new();
     gtk_widget_add_css_class(b2, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(b2), hb_icon_new("copy", 13));
-    gtk_widget_set_tooltip_text(b2, "复制");
+    gtk_widget_set_tooltip_text(b2, _("复制"));
     g_object_set_data_full(G_OBJECT(b2), "cmd",
                          g_strdup(e->cmd ? e->cmd : ""), g_free);
     g_signal_connect(b2, "clicked", G_CALLBACK(on_hist_copy), NULL);
@@ -738,7 +739,7 @@ static bool hist_row_cb(const hb_history_entry *e, void *ud)
     b3 = gtk_button_new();
     gtk_widget_add_css_class(b3, "hb-iconbtn");
     gtk_button_set_child(GTK_BUTTON(b3), hb_icon_new("trash", 13));
-    gtk_widget_set_tooltip_text(b3, "删除");
+    gtk_widget_set_tooltip_text(b3, _("删除"));
     g_object_set_data(G_OBJECT(b3), "hid", (gpointer)(intptr_t)e->id);
     g_signal_connect(b3, "clicked", G_CALLBACK(on_hist_del), v);
     gtk_box_append(GTK_BOX(row), b3);
@@ -775,8 +776,8 @@ static void rebuild_host_dropdown(HbSnippetsView *v)
     ids = g_ptr_array_new_with_free_func(g_free);
     g_ptr_array_add(ids, NULL);                /* 全部 */
     g_ptr_array_add(ids, g_strdup(""));        /* Local */
-    gtk_string_list_append(sm, "全部主机");
-    gtk_string_list_append(sm, "Local");
+    gtk_string_list_append(sm, _("全部主机"));
+    gtk_string_list_append(sm, _("Local"));
     if (prev && *prev) newsel = GTK_INVALID_LIST_POSITION;
 
     hosts = hb_store_list(v->store, "host", &nh);
@@ -822,7 +823,7 @@ static void fill_hist(HbSnippetsView *v)
     g_hash_table_unref(hf.names);
 
     if (!hf.shown) {
-        GtkWidget *l = gtk_label_new("暂无命令历史");
+        GtkWidget *l = gtk_label_new(_("暂无命令历史"));
         gtk_widget_add_css_class(l, "hb-e-sub");
         gtk_widget_set_margin_top(l, 30);
         gtk_box_append(GTK_BOX(v->h_list), l);
@@ -856,9 +857,9 @@ static void on_clear_hist(GtkButton *b, gpointer ud)
 {
     HbSnippetsView *v = ud;
     (void)b;
-    hb_dialog_confirm(GTK_WIDGET(v), "清空命令历史",
-                      "确定删除全部 Shell History？此操作不可撤销。",
-                      "清空", TRUE, clear_done, v);
+    hb_dialog_confirm(GTK_WIDGET(v), _("清空命令历史"),
+                      _("确定删除全部 Shell History？此操作不可撤销。"),
+                      _("清空"), TRUE, clear_done, v);
 }
 
 static void on_hist_enabled(GObject *sw, GParamSpec *ps, gpointer ud)
@@ -902,7 +903,7 @@ static GtkWidget *build_snips_page(HbSnippetsView *v)
     /* New snippet split ▾ */
     split = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(split, "linked");
-    newb = gtk_button_new_with_label("New snippet");
+    newb = gtk_button_new_with_label(_("New snippet"));
     gtk_widget_add_css_class(newb, "hb-btn");
     gtk_widget_add_css_class(newb, "primary");
     g_signal_connect(newb, "clicked", G_CALLBACK(on_new_snip), v);
@@ -913,9 +914,9 @@ static GtkWidget *build_snips_page(HbSnippetsView *v)
     gtk_widget_add_css_class(menub, "primary");
     {
         GMenu *m = g_menu_new();
-        g_menu_append(m, "新建 Snippet", "snip.new");
-        g_menu_append(m, "导入 JSON…", "snip.import");
-        g_menu_append(m, "导出 JSON", "snip.export");
+        g_menu_append(m, _("新建 Snippet"), "snip.new");
+        g_menu_append(m, _("导入 JSON…"), "snip.import");
+        g_menu_append(m, _("导出 JSON"), "snip.export");
         gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menub),
                                        G_MENU_MODEL(m));
         g_object_unref(m);
@@ -950,7 +951,7 @@ static GtkWidget *build_snips_page(HbSnippetsView *v)
     gtk_widget_add_css_class(hb, "ghost");
     hb_r = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_append(GTK_BOX(hb_r), hb_icon_new("clock", 13));
-    gtk_box_append(GTK_BOX(hb_r), gtk_label_new("Shell History"));
+    gtk_box_append(GTK_BOX(hb_r), gtk_label_new(_("Shell History")));
     gtk_button_set_child(GTK_BUTTON(hb), hb_r);
     g_signal_connect(hb, "clicked", G_CALLBACK(on_show_hist), v);
     gtk_box_append(GTK_BOX(bar), hb);
@@ -961,7 +962,7 @@ static GtkWidget *build_snips_page(HbSnippetsView *v)
 
     v->search = gtk_search_entry_new();
     gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(v->search),
-                                          "搜索 Snippets…");
+                                          _("搜索 Snippets…"));
     gtk_widget_set_size_request(v->search, 220, -1);
     gtk_widget_set_valign(v->search, GTK_ALIGN_CENTER);
     g_signal_connect(v->search, "search-changed",
@@ -996,14 +997,14 @@ static GtkWidget *build_hist_page(HbSnippetsView *v)
     gtk_widget_add_css_class(back, "ghost");
     br = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_append(GTK_BOX(br), hb_icon_new("back", 13));
-    gtk_box_append(GTK_BOX(br), gtk_label_new("Snippets"));
+    gtk_box_append(GTK_BOX(br), gtk_label_new(_("Snippets")));
     gtk_button_set_child(GTK_BUTTON(back), br);
     g_signal_connect(back, "clicked", G_CALLBACK(on_show_hist), v);
     gtk_box_append(GTK_BOX(bar), back);
 
     /* history_enabled 开关 */
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 7);
-    l = gtk_label_new("记录命令历史");
+    l = gtk_label_new(_("记录命令历史"));
     gtk_widget_set_valign(l, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(row), l);
     if (hb_vault_settings(hb_store_vault(v->store), &o) == HB_OK && o) {
@@ -1022,15 +1023,15 @@ static GtkWidget *build_hist_page(HbSnippetsView *v)
 
     /* history_sync（BETA，insensitive） */
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 7);
-    l = gtk_label_new("同步");
+    l = gtk_label_new(_("同步"));
     gtk_widget_set_valign(l, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(row), l);
     sw = gtk_switch_new();
     gtk_widget_set_sensitive(sw, FALSE);
     gtk_widget_set_valign(sw, GTK_ALIGN_CENTER);
-    gtk_widget_set_tooltip_text(sw, "同步上线后可选");
+    gtk_widget_set_tooltip_text(sw, _("同步上线后可选"));
     gtk_box_append(GTK_BOX(row), sw);
-    sub = gtk_label_new("同步上线后可选");
+    sub = gtk_label_new(_("同步上线后可选"));
     gtk_widget_add_css_class(sub, "hb-dim");
     gtk_widget_set_valign(sub, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(row), sub);
@@ -1047,7 +1048,7 @@ static GtkWidget *build_hist_page(HbSnippetsView *v)
     /* 搜索 */
     v->h_search = gtk_search_entry_new();
     gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(v->h_search),
-                                          "搜索命令…");
+                                          _("搜索命令…"));
     gtk_widget_set_size_request(v->h_search, 180, -1);
     gtk_widget_set_valign(v->h_search, GTK_ALIGN_CENTER);
     g_signal_connect(v->h_search, "search-changed",
@@ -1060,7 +1061,7 @@ static GtkWidget *build_hist_page(HbSnippetsView *v)
         gtk_box_append(GTK_BOX(bar), spacer);
     }
 
-    clr = gtk_button_new_with_label("清空历史");
+    clr = gtk_button_new_with_label(_("清空历史"));
     gtk_widget_add_css_class(clr, "hb-btn");
     g_signal_connect(clr, "clicked", G_CALLBACK(on_clear_hist), v);
     gtk_box_append(GTK_BOX(bar), clr);

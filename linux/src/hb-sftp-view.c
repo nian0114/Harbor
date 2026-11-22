@@ -22,6 +22,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <glib/gi18n.h>
 
 /* ================= HbFileItem ================= */
 
@@ -337,7 +338,7 @@ static void on_ctl_fail(HbConnCtl *c, int code, const char *title,
     (void)c;
     hb_connect_view_error(HB_CONNECT_VIEW(p->conn_view), title,
                           details, code);
-    pane_fail_xfer(p, title ? title : "连接失败");
+    pane_fail_xfer(p, title ? title : _("连接失败"));
 }
 
 static void on_ctl_disconn(HbConnCtl *c, gpointer ud);
@@ -353,8 +354,8 @@ static void on_ctl_disconn(HbConnCtl *c, gpointer ud)
     (void)c;
     pane_set_state(p, PS_CONN);
     hb_connect_view_error(HB_CONNECT_VIEW(p->conn_view),
-                          "连接已断开", NULL, 0);
-    pane_fail_xfer(p, "连接已断开");
+                          _("连接已断开"), NULL, 0);
+    pane_fail_xfer(p, _("连接已断开"));
     p->sess = NULL;             /* 死会话：防止 stale 指针复用 */
 }
 
@@ -429,7 +430,7 @@ static void pane_pick(Pane *p, const char *host_id)
     if (!host_id) {
         /* Local */
         p->is_local = TRUE;
-        g_free(p->hname); p->hname = g_strdup("Local");
+        g_free(p->hname); p->hname = g_strdup(_("Local"));
         g_free(p->os_key); p->os_key = g_strdup("local");
         p->fs = hb_fs_local_new();
         hb_fs_realpath(p->fs, NULL, rp_cb, p, NULL);
@@ -553,7 +554,7 @@ static void on_sel_filter(GtkEditable *e, gpointer ud)
 static GtkWidget *build_select(Pane *p)
 {
     GtkWidget *box, *head, *b, *scroll, *hint;
-    const char *sidename = p->side == 0 ? "左栏" : "右栏";
+    const char *sidename = p->side == 0 ? _("左栏") : _("右栏");
     char *t;
 
     box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -581,7 +582,7 @@ static GtkWidget *build_select(Pane *p)
     {
         GtkWidget *r = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
         gtk_box_append(GTK_BOX(r), hb_icon_new("laptop", 13));
-        gtk_box_append(GTK_BOX(r), gtk_label_new("Local"));
+        gtk_box_append(GTK_BOX(r), gtk_label_new(_("Local")));
         gtk_button_set_child(GTK_BUTTON(b), r);
     }
     g_signal_connect(b, "clicked", G_CALLBACK(select_local), p);
@@ -595,7 +596,7 @@ static GtkWidget *build_select(Pane *p)
         gtk_box_append(GTK_BOX(f), hb_icon_new("search", 13));
         p->sel_entry = gtk_entry_new();
         gtk_entry_set_placeholder_text(GTK_ENTRY(p->sel_entry),
-                                       "过滤主机…");
+                                       _("过滤主机…"));
         gtk_widget_set_hexpand(p->sel_entry, TRUE);
         g_signal_connect(p->sel_entry, "changed",
                          G_CALLBACK(on_sel_filter), p);
@@ -614,7 +615,7 @@ static GtkWidget *build_select(Pane *p)
     gtk_box_append(GTK_BOX(box), scroll);
 
     hint = gtk_label_new(
-        "选择两端后可双栏互传（远端↔远端 / 远端↔本地）· 双击文件即开始传输");
+        _("选择两端后可双栏互传（远端↔远端 / 远端↔本地）· 双击文件即开始传输"));
     gtk_widget_add_css_class(hint, "hb-dim");
     gtk_widget_add_css_class(hint, "sftp-empty");
     gtk_label_set_wrap(GTK_LABEL(hint), TRUE);
@@ -808,8 +809,8 @@ static void list_cb(const hb_fs_result *r, gpointer ud)
         return;
     p->loading = FALSE;
     if (!r->ok) {
-        char *t = g_strdup_printf("读取目录失败: %s",
-            r->message ? r->message : "未知错误");
+        char *t = g_strdup_printf(_("读取目录失败: %s"),
+            r->message ? r->message : _("未知错误"));
         toast(p->v, t);
         g_free(t);
         return;
@@ -881,7 +882,7 @@ static void nav_sync(Pane *p)
     gtk_label_set_label(
         GTK_LABEL(g_object_get_data(G_OBJECT(p->browse_box),
                                     "title")),
-        p->is_local ? "Local" : p->hname);
+        p->is_local ? _("Local") : p->hname);
 }
 
 /* 进入目录；nav=TRUE 时把旧 cwd 压入 back 并清 fwd */
@@ -1073,8 +1074,8 @@ static void xfer_update_row(Xfer *x)
             eta = g_strdup_printf(" · ~%ds", s > 0 ? s : 1);
         }
         t = g_strdup_printf("%d%%%s%s · %s/s", (int)pct,
-                            x->phase == 1 ? " · 上传" :
-                            x->kind == X_RELAY ? " · 下载" : "",
+                            x->phase == 1 ? _(" · 上传") :
+                            x->kind == X_RELAY ? _(" · 下载") : "",
                             eta ? eta : "", sp);
         g_free(eta);
         gtk_label_set_label(GTK_LABEL(x->pct), t);
@@ -1084,22 +1085,22 @@ static void xfer_update_row(Xfer *x)
         /* 完成后显示平均速度（字节/全程耗时），不受瞬时突发影响 */
         if (el > 0.05 && x->acc) {
             char *sp = g_format_size((guint64)(x->acc / el));
-            char *tt = g_strdup_printf("已完成 · %s/s", sp);
+            char *tt = g_strdup_printf(_("已完成 · %s/s"), sp);
             gtk_label_set_label(GTK_LABEL(x->pct), tt);
             g_free(tt); g_free(sp);
         } else
-            gtk_label_set_label(GTK_LABEL(x->pct), "已完成");
+            gtk_label_set_label(GTK_LABEL(x->pct), _("已完成"));
         if (x->skipped)
-            gtk_label_set_label(GTK_LABEL(x->pct), "已跳过");
+            gtk_label_set_label(GTK_LABEL(x->pct), _("已跳过"));
         gtk_widget_add_css_class(x->fill, "xfer-done");
     } else if (x->state == XS_FAIL) {
-        t = g_strdup_printf("失败: %s",
-                            x->err ? x->err : "未知错误");
+        t = g_strdup_printf(_("失败: %s"),
+                            x->err ? x->err : _("未知错误"));
         gtk_label_set_label(GTK_LABEL(x->pct), t);
         g_free(t);
         gtk_widget_add_css_class(x->fill, "xfer-fail");
     } else {
-        gtk_label_set_label(GTK_LABEL(x->pct), "已取消");
+        gtk_label_set_label(GTK_LABEL(x->pct), _("已取消"));
         gtk_widget_add_css_class(x->fill, "xfer-cancel");
     }
 }
@@ -1114,7 +1115,7 @@ static void xhead_sync(HbSftpView *v)
     }
     gtk_widget_set_visible(v->xwrap, TRUE);   /* 队列栏常驻 */
     {
-        char *t = g_strdup_printf("传输队列 · %d 进行中", act);
+        char *t = g_strdup_printf(ngettext("传输队列 · %d 进行中", "传输队列 · %d 进行中", act), act);
         gtk_label_set_label(GTK_LABEL(v->xhead), t);
         g_free(t);
     }
@@ -1153,8 +1154,8 @@ static void xfer_notify(Xfer *x, XState st)
 {
     gboolean ok = st == XS_DONE;
     const char *kind = ok ? "ok" : st == XS_CANCEL ? "info" : "err";
-    const char *verb = ok ? "传输完成" :
-                       st == XS_CANCEL ? "传输已取消" : "传输失败";
+    const char *verb = ok ? _("传输完成") :
+                       st == XS_CANCEL ? _("传输已取消") : _("传输失败");
     char *t = g_strdup_printf("%s · %s", verb, x->name);
     char *b = g_strdup_printf("%s → %s",
         x->src_label ? x->src_label : "?",
@@ -1190,7 +1191,7 @@ static void xfer_finish(Xfer *x, XState st, const char *err)
         if (x->canc) { g_object_unref(x->canc); x->canc = NULL; }
         gtk_widget_set_visible(x->xbtn, st == XS_FAIL);
         if (x->xbtn && st == XS_FAIL)
-            gtk_button_set_label(GTK_BUTTON(x->xbtn), "重试");
+            gtk_button_set_label(GTK_BUTTON(x->xbtn), _("重试"));
         if (st != XS_RUN) xfer_notify(x, st);
     }
     xfer_update_row(x);
@@ -1254,7 +1255,7 @@ static void xfer_dispatch(Pane *p, const hb_sftp_result *r)
         xfer_finish(x, XS_CANCEL, NULL);
     else
         xfer_finish(x, XS_FAIL,
-                    r->message ? r->message : "传输失败");
+                    r->message ? r->message : _("传输失败"));
 }
 
 /* session 断开 → 其上所有 run 状态 xfer fail */
@@ -1267,7 +1268,7 @@ static void xfer_fail_session(HbSftpView *v, hb_session *s,
         if (x->state == XS_RUN &&
             (x->sess == s || (x->sp && x->sp->sess == s) ||
              (x->dp && x->dp->sess == s)))
-            xfer_finish(x, XS_FAIL, why ? why : "连接已断开");
+            xfer_finish(x, XS_FAIL, why ? why : _("连接已断开"));
     }
 }
 
@@ -1329,12 +1330,12 @@ static char *lc_dst(LCOp *o, const char *dst, gboolean is_dir,
     if (o->policy == HB_SFTP_SKIP) { *skipped = TRUE; return NULL; }
     if (o->policy == HB_SFTP_RENAME) {
         char *np = lc_rename_free(dst, is_dir);
-        if (!np) o->err = g_strdup("无法生成重命名目标");
+        if (!np) o->err = g_strdup(_("无法生成重命名目标"));
         return np;
     }
     /* OVERWRITE：文件截断；目标是目录则失败 */
     if (S_ISDIR(st.st_mode) && !is_dir) {
-        o->err = g_strdup("目标是目录");
+        o->err = g_strdup(_("目标是目录"));
         return NULL;
     }
     return g_strdup(dst);
@@ -1417,7 +1418,7 @@ static gboolean lc_walk(LCOp *o, const char *src, const char *dst,
         rd = lc_dst(o, dst, TRUE, &skipped);
         if (!rd) {
             if (skipped) { o->nskip++; return TRUE; }
-            if (!o->err) o->err = g_strdup("无法解析目标路径");
+            if (!o->err) o->err = g_strdup(_("无法解析目标路径"));
             return FALSE;
         }
         {
@@ -1483,7 +1484,7 @@ static void lc_work(GTask *t, gpointer src, gpointer data,
             g_task_return_boolean(t, TRUE);
             return;
         }
-        if (!o->err) o->err = g_strdup("无法解析目标路径");
+        if (!o->err) o->err = g_strdup(_("无法解析目标路径"));
         g_task_return_boolean(t, FALSE);
         return;
     }
@@ -1624,8 +1625,8 @@ static void enq_one(ConfCtx *cc, HbFileItem *i,
     x->src_path = g_strdup(i->path);
     x->dst_dir = g_strdup(cc->dp->cwd);
     x->src_label = g_strdup(!cc->sp || cc->sp->is_local
-                            ? "Local" : cc->sp->hname);
-    x->dst_label = g_strdup(cc->dp->is_local ? "Local" : cc->dp->hname);
+                            ? _("Local") : cc->sp->hname);
+    x->dst_label = g_strdup(cc->dp->is_local ? _("Local") : cc->dp->hname);
     x->policy = pol;
     if (cc->sp && !cc->sp->is_local && !cc->dp->is_local)
         x->kind = X_RELAY;
@@ -1714,7 +1715,7 @@ static void enq_one(ConfCtx *cc, HbFileItem *i,
         }
         {
             char *t = g_mkdtemp(x->tmp_dir);
-            if (!t) { xfer_finish(x, XS_FAIL, "无法创建临时目录"); return; }
+            if (!t) { xfer_finish(x, XS_FAIL, _("无法创建临时目录")); return; }
         }
         x->tmp_path = path_join(x->tmp_dir, x->name);
         x->phase = 0;
@@ -1793,29 +1794,29 @@ static void conf_ask(ConfCtx *cc, HbFileItem *it)
     char *t;
     cd->cc = cc;
     cd->item = it;
-    d = adw_alert_dialog_new("目标已存在", NULL);
+    d = adw_alert_dialog_new(_("目标已存在"), NULL);
     if (it->is_dir)
         t = g_strdup_printf(
-            "「%s」已存在 — 将合并目录，按所选方式处理同名文件",
+            _("「%s」已存在 — 将合并目录，按所选方式处理同名文件"),
             it->name);
     else
-        t = g_strdup_printf("「%s」在对侧目录已存在。选择处理方式：",
+        t = g_strdup_printf(_("「%s」在对侧目录已存在。选择处理方式："),
                             it->name);
     adw_alert_dialog_set_body(ADW_ALERT_DIALOG(d), t);
     g_free(t);
     cd->dlg = d;
     adw_alert_dialog_add_response(ADW_ALERT_DIALOG(d), "cancel",
-                                  "取消传输");
-    adw_alert_dialog_add_response(ADW_ALERT_DIALOG(d), "skip", "跳过");
+                                  _("取消传输"));
+    adw_alert_dialog_add_response(ADW_ALERT_DIALOG(d), "skip", _("跳过"));
     adw_alert_dialog_add_response(ADW_ALERT_DIALOG(d), "rename",
-                                  "重命名");
-    adw_alert_dialog_add_response(ADW_ALERT_DIALOG(d), "ov", "覆盖");
+                                  _("重命名"));
+    adw_alert_dialog_add_response(ADW_ALERT_DIALOG(d), "ov", _("覆盖"));
     adw_alert_dialog_set_response_appearance(
         ADW_ALERT_DIALOG(d), "ov", ADW_RESPONSE_DESTRUCTIVE);
     adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(d), "ov");
     adw_alert_dialog_set_close_response(ADW_ALERT_DIALOG(d), "cancel");
     cd->apply_all = gtk_check_button_new_with_label(
-        "对本次其余项目都适用");
+        _("对本次其余项目都适用"));
     box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_box_append(GTK_BOX(box), cd->apply_all);
     adw_alert_dialog_set_extra_child(ADW_ALERT_DIALOG(d), box);
@@ -1870,7 +1871,7 @@ static void xfer_enqueue(HbSftpView *v, Pane *sp, GList *items,
     ConfCtx *cc;
     if (!items) return;
     if (!dp || dp->state != PS_BROWSE || !dp->fs) {
-        toast(v, "请先在对侧栏选择主机");
+        toast(v, _("请先在对侧栏选择主机"));
         sel_items_free(items);
         return;
     }
@@ -1945,7 +1946,7 @@ static void op_cb_refresh(const hb_fs_result *r, gpointer ud)
 {
     Pane *p = ud;
     if (!r->ok) {
-        char *t = g_strdup_printf("操作失败: %s",
+        char *t = g_strdup_printf(_("操作失败: %s"),
             r->message ? r->message : "");
         toast(p->v, t); g_free(t);
     }
@@ -1977,7 +1978,7 @@ static void on_mkdir_name(const char *text, gpointer ud)
 }
 static void act_new_folder(Pane *p)
 {
-    hb_dialog_prompt(GTK_WIDGET(p->v), "新建文件夹", "名称",
+    hb_dialog_prompt(GTK_WIDGET(p->v), _("新建文件夹"), _("名称"),
                      "new-folder", on_mkdir_name, p);
 }
 
@@ -2038,7 +2039,7 @@ static void delete_items(Pane *p, GList *items)
     }
     p->pend_dels = g_list_append(p->pend_dels, pd);
     {
-        char *t = g_strdup_printf("已删除 %u 个项目", n);
+        char *t = g_strdup_printf(ngettext("已删除 %u 个项目", "已删除 %u 个项目", n), n);
         hb_toast_undo_destroy(GTK_WIDGET(p->v), t,
             pend_undo, (GDestroyNotify)pend_exec, pd);
         g_free(t);
@@ -2059,12 +2060,12 @@ static void act_delete(Pane *p)
     }
     if (ndir) {
         char *t = g_strdup_printf(
-            "将递归删除 %u 个项目（含 %u 个目录）。删除后 9 秒内可撤销。",
+            _("将递归删除 %u 个项目（含 %u 个目录）。删除后 9 秒内可撤销。"),
             n, ndir);
         DelConf *dc = g_new0(DelConf, 1);
         dc->p = p;
         dc->items = items;
-        hb_dialog_confirm(GTK_WIDGET(p->v), "删除项目", t, "删除",
+        hb_dialog_confirm(GTK_WIDGET(p->v), _("删除项目"), t, _("删除"),
                           TRUE, on_deldir_conf, dc);
         g_free(t);
         return;
@@ -2084,15 +2085,15 @@ static const char *menu_names[] = {
 static GMenu *build_pane_menu(Pane *p)
 {
     GMenu *m = g_menu_new();
-    g_menu_append(m, "打开", "pane.open");
-    g_menu_append(m, "复制到对侧栏", "pane.copy");
-    g_menu_append(m, "重命名…", "pane.rename");
-    g_menu_append(m, "删除", "pane.delete");
-    g_menu_append(m, "新建文件夹…", "pane.mkdir");
-    g_menu_append(m, "修改权限…", "pane.chmod");
-    g_menu_append(m, "刷新", "pane.refresh");
-    g_menu_append(m, "全选", "pane.selectall");
-    g_menu_append(m, "显示隐藏文件", "pane.hidden");
+    g_menu_append(m, _("打开"), "pane.open");
+    g_menu_append(m, _("复制到对侧栏"), "pane.copy");
+    g_menu_append(m, _("重命名…"), "pane.rename");
+    g_menu_append(m, _("删除"), "pane.delete");
+    g_menu_append(m, _("新建文件夹…"), "pane.mkdir");
+    g_menu_append(m, _("修改权限…"), "pane.chmod");
+    g_menu_append(m, _("刷新"), "pane.refresh");
+    g_menu_append(m, _("全选"), "pane.selectall");
+    g_menu_append(m, _("显示隐藏文件"), "pane.hidden");
     (void)p;
     return m;
 }
@@ -2231,7 +2232,7 @@ static gboolean on_drop(GtkDropTarget *dt, const GValue *val,
     HbSftpView *v = dp->v;
     (void)x; (void)y; (void)ud;
     if (dp->state != PS_BROWSE || !dp->fs) {
-        toast(v, "请先在对侧栏选择主机");
+        toast(v, _("请先在对侧栏选择主机"));
         return FALSE;
     }
     if (G_VALUE_HOLDS(val, GDK_TYPE_FILE_LIST)) {
@@ -2455,7 +2456,7 @@ static void act_chmod(Pane *p, GList *items)
     AdwDialog *dlg;
     GtkWidget *box, *grid, *foot, *btn;
     int k;
-    static const char *heads[] = { "所有者", "组", "其他" };
+    static const char *heads[] = { N_("所有者"), N_("组"), N_("其他") };
     if (!items) return;
     c = g_new0(ChmodCtx, 1);
     c->p = p;
@@ -2473,7 +2474,7 @@ static void act_chmod(Pane *p, GList *items)
     gtk_widget_set_margin_top(box, 14);
     gtk_widget_set_margin_bottom(box, 14);
     {
-        GtkWidget *t = gtk_label_new("修改权限");
+        GtkWidget *t = gtk_label_new(_("修改权限"));
         gtk_widget_add_css_class(t, "h-name");
         gtk_box_append(GTK_BOX(box), t);
     }
@@ -2481,7 +2482,7 @@ static void act_chmod(Pane *p, GList *items)
     gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
     gtk_grid_set_column_spacing(GTK_GRID(grid), 14);
     for (k = 0; k < 3; k++) {
-        GtkWidget *h = gtk_label_new(heads[k]);
+        GtkWidget *h = gtk_label_new(_(heads[k]));
         gtk_widget_add_css_class(h, "hb-dim");
         gtk_grid_attach(GTK_GRID(grid), h, k + 1, 0, 1, 1);
     }
@@ -2505,7 +2506,7 @@ static void act_chmod(Pane *p, GList *items)
     gtk_widget_set_halign(grid, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(box), grid);
     c->oct = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(c->oct), "八进制，如 755");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(c->oct), _("八进制，如 755"));
     gtk_editable_set_width_chars(GTK_EDITABLE(c->oct), 6);
     gtk_widget_set_halign(c->oct, GTK_ALIGN_CENTER);
     g_signal_connect(c->oct, "changed",
@@ -2513,14 +2514,14 @@ static void act_chmod(Pane *p, GList *items)
     gtk_box_append(GTK_BOX(box), c->oct);
     foot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(foot, GTK_ALIGN_END);
-    btn = gtk_button_new_with_label("取消");
+    btn = gtk_button_new_with_label(_("取消"));
     gtk_widget_add_css_class(btn, "hb-btn");
     g_object_set_data(G_OBJECT(btn), "cc", c);
     g_object_set_data(G_OBJECT(btn), "dlg", dlg);
     g_signal_connect(btn, "clicked",
                      G_CALLBACK(on_chmod_cancel_btn), NULL);
     gtk_box_append(GTK_BOX(foot), btn);
-    btn = gtk_button_new_with_label("应用");
+    btn = gtk_button_new_with_label(_("应用"));
     gtk_widget_add_css_class(btn, "hb-btn");
     gtk_widget_add_css_class(btn, "primary");
     g_object_set_data(G_OBJECT(btn), "cc", c);
@@ -2582,7 +2583,7 @@ static void on_file_changed(GFileMonitor *m, GFile *f, GFile *o,
     if (ev != G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT &&
         ev != G_FILE_MONITOR_EVENT_CREATED)
         return;
-    t = g_strdup_printf("已修改 %s · 上传回远端", oc->name);
+    t = g_strdup_printf(_("已修改 %s · 上传回远端"), oc->name);
     /* toast 拥有 UpBack（dismiss 时释放），不引用 OpenCtx：
      * pane teardown 先于 toast 消失也不会 UAF */
     u = g_new0(UpBack, 1);
@@ -2590,7 +2591,7 @@ static void on_file_changed(GFileMonitor *m, GFile *f, GFile *o,
     u->local_path = g_strdup(oc->local_path);
     u->remote_path = g_strdup(oc->remote_path);
     if (w)
-        hb_window_toast_action2(w, t, "上传", 9,
+        hb_window_toast_action2(w, t, _("上传"), 9,
             (GCallback)upload_back_cb,
             (GDestroyNotify)upback_free, u);
     else
@@ -2609,7 +2610,7 @@ static gboolean open_done(Pane *p, const hb_sftp_result *r)
     if (r->kind == HB_SFTP_R_PROGRESS) return TRUE;
     g_hash_table_steal(p->open_reqs, GUINT_TO_POINTER(r->req));
     if (r->status != HB_SFTP_OK) {
-        char *t = g_strdup_printf("下载失败: %s",
+        char *t = g_strdup_printf(_("下载失败: %s"),
             r->message ? r->message : "");
         toast(p->v, t); g_free(t);
         open_ctx_free(oc);
@@ -2660,7 +2661,7 @@ static void act_open(Pane *p, GList *items)
         {
             char *t = g_mkdtemp(oc->dir);
             if (!t) {
-                toast(p->v, "无法创建缓存目录");
+                toast(p->v, _("无法创建缓存目录"));
                 open_ctx_free(oc);
                 sel_items_free(items);
                 return;
@@ -2690,7 +2691,7 @@ static void act_rename(Pane *p, GList *items)
     rc = g_new0(RenCtx, 1);
     rc->p = p;
     rc->old = g_strdup(i->path);
-    hb_dialog_prompt(GTK_WIDGET(p->v), "重命名", "新文件名",
+    hb_dialog_prompt(GTK_WIDGET(p->v), _("重命名"), _("新文件名"),
                      i->name, on_rename_name, rc);
     sel_items_free(items);
 }
@@ -2744,7 +2745,7 @@ static GtkWidget *build_browser(Pane *p)
         gtk_widget_add_css_class(fb, "ghost");
         gtk_widget_add_css_class(fb, "sm");
         gtk_box_append(GTK_BOX(r), hb_icon_new("search", 13));
-        gtk_box_append(GTK_BOX(r), gtk_label_new("Filter"));
+        gtk_box_append(GTK_BOX(r), gtk_label_new(_("Filter")));
         gtk_button_set_child(GTK_BUTTON(fb), r);
         g_signal_connect(fb, "clicked",
                          G_CALLBACK(on_filter_toggle), p);
@@ -2767,7 +2768,7 @@ static GtkWidget *build_browser(Pane *p)
     gtk_widget_add_css_class(p->filter_row, "sftp-head");
     p->filter_entry = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(p->filter_entry),
-                                   "过滤文件名…");
+                                   _("过滤文件名…"));
     gtk_widget_set_hexpand(p->filter_entry, TRUE);
     g_signal_connect(p->filter_entry, "changed",
                      G_CALLBACK(on_filter_text), p);
@@ -2794,7 +2795,7 @@ static GtkWidget *build_browser(Pane *p)
     gtk_button_set_child(GTK_BUTTON(p->up_b),
                          hb_icon_new("up", 13));
     gtk_widget_add_css_class(p->up_b, "navbtn");
-    gtk_widget_set_tooltip_text(p->up_b, "上级目录");
+    gtk_widget_set_tooltip_text(p->up_b, _("上级目录"));
     g_signal_connect(p->up_b, "clicked", G_CALLBACK(on_up), p);
     gtk_box_append(GTK_BOX(nav), p->up_b);
     p->crumbs = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
@@ -2841,11 +2842,11 @@ static GtkWidget *build_browser(Pane *p)
             GTK_COLUMN_VIEW(p->colview), col);                  \
         g_object_unref(col);                                    \
     } while (0)
-    ADDCOL("Name", fac_setup, fac_bind_name, name_cmp);
-    ADDCOL("修改时间", fac_setup, fac_bind_mtime, mtime_cmp);
-    ADDCOL("大小", fac_setup, fac_bind_size, size_cmp);
-    ADDCOL("类型", fac_setup, fac_bind_kind, name_cmp);
-    ADDCOL("权限", fac_setup, fac_bind_mode, mode_cmp);
+    ADDCOL(_("Name"), fac_setup, fac_bind_name, name_cmp);
+    ADDCOL(_("修改时间"), fac_setup, fac_bind_mtime, mtime_cmp);
+    ADDCOL(_("大小"), fac_setup, fac_bind_size, size_cmp);
+    ADDCOL(_("类型"), fac_setup, fac_bind_kind, name_cmp);
+    ADDCOL(_("权限"), fac_setup, fac_bind_mode, mode_cmp);
 #undef ADDCOL
 
     {
@@ -3074,7 +3075,7 @@ GtkWidget *hb_sftp_view_new(HbStore *st)
         GtkWidget *h = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         gtk_widget_add_css_class(h, "xfer-head");
         gtk_box_append(GTK_BOX(h), hb_icon_new("fwd", 13));
-        v->xhead = gtk_label_new("传输队列 · 0 进行中");
+        v->xhead = gtk_label_new(_("传输队列 · 0 进行中"));
         gtk_label_set_xalign(GTK_LABEL(v->xhead), 0);
         gtk_box_append(GTK_BOX(h), v->xhead);
         {
@@ -3082,7 +3083,7 @@ GtkWidget *hb_sftp_view_new(HbStore *st)
             gtk_widget_set_hexpand(sp, TRUE);
             gtk_box_append(GTK_BOX(h), sp);
         }
-        v->xclear = gtk_button_new_with_label("清空已完成");
+        v->xclear = gtk_button_new_with_label(_("清空已完成"));
         gtk_widget_add_css_class(v->xclear, "hb-btn");
         gtk_widget_add_css_class(v->xclear, "ghost");
         gtk_widget_add_css_class(v->xclear, "sm");

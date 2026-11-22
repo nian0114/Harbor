@@ -16,6 +16,7 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdlib.h>
+#include <glib/gi18n.h>
 
 typedef struct {
     GtkWidget *parent;
@@ -173,11 +174,11 @@ static void do_probe(FwdForm *f)
     if (f->dead)
         return;
     if (!addr_ok(addr)) {
-        set_port_err(f, "绑定地址必须是数字 IP（IPv4/IPv6）或 localhost");
+        set_port_err(f, _("绑定地址必须是数字 IP（IPv4/IPv6）或 localhost"));
         return;
     }
     if (port < 1 || port > 65535) {
-        set_port_err(f, "端口必须在 1–65535");
+        set_port_err(f, _("端口必须在 1–65535"));
         return;
     }
     if (kind == 1 || port_held_by_self(f)) {   /* remote 不占本机端口 */
@@ -190,7 +191,7 @@ static void do_probe(FwdForm *f)
     if (hit) {
         const char *ha = hb_obj_get_str(hit, "bind_addr");
         char *m = g_strdup_printf(
-            "端口 %d 已被另一条转发规则占用（%s:%d）",
+            _("端口 %d 已被另一条转发规则占用（%s:%d）"),
             port, ha && *ha ? ha : "127.0.0.1",
             (int)hb_obj_get_int(hit, "bind_port", 0));
         set_port_err(f, m);
@@ -201,7 +202,7 @@ static void do_probe(FwdForm *f)
     if (objs) hb_obj_list_free(objs, n);
     /* 真实 bind 预检 */
     if (hb_pf_probe_bind(addr, port, &err) != HB_OK) {
-        set_port_err(f, err ? err : "端口不可用");
+        set_port_err(f, err ? err : _("端口不可用"));
         free(err);
         return;
     }
@@ -253,13 +254,13 @@ static void refresh_hints(FwdForm *f)
     const char *hint = NULL;
     if (kind == 1) {   /* remote：绑定在服务端 */
         if (!is_loopback(addr))
-            hint = "需要服务器 sshd_config 设置 "
-                   "GatewayPorts yes/clientspecified，否则仅绑定回环";
+            hint = _("需要服务器 sshd_config 设置 "
+                   "GatewayPorts yes/clientspecified，否则仅绑定回环");
     } else {           /* local/dynamic：绑定在本机 */
         if (!is_loopback(addr))
-            hint = "将对局域网开放此端口";
+            hint = _("将对局域网开放此端口");
         else if (bind_port(f) > 0 && bind_port(f) < 1024)
-            hint = "绑定 1024 以下端口需要 root 权限";
+            hint = _("绑定 1024 以下端口需要 root 权限");
     }
     gtk_label_set_text(GTK_LABEL(f->hint_l), hint ? hint : "");
     gtk_widget_set_visible(f->hint_l, hint != NULL);
@@ -278,7 +279,7 @@ static void refresh_cmd(FwdForm *f)
     if (kind == 0) {
         const char *da = gtk_editable_get_text(GTK_EDITABLE(f->dest_e));
         g_string_append_printf(s, "-L %s:%d:%s:%d", ba, bp,
-            da && *da ? da : "目标地址",
+            da && *da ? da : _("目标地址"),
             (int)gtk_spin_button_get_value(
                 GTK_SPIN_BUTTON(f->dport_sb)));
     } else if (kind == 1) {
@@ -339,15 +340,15 @@ static void on_kind_sel(GObject *dd, GParamSpec *ps, gpointer ud)
 {
     FwdForm *f = ud;
     static const char *subs[] = {
-        "本机 绑定地址:端口 → 经 SSH 服务器访问 目标地址:端口",
-        "服务器 绑定地址:端口 → 经本机访问 目标地址:端口（需要 sshd 允许）",
-        "本机 SOCKS5 代理端口 → 目标由客户端逐连接指定",
+        N_("本机 绑定地址:端口 → 经 SSH 服务器访问 目标地址:端口"),
+        N_("服务器 绑定地址:端口 → 经本机访问 目标地址:端口（需要 sshd 允许）"),
+        N_("本机 SOCKS5 代理端口 → 目标由客户端逐连接指定"),
     };
     int k;
     (void)dd; (void)ps;
     if (f->dead) return;
     k = kind_sel(f);
-    gtk_label_set_text(GTK_LABEL(f->kind_sub), subs[k]);
+    gtk_label_set_text(GTK_LABEL(f->kind_sub), _(subs[k]));
     gtk_widget_set_visible(f->dest_row, k != 2);
     schedule_probe(f);
     refresh_cmd(f);
@@ -370,31 +371,31 @@ static gboolean validate(FwdForm *f, char **err_out, GtkWidget **focus)
     const char *da;
     *focus = NULL;
     if (!addr_ok(bind_addr(f))) {
-        *err_out = g_strdup("绑定地址必须是数字 IP 或 localhost");
+        *err_out = g_strdup(_("绑定地址必须是数字 IP 或 localhost"));
         *focus = f->bind_e;
         return FALSE;
     }
     if (bind_port(f) < 1 || bind_port(f) > 65535) {
-        *err_out = g_strdup("绑定端口必须在 1–65535");
+        *err_out = g_strdup(_("绑定端口必须在 1–65535"));
         *focus = f->port_sb;
         return FALSE;
     }
     if (kind != 2) {
         da = gtk_editable_get_text(GTK_EDITABLE(f->dest_e));
         if (!da || !*da) {
-            *err_out = g_strdup("目标地址不能为空");
+            *err_out = g_strdup(_("目标地址不能为空"));
             *focus = f->dest_e;
             return FALSE;
         }
         if ((int)gtk_spin_button_get_value(GTK_SPIN_BUTTON(f->dport_sb))
                 < 1) {
-            *err_out = g_strdup("目标端口必须在 1–65535");
+            *err_out = g_strdup(_("目标端口必须在 1–65535"));
             *focus = f->dport_sb;
             return FALSE;
         }
     }
     if (!via_id(f)) {
-        *err_out = g_strdup("请选择经由 SSH 主机");
+        *err_out = g_strdup(_("请选择经由 SSH 主机"));
         *focus = f->via_dd;
         return FALSE;
     }
@@ -525,11 +526,11 @@ void hb_forward_form_open(GtkWidget *parent, HbStore *st, hb_obj *obj)
     if (obj)
         f->obj = hb_obj_copy(obj);   /* 深拷贝：编辑期间不受外部变更影响 */
 
-    f->dlg = hb_modal_new(obj ? "Edit forwarding" : "New forwarding",
+    f->dlg = hb_modal_new(obj ? _("Edit forwarding") : _("New forwarding"),
                           &body, &foot);
 
     /* 类型 */
-    field_label(body, "类型");
+    field_label(body, _("类型"));
     sm = gtk_string_list_new(NULL);
     for (i = 0; i < 3; i++)
         gtk_string_list_append(sm, kKindLbl[i]);
@@ -546,11 +547,11 @@ void hb_forward_form_open(GtkWidget *parent, HbStore *st, hb_obj *obj)
         GtkWidget *c1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
         GtkWidget *c2 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
         gtk_widget_set_hexpand(c1, TRUE);
-        field_label(c1, "绑定地址");
+        field_label(c1, _("绑定地址"));
         f->bind_e = gtk_entry_new();
         gtk_editable_set_text(GTK_EDITABLE(f->bind_e), "127.0.0.1");
         gtk_box_append(GTK_BOX(c1), f->bind_e);
-        field_label(c2, "端口");
+        field_label(c2, _("端口"));
         f->port_sb = gtk_spin_button_new_with_range(1, 65535, 1);
         gtk_spin_button_set_value(GTK_SPIN_BUTTON(f->port_sb), 13306);
         gtk_widget_set_size_request(f->port_sb, 110, -1);
@@ -578,12 +579,12 @@ void hb_forward_form_open(GtkWidget *parent, HbStore *st, hb_obj *obj)
         GtkWidget *c1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
         GtkWidget *c2 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
         gtk_widget_set_hexpand(c1, TRUE);
-        field_label(c1, "目标地址");
+        field_label(c1, _("目标地址"));
         f->dest_e = gtk_entry_new();
         gtk_entry_set_placeholder_text(GTK_ENTRY(f->dest_e),
                                        "db.internal");
         gtk_box_append(GTK_BOX(c1), f->dest_e);
-        field_label(c2, "目标端口");
+        field_label(c2, _("目标端口"));
         f->dport_sb = gtk_spin_button_new_with_range(1, 65535, 1);
         gtk_spin_button_set_value(GTK_SPIN_BUTTON(f->dport_sb), 3306);
         gtk_widget_set_size_request(f->dport_sb, 110, -1);
@@ -594,7 +595,7 @@ void hb_forward_form_open(GtkWidget *parent, HbStore *st, hb_obj *obj)
     gtk_box_append(GTK_BOX(body), f->dest_row);
 
     /* 经由 SSH 主机（proto=ssh） */
-    field_label(body, "经由 SSH 主机");
+    field_label(body, _("经由 SSH 主机"));
     sm = gtk_string_list_new(NULL);
     f->via_ids = g_ptr_array_new_with_free_func(g_free);
     hosts = hb_store_list(st, "host", &nh);
@@ -629,12 +630,12 @@ void hb_forward_form_open(GtkWidget *parent, HbStore *st, hb_obj *obj)
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
         GtkWidget *vb = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-        GtkWidget *t = gtk_label_new("随主机连接自动启动");
+        GtkWidget *t = gtk_label_new(_("随主机连接自动启动"));
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_box_append(GTK_BOX(vb), t);
         {
             GtkWidget *sub = gtk_label_new(
-                "该 SSH 主机连上时自动拉起此规则");
+                _("该 SSH 主机连上时自动拉起此规则"));
             gtk_widget_add_css_class(sub, "hb-dim");
             gtk_label_set_xalign(GTK_LABEL(sub), 0);
             gtk_box_append(GTK_BOX(vb), sub);
@@ -649,7 +650,7 @@ void hb_forward_form_open(GtkWidget *parent, HbStore *st, hb_obj *obj)
     gtk_box_append(GTK_BOX(body), row);
 
     /* 等效命令（只读可选中） */
-    field_label(body, "等效命令");
+    field_label(body, _("等效命令"));
     f->cmd_l = gtk_label_new("");
     gtk_label_set_selectable(GTK_LABEL(f->cmd_l), TRUE);
     gtk_widget_add_css_class(f->cmd_l, "mono");
@@ -663,17 +664,17 @@ void hb_forward_form_open(GtkWidget *parent, HbStore *st, hb_obj *obj)
         GtkWidget *fl = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         gtk_widget_add_css_class(fl, "hb-modal-footer");
         gtk_widget_set_halign(fl, GTK_ALIGN_END);
-        b = gtk_button_new_with_label("取消");
+        b = gtk_button_new_with_label(_("取消"));
         gtk_widget_add_css_class(b, "hb-btn");
         g_signal_connect_swapped(b, "clicked",
             G_CALLBACK(adw_dialog_close), f->dlg);
         gtk_box_append(GTK_BOX(fl), b);
-        f->save_btn = gtk_button_new_with_label("保存");
+        f->save_btn = gtk_button_new_with_label(_("保存"));
         gtk_widget_add_css_class(f->save_btn, "hb-btn");
         g_signal_connect(f->save_btn, "clicked",
             G_CALLBACK(on_save), f);
         gtk_box_append(GTK_BOX(fl), f->save_btn);
-        f->savestart_btn = gtk_button_new_with_label("保存并启动");
+        f->savestart_btn = gtk_button_new_with_label(_("保存并启动"));
         gtk_widget_add_css_class(f->savestart_btn, "hb-btn");
         gtk_widget_add_css_class(f->savestart_btn, "primary");
         g_signal_connect(f->savestart_btn, "clicked",

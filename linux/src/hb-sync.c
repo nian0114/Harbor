@@ -18,6 +18,7 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <glib/gi18n.h>
 
 #define POLL_SEC         30
 #define PUSH_DEBOUNCE_MS 1000
@@ -301,8 +302,8 @@ static void req_done(GObject *src, GAsyncResult *res, gpointer ud)
             json_object_unref(obj);
             g_free(txt);
             sign_out_local(s, wipe, NULL);
-            hb_notify_post("err", "此设备已被吊销",
-                           wipe ? "账号已退出，本地数据已擦除" : "账号已退出",
+            hb_notify_post("err", _("此设备已被吊销"),
+                           wipe ? _("账号已退出，本地数据已擦除") : _("账号已退出"),
                            NULL);
             g_free(r);
             return;
@@ -310,7 +311,7 @@ static void req_done(GObject *src, GAsyncResult *res, gpointer ud)
         if (code && !strcmp(code, "unauthorized")) {
             json_object_unref(obj);
             g_free(txt);
-            sign_out_local(s, FALSE, "登录已失效，请重新登录");
+            sign_out_local(s, FALSE, _("登录已失效，请重新登录"));
             g_free(r);
             return;
         }
@@ -576,36 +577,36 @@ static void op_fail_from_resp(OpCtx *o, guint st, JsonObject *obj)
     int ra = 0;
     JsonNode *n;
     if (st == 0) {
-        op_result(o, FALSE, "network", "无法连接服务器", 0);
+        op_result(o, FALSE, "network", _("无法连接服务器"), 0);
         return;
     }
     if (st == 429) {
         n = obj ? json_object_get_member(obj, "retry_after") : NULL;
         if (n && JSON_NODE_HOLDS_VALUE(n))
             ra = (int)json_node_get_int(n);
-        msg = msg ? msg : "请求过于频繁，请稍后再试";
+        msg = msg ? msg : _("请求过于频繁，请稍后再试");
         op_result(o, FALSE, "rate_limited", msg, ra);
         return;
     }
     if (code && !strcmp(code, "totp_required")) {
-        op_result(o, FALSE, "totp_required", "需要两步验证码", 0);
+        op_result(o, FALSE, "totp_required", _("需要两步验证码"), 0);
         return;
     }
     if (code && !strcmp(code, "totp_invalid")) {
-        op_result(o, FALSE, "totp_invalid", "两步验证码错误", 0);
+        op_result(o, FALSE, "totp_invalid", _("两步验证码错误"), 0);
         return;
     }
     if (code && !strcmp(code, "invalid_credentials")) {
-        op_result(o, FALSE, "invalid_credentials", "邮箱、密码或恢复码错误",
+        op_result(o, FALSE, "invalid_credentials", _("邮箱、密码或恢复码错误"),
                   0);
         return;
     }
     if (code && !strcmp(code, "email_taken")) {
-        op_result(o, FALSE, "email_taken", "该邮箱已注册", 0);
+        op_result(o, FALSE, "email_taken", _("该邮箱已注册"), 0);
         return;
     }
     op_result(o, FALSE, code ? code : "server_error",
-              msg ? msg : "服务器错误", 0);
+              msg ? msg : _("服务器错误"), 0);
 }
 
 /* ============================ login ============================ */
@@ -630,7 +631,7 @@ static void login_post_done(HbSyncService *s, guint st, const char *body,
             finish_signin(o);
             return;
         }
-        op_result(o, FALSE, "server_error", "服务器响应异常", 0);
+        op_result(o, FALSE, "server_error", _("服务器响应异常"), 0);
     } else {
         op_fail_from_resp(o, st, obj);
     }
@@ -640,7 +641,7 @@ static void login_post_done(HbSyncService *s, guint st, const char *body,
 static void login_after_work(OpCtx *o)
 {
     if (o->err != HB_OK || o->gen != o->svc->gen) {
-        op_result(o, FALSE, "server_error", "内部错误", 0);
+        op_result(o, FALSE, "server_error", _("内部错误"), 0);
         op_end(o);
         return;
     }
@@ -675,7 +676,7 @@ void hb_sync_service_login(HbSyncService *s, const char *server,
     o->totp = totp && *totp ? g_strdup(totp) : NULL;
     body = NULL;
     if (hb_sync_prelogin_body(em, &body) != HB_OK) {
-        op_result(o, FALSE, "server_error", "内部错误", 0);
+        op_result(o, FALSE, "server_error", _("内部错误"), 0);
         op_end(o);
         return;
     }
@@ -698,7 +699,7 @@ static void register_post_done(HbSyncService *s, guint st, const char *body,
         return;
     }
     if (st == 200)
-        op_result(o, FALSE, "server_error", "服务器响应异常", 0);
+        op_result(o, FALSE, "server_error", _("服务器响应异常"), 0);
     else
         op_fail_from_resp(o, st, obj);
     op_end(o);
@@ -707,7 +708,7 @@ static void register_post_done(HbSyncService *s, guint st, const char *body,
 static void register_after_work(OpCtx *o)
 {
     if (o->err != HB_OK || o->gen != o->svc->gen) {
-        op_result(o, FALSE, "server_error", "内部错误", 0);
+        op_result(o, FALSE, "server_error", _("内部错误"), 0);
         op_end(o);
         return;
     }
@@ -741,7 +742,7 @@ static void recover_finish_done(HbSyncService *s, guint st, const char *body,
         return;
     }
     if (st == 200)
-        op_result(o, FALSE, "server_error", "服务器响应异常", 0);
+        op_result(o, FALSE, "server_error", _("服务器响应异常"), 0);
     else
         op_fail_from_resp(o, st, obj);
     op_end(o);
@@ -750,7 +751,7 @@ static void recover_finish_done(HbSyncService *s, guint st, const char *body,
 static void recover_after_work(OpCtx *o)
 {
     if (o->err != HB_OK || o->gen != o->svc->gen) {
-        op_result(o, FALSE, "server_error", "内部错误", 0);
+        op_result(o, FALSE, "server_error", _("内部错误"), 0);
         op_end(o);
         return;
     }
@@ -773,7 +774,7 @@ static void recover_start_done(HbSyncService *s, guint st, const char *body,
         }
     }
     if (st == 200)
-        op_result(o, FALSE, "server_error", "服务器响应异常", 0);
+        op_result(o, FALSE, "server_error", _("服务器响应异常"), 0);
     else
         op_fail_from_resp(o, st, obj);
     op_end(o);
@@ -792,7 +793,7 @@ void hb_sync_service_recover(HbSyncService *s, const char *server,
     o->words_in = g_strdup(words);
     o->new_password = nfkc(new_password);
     if (hb_sync_recover_start_body(em, words, &body) != HB_OK) {
-        op_result(o, FALSE, "invalid_credentials", "恢复码无效", 0);
+        op_result(o, FALSE, "invalid_credentials", _("恢复码无效"), 0);
         op_end(o);
         return;
     }
@@ -819,7 +820,7 @@ static void simple_post_done(HbSyncService *s, guint st, const char *body,
 static void rotate_after_work(OpCtx *o)
 {
     if (o->err != HB_OK || o->gen != o->svc->gen) {
-        op_result(o, FALSE, "server_error", "内部错误", 0);
+        op_result(o, FALSE, "server_error", _("内部错误"), 0);
         op_end(o);
         return;
     }
@@ -830,7 +831,7 @@ static void rotate_after_work(OpCtx *o)
 static void password_after_work(OpCtx *o)
 {
     if (o->err != HB_OK || o->gen != o->svc->gen) {
-        op_result(o, FALSE, "server_error", "内部错误", 0);
+        op_result(o, FALSE, "server_error", _("内部错误"), 0);
         op_end(o);
         return;
     }
@@ -858,7 +859,7 @@ static void authed_prelogin(OpCtx *o, const char *email)
 {
     char *body = NULL;
     if (hb_sync_prelogin_body(email, &body) != HB_OK) {
-        op_result(o, FALSE, "server_error", "内部错误", 0);
+        op_result(o, FALSE, "server_error", _("内部错误"), 0);
         op_end(o);
         return;
     }
@@ -880,7 +881,7 @@ void hb_sync_service_rotate_recovery(HbSyncService *s, const char *password,
     hb_sync_get_account(s->sync, &aid, &em, &srv, &dev);
     if (!em) {
         g_free(aid); g_free(srv); g_free(dev);
-        op_result(o, FALSE, "server_error", "未登录", 0);
+        op_result(o, FALSE, "server_error", _("未登录"), 0);
         op_end(o);
         return;
     }
@@ -904,7 +905,7 @@ void hb_sync_service_change_password(HbSyncService *s, const char *old_pw,
     hb_sync_get_account(s->sync, &aid, &em, &srv, &dev);
     if (!em) {
         g_free(aid); g_free(srv); g_free(dev);
-        op_result(o, FALSE, "server_error", "未登录", 0);
+        op_result(o, FALSE, "server_error", _("未登录"), 0);
         op_end(o);
         return;
     }
@@ -967,7 +968,7 @@ static void simp_done(HbSyncService *s, guint st, const char *body,
 {
     SimpOp *o = ud;
     (void)body;
-    if (st == 0) { simp_end(o, FALSE, "network", "无法连接服务器", 0); return; }
+    if (st == 0) { simp_end(o, FALSE, "network", _("无法连接服务器"), 0); return; }
     if (o->what == 0 && st == 200) {
         o->totp_secret = g_strdup(jstr(obj, "secret"));
         o->totp_uri = g_strdup(jstr(obj, "uri"));
@@ -1017,7 +1018,7 @@ static void simp_done(HbSyncService *s, guint st, const char *body,
             if (n) ra = (int)json_node_get_int(n);
         }
         simp_end(o, FALSE, code ? code : "server_error",
-                 msg ? msg : "操作失败", ra);
+                 msg ? msg : _("操作失败"), ra);
     }
 }
 
@@ -1118,7 +1119,7 @@ static gboolean watchdog_cb(gpointer p)
         return G_SOURCE_REMOVE;
     if (s->round_cancel)
         g_cancellable_cancel(s->round_cancel);
-    loop_offline(s, "同步超时");
+    loop_offline(s, _("同步超时"));
     return G_SOURCE_REMOVE;
 }
 
@@ -1130,7 +1131,7 @@ static void loop_offline(HbSyncService *s, const char *why)
     g_free(s->last_error);
     s->last_error = g_strdup(why);
     set_state(s, HB_SYNC_OFFLINE);
-    set_status_txt(s, "离线 · 重试中");
+    set_status_txt(s, _("离线 · 重试中"));
 }
 
 static void finish_round(HbSyncService *s)
@@ -1165,9 +1166,9 @@ static void pull_done(HbSyncService *s, guint st, const char *body,
         return;
     }
     if (st == 0) {
-        loop_offline(s, "网络错误");
+        loop_offline(s, _("网络错误"));
     } else {
-        loop_offline(s, "服务器错误");
+        loop_offline(s, _("服务器错误"));
     }
 }
 
@@ -1175,7 +1176,7 @@ static void pull_step(HbSyncService *s)
 {
     char *path = NULL;
     if (hb_sync_pull_path(s->sync, &path) != HB_OK) {
-        loop_offline(s, "内部错误");
+        loop_offline(s, _("内部错误"));
         return;
     }
     http(s, s->server_url, SOUP_METHOD_GET, path, NULL, TRUE,
@@ -1203,8 +1204,8 @@ static void push_done(HbSyncService *s, guint st, const char *body,
         return;
     }
     hb_sync_push_free(p);
-    if (st == 0) loop_offline(s, "网络错误");
-    else loop_offline(s, "服务器错误");
+    if (st == 0) loop_offline(s, _("网络错误"));
+    else loop_offline(s, _("服务器错误"));
 }
 
 static void push_round(HbSyncService *s, int round)
@@ -1234,7 +1235,7 @@ static void sync_kick(HbSyncService *s)
     s->round_cancel = g_cancellable_new();
     watchdog_disarm(s);
     s->watchdog_src = g_timeout_add_seconds(WATCHDOG_SEC, watchdog_cb, s);
-    set_status_txt(s, "同步中…");
+    set_status_txt(s, _("同步中…"));
     set_state(s, HB_SYNC_SYNCING);
     pull_step(s);
 }
@@ -1266,8 +1267,8 @@ static void ws_on_msg(SoupWebsocketConnection *c, gint type, GBytes *msg,
         if (strstr(txt, "\"revoked\"")) {
             gboolean wipe = strstr(txt, "\"wipe\":true") != NULL;
             sign_out_local(s, wipe, NULL);
-            hb_notify_post("err", "此设备已被吊销",
-                           wipe ? "账号已退出，本地数据已擦除" : "账号已退出",
+            hb_notify_post("err", _("此设备已被吊销"),
+                           wipe ? _("账号已退出，本地数据已擦除") : _("账号已退出"),
                            NULL);
             return;
         }
@@ -1594,11 +1595,11 @@ const char *hb_sync_service_status(HbSyncService *s)
 {
     if (s->status) return s->status;
     switch (s->state) {
-    case HB_SYNC_SIGNED_OUT: return "未登录";
-    case HB_SYNC_SYNCING:    return "同步中…";
-    case HB_SYNC_OFFLINE:    return "离线 · 重试中";
-    case HB_SYNC_ERROR:      return s->last_error ? s->last_error : "错误";
-    default:                 return "已同步";
+    case HB_SYNC_SIGNED_OUT: return _("未登录");
+    case HB_SYNC_SYNCING:    return _("同步中…");
+    case HB_SYNC_OFFLINE:    return _("离线 · 重试中");
+    case HB_SYNC_ERROR:      return s->last_error ? s->last_error : _("错误");
+    default:                 return _("已同步");
     }
 }
 

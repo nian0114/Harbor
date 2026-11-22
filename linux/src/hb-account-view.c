@@ -9,6 +9,7 @@
 #include <adwaita.h>
 #include <json-glib/json-glib.h>
 #include <string.h>
+#include <glib/gi18n.h>
 
 #define DEFAULT_SERVER "http://127.0.0.1:8787"
 
@@ -166,18 +167,18 @@ static void login_cb(HbSyncService *s, const HbSyncOpResult *r, gpointer ud)
     }
     if (r->code && !strcmp(r->code, "totp_required")) {
         gtk_widget_set_visible(v->totp_row, TRUE);
-        show_err(v, "需要两步验证码");
+        show_err(v, _("需要两步验证码"));
         gtk_widget_grab_focus(v->totp_e);
         return;
     }
     if (r->code && !strcmp(r->code, "rate_limited") && r->retry_after > 0) {
-        char *m = g_strdup_printf("尝试次数过多，请 %d 秒后再试",
-                                  r->retry_after);
+        char *m = g_strdup_printf(ngettext("尝试次数过多，请 %d 秒后再试", "尝试次数过多，请 %d 秒后再试",
+                                  r->retry_after), r->retry_after);
         show_err(v, m);
         g_free(m);
         return;
     }
-    show_err(v, r->message ? r->message : "登录失败");
+    show_err(v, r->message ? r->message : _("登录失败"));
 }
 
 static void do_login(GtkButton *b, gpointer ud)
@@ -191,11 +192,11 @@ static void do_login(GtkButton *b, gpointer ud)
     (void)b;
     nsrv = hb_sync_check_server(srv);
     if (!nsrv) {
-        show_err(v, "服务器地址仅支持 https:// 或回环 http://");
+        show_err(v, _("服务器地址仅支持 https:// 或回环 http://"));
         return;
     }
     if (!*em || !*pw) {
-        show_err(v, "请填写邮箱与密码");
+        show_err(v, _("请填写邮箱与密码"));
         return;
     }
     show_err(v, NULL);
@@ -224,17 +225,17 @@ static void merge_pick(GtkButton *b, gpointer ud)
 static void ask_merge(HbAccountView *v)
 {
     GtkWidget *body, *foot;
-    AdwDialog *d = hb_modal_new("首次登录", &body, &foot);
+    AdwDialog *d = hb_modal_new(_("首次登录"), &body, &foot);
     MergeCtx *m = g_new0(MergeCtx, 1);
     GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     GtkWidget *mb, *db;
     m->v = v;
     m->dlg = d;
     gtk_box_append(GTK_BOX(body),
-        psub("本机 Vault 中已有数据。合并后将上传加密副本并与云端保持一致；"
-             "丢弃则以云端内容覆盖本机同步范围内的数据。"));
-    mb = btn("合并本机数据到账号", "primary");
-    db = btn("丢弃本机数据，使用云端", "danger");
+        psub(_("本机 Vault 中已有数据。合并后将上传加密副本并与云端保持一致；"
+             "丢弃则以云端内容覆盖本机同步范围内的数据。")));
+    mb = btn(_("合并本机数据到账号"), "primary");
+    db = btn(_("丢弃本机数据，使用云端"), "danger");
     g_object_set_data(G_OBJECT(mb), "merge", GINT_TO_POINTER(1));
     g_object_set_data(G_OBJECT(db), "merge", GINT_TO_POINTER(0));
     g_signal_connect(mb, "clicked", G_CALLBACK(merge_pick), m);
@@ -265,11 +266,11 @@ static void reg_cb(HbSyncService *s, const HbSyncOpResult *r, gpointer ud)
     RegCtx *rc = ud;
     (void)s;
     if (!r->ok) {
-        const char *msg = r->message ? r->message : "注册失败";
+        const char *msg = r->message ? r->message : _("注册失败");
         if (r->code && !strcmp(r->code, "rate_limited") &&
             r->retry_after > 0) {
-            char *m = g_strdup_printf("尝试次数过多，请 %d 秒后再试",
-                                      r->retry_after);
+            char *m = g_strdup_printf(ngettext("尝试次数过多，请 %d 秒后再试", "尝试次数过多，请 %d 秒后再试",
+                                      r->retry_after), r->retry_after);
             gtk_label_set_text(GTK_LABEL(rc->err_l), m);
             g_free(m);
         } else {
@@ -289,13 +290,13 @@ static void reg_go(GtkButton *b, gpointer ud)
     const char *pw = gtk_editable_get_text(GTK_EDITABLE(r->pw_e));
     const char *p2 = gtk_editable_get_text(GTK_EDITABLE(r->pw2_e));
     (void)b;
-    if (!*em) { gtk_label_set_text(GTK_LABEL(r->err_l), "请填写邮箱"); return; }
+    if (!*em) { gtk_label_set_text(GTK_LABEL(r->err_l), _("请填写邮箱")); return; }
     if (strlen(pw) < 8) {
-        gtk_label_set_text(GTK_LABEL(r->err_l), "密码至少 8 位");
+        gtk_label_set_text(GTK_LABEL(r->err_l), _("密码至少 8 位"));
         return;
     }
     if (strcmp(pw, p2)) {
-        gtk_label_set_text(GTK_LABEL(r->err_l), "两次密码不一致");
+        gtk_label_set_text(GTK_LABEL(r->err_l), _("两次密码不一致"));
         return;
     }
     gtk_label_set_text(GTK_LABEL(r->err_l), "");
@@ -320,28 +321,28 @@ static void open_register(HbAccountView *v)
     GtkWidget *body, *foot, *row;
     RegCtx *r;
     if (!nsrv) {
-        show_err(v, "服务器地址仅支持 https:// 或回环 http://");
+        show_err(v, _("服务器地址仅支持 https:// 或回环 http://"));
         return;
     }
     r = g_new0(RegCtx, 1);
     r->v = v;
     r->server = g_steal_pointer(&nsrv);
-    r->dlg = hb_modal_new("注册新账号", &body, &foot);
+    r->dlg = hb_modal_new(_("注册新账号"), &body, &foot);
     gtk_box_append(GTK_BOX(body),
-        hint("零知识：Harbor 服务器只存加密数据，无法帮你找回或重置密码。"
-             "忘记密码且没有 24 词恢复码或其他已登录设备时，数据不可恢复。",
+        hint(_("零知识：Harbor 服务器只存加密数据，无法帮你找回或重置密码。"
+             "忘记密码且没有 24 词恢复码或其他已登录设备时，数据不可恢复。"),
              "amber"));
-    gtk_box_append(GTK_BOX(body), field("邮箱", FALSE, &r->em_e));
-    gtk_box_append(GTK_BOX(body), field("主密码", TRUE, &r->pw_e));
-    gtk_box_append(GTK_BOX(body), field("确认密码", TRUE, &r->pw2_e));
+    gtk_box_append(GTK_BOX(body), field(_("邮箱"), FALSE, &r->em_e));
+    gtk_box_append(GTK_BOX(body), field(_("主密码"), TRUE, &r->pw_e));
+    gtk_box_append(GTK_BOX(body), field(_("确认密码"), TRUE, &r->pw2_e));
     r->err_l = gtk_label_new("");
     gtk_widget_add_css_class(r->err_l, "hb-red");
     gtk_label_set_xalign(GTK_LABEL(r->err_l), 0);
     gtk_box_append(GTK_BOX(body), r->err_l);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
-        GtkWidget *cb = btn("取消", NULL);
-        GtkWidget *ob = btn("注册", "primary");
+        GtkWidget *cb = btn(_("取消"), NULL);
+        GtkWidget *ob = btn(_("注册"), "primary");
         g_signal_connect(cb, "clicked", G_CALLBACK(reg_cancel), r);
         g_signal_connect(ob, "clicked", G_CALLBACK(reg_go), r);
         gtk_box_append(GTK_BOX(row), cb);
@@ -385,7 +386,7 @@ static void words_check(GtkButton *b, gpointer ud)
         g_strstrip(tt);
         if (!*tt || g_ascii_strcasecmp(tt, w->warr[w->pos[i]])) {
             gtk_label_set_text(GTK_LABEL(w->err_l),
-                               "词不匹配，请核对恢复码");
+                               _("词不匹配，请核对恢复码"));
             return;
         }
     }
@@ -404,15 +405,15 @@ static void words_done(GtkButton *b, gpointer ud)
 static void words_confirm_page(WordsCtx *w)
 {
     GtkWidget *body, *foot;
-    AdwDialog *d = hb_modal_new("确认恢复码", &body, &foot);
+    AdwDialog *d = hb_modal_new(_("确认恢复码"), &body, &foot);
     int i;
     char txt[64];
     GtkWidget *row;
     w->dlg = d;
     gtk_box_append(GTK_BOX(body),
-        psub("请按编号填写对应的词，确认你已正确抄写。"));
+        psub(_("请按编号填写对应的词，确认你已正确抄写。")));
     for (i = 0; i < 3; i++) {
-        snprintf(txt, sizeof txt, "第 %d 个词", w->pos[i] + 1);
+        snprintf(txt, sizeof txt, _("第 %d 个词"), w->pos[i] + 1);
         gtk_box_append(GTK_BOX(body), field(txt, FALSE, &w->e[i]));
     }
     w->err_l = gtk_label_new("");
@@ -421,7 +422,7 @@ static void words_confirm_page(WordsCtx *w)
     gtk_box_append(GTK_BOX(body), w->err_l);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
-        GtkWidget *ob = btn("确认", "primary");
+        GtkWidget *ob = btn(_("确认"), "primary");
         g_signal_connect(ob, "clicked", G_CALLBACK(words_check), w);
         gtk_box_append(GTK_BOX(row), ob);
     }
@@ -452,16 +453,16 @@ static void show_words_dialog(HbAccountView *v, const char *words)
     w->v = v;
     w->words = g_strdup(words);
     w->warr = split_words(words, NULL);
-    w->dlg = d = hb_modal_new("恢复码（请离线抄写）", &body, &foot);
+    w->dlg = d = hb_modal_new(_("恢复码（请离线抄写）"), &body, &foot);
     gtk_box_append(GTK_BOX(body),
-        hint("忘记密码时，24 词恢复码是找回 Vault 的唯一途径——"
-             "服务端零知识，无法帮你重置。请离线抄写并妥善保存。",
+        hint(_("忘记密码时，24 词恢复码是找回 Vault 的唯一途径——"
+             "服务端零知识，无法帮你重置。请离线抄写并妥善保存。"),
              "amber"));
     gtk_box_append(GTK_BOX(body), words_grid(words));
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
-        GtkWidget *cp = btn("复制", NULL);
-        GtkWidget *nb = btn("我已保存", "primary");
+        GtkWidget *cp = btn(_("复制"), NULL);
+        GtkWidget *nb = btn(_("我已保存"), "primary");
         g_object_set_data_full(G_OBJECT(cp), "txt", g_strdup(words),
                                g_free);
         g_signal_connect(cp, "clicked", G_CALLBACK(copy_words), NULL);
@@ -494,7 +495,7 @@ static void rec_cb(HbSyncService *s, const HbSyncOpResult *r, gpointer ud)
     (void)s;
     if (!r->ok) {
         gtk_label_set_text(GTK_LABEL(rc->err_l),
-                           r->message ? r->message : "恢复失败");
+                           r->message ? r->message : _("恢复失败"));
         return;
     }
     adw_dialog_close(rc->dlg);
@@ -516,15 +517,15 @@ static void rec_go(GtkButton *b, gpointer ud)
     w = split_words(wd, &n);
     g_strfreev(w);
     if (n != 24) {
-        gtk_label_set_text(GTK_LABEL(r->err_l), "请输入全部 24 个词");
+        gtk_label_set_text(GTK_LABEL(r->err_l), _("请输入全部 24 个词"));
         return;
     }
     if (strlen(pw) < 8) {
-        gtk_label_set_text(GTK_LABEL(r->err_l), "新密码至少 8 位");
+        gtk_label_set_text(GTK_LABEL(r->err_l), _("新密码至少 8 位"));
         return;
     }
     if (strcmp(pw, p2)) {
-        gtk_label_set_text(GTK_LABEL(r->err_l), "两次密码不一致");
+        gtk_label_set_text(GTK_LABEL(r->err_l), _("两次密码不一致"));
         return;
     }
     gtk_widget_set_sensitive(GTK_WIDGET(b), FALSE);
@@ -548,29 +549,29 @@ static void open_recover(HbAccountView *v)
     GtkWidget *body, *foot, *row;
     RecCtx *r;
     if (!nsrv) {
-        show_err(v, "服务器地址仅支持 https:// 或回环 http://");
+        show_err(v, _("服务器地址仅支持 https:// 或回环 http://"));
         return;
     }
     r = g_new0(RecCtx, 1);
     r->v = v;
     r->server = g_steal_pointer(&nsrv);
-    r->dlg = hb_modal_new("用恢复码恢复", &body, &foot);
+    r->dlg = hb_modal_new(_("用恢复码恢复"), &body, &foot);
     gtk_box_append(GTK_BOX(body),
-        hint("没有恢复码、也没有其他已登录设备时，数据无法恢复（零知识）。",
+        hint(_("没有恢复码、也没有其他已登录设备时，数据无法恢复（零知识）。"),
              "red"));
-    gtk_box_append(GTK_BOX(body), field("邮箱", FALSE, &r->em_e));
-    gtk_box_append(GTK_BOX(body), field("24 词恢复码（空格分隔）", FALSE,
+    gtk_box_append(GTK_BOX(body), field(_("邮箱"), FALSE, &r->em_e));
+    gtk_box_append(GTK_BOX(body), field(_("24 词恢复码（空格分隔）"), FALSE,
                                        &r->words_e));
-    gtk_box_append(GTK_BOX(body), field("新密码", TRUE, &r->pw_e));
-    gtk_box_append(GTK_BOX(body), field("确认新密码", TRUE, &r->pw2_e));
+    gtk_box_append(GTK_BOX(body), field(_("新密码"), TRUE, &r->pw_e));
+    gtk_box_append(GTK_BOX(body), field(_("确认新密码"), TRUE, &r->pw2_e));
     r->err_l = gtk_label_new("");
     gtk_widget_add_css_class(r->err_l, "hb-red");
     gtk_label_set_xalign(GTK_LABEL(r->err_l), 0);
     gtk_box_append(GTK_BOX(body), r->err_l);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
-        GtkWidget *cb = btn("取消", NULL);
-        GtkWidget *ob = btn("恢复", "primary");
+        GtkWidget *cb = btn(_("取消"), NULL);
+        GtkWidget *ob = btn(_("恢复"), "primary");
         g_signal_connect(cb, "clicked", G_CALLBACK(rec_cancel), r);
         g_signal_connect(ob, "clicked", G_CALLBACK(rec_go), r);
         gtk_box_append(GTK_BOX(row), cb);
@@ -595,10 +596,10 @@ static void pw_cb(HbSyncService *s, const HbSyncOpResult *r, gpointer ud)
     (void)s;
     if (!r->ok) {
         gtk_label_set_text(GTK_LABEL(c->err_l),
-                           r->message ? r->message : "修改失败");
+                           r->message ? r->message : _("修改失败"));
         return;
     }
-    toastv(c->v, "密码已修改");
+    toastv(c->v, _("密码已修改"));
     adw_dialog_close(c->dlg);
     g_free(c);
 }
@@ -611,11 +612,11 @@ static void pw_go(GtkButton *b, gpointer ud)
     const char *n2 = gtk_editable_get_text(GTK_EDITABLE(c->n2_e));
     (void)b;
     if (strlen(n) < 8) {
-        gtk_label_set_text(GTK_LABEL(c->err_l), "新密码至少 8 位");
+        gtk_label_set_text(GTK_LABEL(c->err_l), _("新密码至少 8 位"));
         return;
     }
     if (strcmp(n, n2)) {
-        gtk_label_set_text(GTK_LABEL(c->err_l), "两次密码不一致");
+        gtk_label_set_text(GTK_LABEL(c->err_l), _("两次密码不一致"));
         return;
     }
     gtk_widget_set_sensitive(GTK_WIDGET(b), FALSE);
@@ -630,18 +631,18 @@ static void open_change_pw(HbAccountView *v)
     GtkWidget *body, *foot, *row;
     PwCtx *c = g_new0(PwCtx, 1);
     c->v = v;
-    c->dlg = hb_modal_new("修改密码", &body, &foot);
-    gtk_box_append(GTK_BOX(body), field("当前密码", TRUE, &c->o_e));
-    gtk_box_append(GTK_BOX(body), field("新密码", TRUE, &c->n_e));
-    gtk_box_append(GTK_BOX(body), field("确认新密码", TRUE, &c->n2_e));
+    c->dlg = hb_modal_new(_("修改密码"), &body, &foot);
+    gtk_box_append(GTK_BOX(body), field(_("当前密码"), TRUE, &c->o_e));
+    gtk_box_append(GTK_BOX(body), field(_("新密码"), TRUE, &c->n_e));
+    gtk_box_append(GTK_BOX(body), field(_("确认新密码"), TRUE, &c->n2_e));
     c->err_l = gtk_label_new("");
     gtk_widget_add_css_class(c->err_l, "hb-red");
     gtk_label_set_xalign(GTK_LABEL(c->err_l), 0);
     gtk_box_append(GTK_BOX(body), c->err_l);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
-        GtkWidget *cb = btn("取消", NULL);
-        GtkWidget *ob = btn("修改", "primary");
+        GtkWidget *cb = btn(_("取消"), NULL);
+        GtkWidget *ob = btn(_("修改"), "primary");
         g_signal_connect_swapped(cb, "clicked",
                                  G_CALLBACK(adw_dialog_close), c->dlg);
         g_signal_connect(ob, "clicked", G_CALLBACK(pw_go), c);
@@ -659,7 +660,7 @@ static void rot_cb(HbSyncService *s, const HbSyncOpResult *r, gpointer ud)
     HbAccountView *v = ud;
     (void)s;
     if (!r->ok) {
-        toastv(v, r->message ? r->message : "恢复码轮换失败");
+        toastv(v, r->message ? r->message : _("恢复码轮换失败"));
         return;
     }
     show_words_dialog(v, r->words);
@@ -676,7 +677,7 @@ static void rot_pw_cb(const char *secret, gboolean remember, gpointer ud)
 static void open_rotate(HbAccountView *v)
 {
     hb_dialog_password(GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(v))),
-                       "输入主密码以轮换恢复码", FALSE, FALSE,
+                       _("输入主密码以轮换恢复码"), FALSE, FALSE,
                        rot_pw_cb, v);
 }
 
@@ -689,10 +690,10 @@ static void totp_enable_cb(HbSyncService *s, const HbSyncOpResult *r,
     HbAccountView *v = ud;
     (void)s;
     if (!r->ok) {
-        toastv(v, r->message ? r->message : "两步验证启用失败");
+        toastv(v, r->message ? r->message : _("两步验证启用失败"));
         return;
     }
-    toastv(v, "两步验证已开启");
+    toastv(v, _("两步验证已开启"));
 }
 
 typedef struct {
@@ -726,19 +727,19 @@ static void totp_setup_cb(HbSyncService *s, const HbSyncOpResult *r,
     (void)s;
     TotpCtx *t;
     if (!r->ok) {
-        toastv(v, r->message ? r->message : "获取两步验证密钥失败");
+        toastv(v, r->message ? r->message : _("获取两步验证密钥失败"));
         return;
     }
     t = g_new0(TotpCtx, 1);
     t->v = v;
     t->enable = TRUE;
-    t->dlg = hb_modal_new("开启两步验证", &body, &foot);
+    t->dlg = hb_modal_new(_("开启两步验证"), &body, &foot);
     gtk_box_append(GTK_BOX(body),
-        psub("在认证器中添加以下密钥（TOTP · SHA1 · 6 位 · 30 秒）。"));
+        psub(_("在认证器中添加以下密钥（TOTP · SHA1 · 6 位 · 30 秒）。")));
     {
         GtkWidget *b1 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         GtkWidget *l = gtk_label_new(r->totp_secret);
-        GtkWidget *cp = btn("复制", NULL);
+        GtkWidget *cp = btn(_("复制"), NULL);
         gtk_widget_add_css_class(l, "mono");
         gtk_label_set_selectable(GTK_LABEL(l), TRUE);
         gtk_widget_set_hexpand(l, TRUE);
@@ -759,11 +760,11 @@ static void totp_setup_cb(HbSyncService *s, const HbSyncOpResult *r,
         gtk_label_set_xalign(GTK_LABEL(l), 0);
         gtk_box_append(GTK_BOX(body), l);
     }
-    gtk_box_append(GTK_BOX(body), field("输入当前验证码以启用", FALSE,
+    gtk_box_append(GTK_BOX(body), field(_("输入当前验证码以启用"), FALSE,
                                        &t->e));
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
-        GtkWidget *ob = btn("启用", "primary");
+        GtkWidget *ob = btn(_("启用"), "primary");
         g_signal_connect(ob, "clicked", G_CALLBACK(totp_code_go), t);
         gtk_box_append(GTK_BOX(row), ob);
     }
@@ -778,11 +779,11 @@ static void open_totp(HbAccountView *v)
         GtkWidget *body, *foot, *row;
         TotpCtx *t = g_new0(TotpCtx, 1);
         t->v = v;
-        t->dlg = hb_modal_new("关闭两步验证", &body, &foot);
-        gtk_box_append(GTK_BOX(body), field("验证码", FALSE, &t->e));
+        t->dlg = hb_modal_new(_("关闭两步验证"), &body, &foot);
+        gtk_box_append(GTK_BOX(body), field(_("验证码"), FALSE, &t->e));
         row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
         {
-            GtkWidget *ob = btn("关闭", "danger");
+            GtkWidget *ob = btn(_("关闭"), "danger");
             g_signal_connect(ob, "clicked", G_CALLBACK(totp_code_go), t);
             gtk_box_append(GTK_BOX(row), ob);
         }
@@ -813,13 +814,13 @@ static void open_logout(HbAccountView *v)
     GtkWidget *body, *foot, *row;
     OutCtx *o = g_new0(OutCtx, 1);
     o->v = v;
-    o->dlg = hb_modal_new("退出账号", &body, &foot);
+    o->dlg = hb_modal_new(_("退出账号"), &body, &foot);
     gtk_box_append(GTK_BOX(body),
-        psub("退出后停止同步，云端密文保留。本地 Vault 可选择保留或擦除。"));
+        psub(_("退出后停止同步，云端密文保留。本地 Vault 可选择保留或擦除。")));
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
-        GtkWidget *kb = btn("保留本地退出", NULL);
-        GtkWidget *wb = btn("擦除并退出", "danger");
+        GtkWidget *kb = btn(_("保留本地退出"), NULL);
+        GtkWidget *wb = btn(_("擦除并退出"), "danger");
         g_object_set_data(G_OBJECT(kb), "w", GINT_TO_POINTER(0));
         g_object_set_data(G_OBJECT(wb), "w", GINT_TO_POINTER(1));
         g_signal_connect(kb, "clicked", G_CALLBACK(out_pick), o);
@@ -860,17 +861,17 @@ static void open_revoke(HbAccountView *v, const char *dev_id,
     char msg[256];
     r->v = v;
     r->dev_id = g_strdup(dev_id);
-    r->dlg = hb_modal_new("吊销设备", &body, &foot);
-    snprintf(msg, sizeof msg, "吊销设备「%s」？该设备将立即断开同步。",
+    r->dlg = hb_modal_new(_("吊销设备"), &body, &foot);
+    snprintf(msg, sizeof msg, _("吊销设备「%s」？该设备将立即断开同步。"),
              name ? name : dev_id);
     gtk_box_append(GTK_BOX(body), psub(msg));
     r->wipe_cb = gtk_check_button_new_with_label(
-        "同时远程擦除该设备上的数据");
+        _("同时远程擦除该设备上的数据"));
     gtk_box_append(GTK_BOX(body), r->wipe_cb);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
-        GtkWidget *cb = btn("取消", NULL);
-        GtkWidget *ob = btn("吊销", "danger");
+        GtkWidget *cb = btn(_("取消"), NULL);
+        GtkWidget *ob = btn(_("吊销"), "danger");
         g_signal_connect_swapped(cb, "clicked",
                                  G_CALLBACK(adw_dialog_close), r->dlg);
         g_signal_connect(ob, "clicked", G_CALLBACK(rev_go), r);
@@ -945,14 +946,14 @@ static GtkWidget *device_row(HbAccountView *v, HbSyncDevice *d)
     GtkWidget *nm, *sub;
     g_autofree char *seen = NULL;
     gtk_widget_add_css_class(row, "acct-row");
-    nm = gtk_label_new(d->name ? d->name : "设备");
+    nm = gtk_label_new(d->name ? d->name : _("设备"));
     gtk_widget_add_css_class(nm, "acct-dname");
     gtk_label_set_xalign(GTK_LABEL(nm), 0);
     gtk_box_append(GTK_BOX(vb), nm);
     seen = fmt_time(d->last_seen);
     {
         g_autofree char *t = g_strdup_printf(
-            "%s · 上次活动 %s%s",
+            _("%s · 上次活动 %s%s"),
             d->platform ? d->platform : "linux", seen,
             d->current ? "" : "");
         sub = gtk_label_new(t);
@@ -962,12 +963,12 @@ static GtkWidget *device_row(HbAccountView *v, HbSyncDevice *d)
     gtk_box_append(GTK_BOX(vb), sub);
     gtk_box_append(GTK_BOX(row), vb);
     if (d->current) {
-        GtkWidget *tag = gtk_label_new("当前");
+        GtkWidget *tag = gtk_label_new(_("当前"));
         gtk_widget_add_css_class(tag, "hb-tag");
         gtk_widget_add_css_class(tag, "tun");
         gtk_box_append(GTK_BOX(row), tag);
     } else {
-        GtkWidget *b = btn("吊销", "danger");
+        GtkWidget *b = btn(_("吊销"), "danger");
         gtk_widget_add_css_class(b, "hb-btn-small");
         g_object_set_data_full(G_OBJECT(b), "id", g_strdup(d->id), g_free);
         g_object_set_data_full(G_OBJECT(b), "name",
@@ -1074,8 +1075,8 @@ static GtkWidget *conflict_card(HbAccountView *v, hb_sync_conflict *c)
                     gtk_widget_add_css_class(fl, "hb-dim");
                     gtk_label_set_xalign(GTK_LABEL(fl), 0);
                     hdr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-                    a = gtk_label_new("当前");
-                    b2 = gtk_label_new("另一版本");
+                    a = gtk_label_new(_("当前"));
+                    b2 = gtk_label_new(_("另一版本"));
                     gtk_widget_add_css_class(a, "hb-dim");
                     gtk_widget_add_css_class(b2, "hb-dim");
                     gtk_widget_set_hexpand(a, TRUE);
@@ -1085,8 +1086,8 @@ static GtkWidget *conflict_card(HbAccountView *v, hb_sync_conflict *c)
                     gtk_box_append(GTK_BOX(hdr), a);
                     gtk_box_append(GTK_BOX(hdr), b2);
                     if (secret) {
-                        cv = g_strdup("••• (已更改)");
-                        ov = g_strdup("••• (已更改)");
+                        cv = g_strdup(_("••• (已更改)"));
+                        ov = g_strdup(_("••• (已更改)"));
                     } else {
                         cv = jmember_str(cur_o, f);
                         ov = jmember_str(loser_o, f);
@@ -1114,8 +1115,8 @@ static GtkWidget *conflict_card(HbAccountView *v, hb_sync_conflict *c)
     }
     {
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-        GtkWidget *kb = btn("保留当前", NULL);
-        GtkWidget *tb = btn("使用另一版本", "primary");
+        GtkWidget *kb = btn(_("保留当前"), NULL);
+        GtkWidget *tb = btn(_("使用另一版本"), "primary");
         g_object_set_data(G_OBJECT(kb), "v", v);
         g_object_set_data(G_OBJECT(tb), "v", v);
         g_object_set_data_full(G_OBJECT(kb), "id", g_strdup(c->id),
@@ -1136,12 +1137,12 @@ static GtkWidget *conflict_card(HbAccountView *v, hb_sync_conflict *c)
 /* ============================ scope ============================ */
 
 static const struct { const char *scope, *label; } SCOPES_UI[] = {
-    { "hosts",    "主机与分组" },
-    { "keys",     "密钥与凭据（E2EE）" },
-    { "snippets", "Snippets" },
-    { "forwards", "端口转发规则" },
-    { "known",    "Known Hosts" },
-    { "settings", "外观与设置" },
+    { "hosts",    N_("主机与分组") },
+    { "keys",     N_("密钥与凭据（E2EE）") },
+    { "snippets", N_("Snippets") },
+    { "forwards", N_("端口转发规则") },
+    { "known",    N_("Known Hosts") },
+    { "settings", N_("外观与设置") },
 };
 
 static void on_scope_switch(GObject *sw, GParamSpec *ps, gpointer ud)
@@ -1157,12 +1158,12 @@ static GtkWidget *scope_panel(HbAccountView *v)
 {
     GtkWidget *p = panel();
     size_t i;
-    gtk_box_append(GTK_BOX(p), h4("同步范围"));
+    gtk_box_append(GTK_BOX(p), h4(_("同步范围")));
     gtk_box_append(GTK_BOX(p),
-        psub("关闭的项目不参与同步。冲突采用版本向量 + LWW 合并。"));
+        psub(_("关闭的项目不参与同步。冲突采用版本向量 + LWW 合并。")));
     for (i = 0; i < G_N_ELEMENTS(SCOPES_UI); i++) {
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-        GtkWidget *l = gtk_label_new(SCOPES_UI[i].label);
+        GtkWidget *l = gtk_label_new(_(SCOPES_UI[i].label));
         GtkWidget *sw = gtk_switch_new();
         gtk_widget_add_css_class(row, "acct-row");
         gtk_label_set_xalign(GTK_LABEL(l), 0);
@@ -1181,7 +1182,7 @@ static GtkWidget *scope_panel(HbAccountView *v)
     /* Shell History：暂不支持 */
     {
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-        GtkWidget *l = gtk_label_new("Shell History（暂不支持）");
+        GtkWidget *l = gtk_label_new(_("Shell History（暂不支持）"));
         GtkWidget *sw = gtk_switch_new();
         gtk_widget_add_css_class(row, "acct-row");
         gtk_label_set_xalign(GTK_LABEL(l), 0);
@@ -1204,14 +1205,14 @@ static GtkWidget *build_signed_out(HbAccountView *v)
     gtk_widget_set_halign(p, GTK_ALIGN_CENTER);
     gtk_widget_set_size_request(p, 460, -1);
     gtk_widget_set_margin_top(p, 26);
-    gtk_box_append(GTK_BOX(p), h4("登录 Harbor 账号"));
+    gtk_box_append(GTK_BOX(p), h4(_("登录 Harbor 账号")));
     gtk_box_append(GTK_BOX(p),
-        psub("登录后从云端拉取密文并在本地解密，恢复全部 Vault 与同步。"));
-    gtk_box_append(GTK_BOX(p), field("服务器", FALSE, &v->srv_e));
+        psub(_("登录后从云端拉取密文并在本地解密，恢复全部 Vault 与同步。")));
+    gtk_box_append(GTK_BOX(p), field(_("服务器"), FALSE, &v->srv_e));
     gtk_editable_set_text(GTK_EDITABLE(v->srv_e), DEFAULT_SERVER);
-    gtk_box_append(GTK_BOX(p), field("邮箱", FALSE, &v->em_e));
-    gtk_box_append(GTK_BOX(p), field("主密码", TRUE, &v->pw_e));
-    v->totp_row = field("TOTP 验证码", FALSE, &v->totp_e);
+    gtk_box_append(GTK_BOX(p), field(_("邮箱"), FALSE, &v->em_e));
+    gtk_box_append(GTK_BOX(p), field(_("主密码"), TRUE, &v->pw_e));
+    v->totp_row = field(_("TOTP 验证码"), FALSE, &v->totp_e);
     gtk_widget_set_visible(v->totp_row, FALSE);
     gtk_box_append(GTK_BOX(p), v->totp_row);
     v->err_l = gtk_label_new("");
@@ -1220,9 +1221,9 @@ static GtkWidget *build_signed_out(HbAccountView *v)
     gtk_box_append(GTK_BOX(p), v->err_l);
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 9);
     {
-        GtkWidget *lb = btn("登录并同步", "primary");
-        GtkWidget *rb = btn("注册新账号", NULL);
-        GtkWidget *cb = btn("用恢复码恢复", NULL);
+        GtkWidget *lb = btn(_("登录并同步"), "primary");
+        GtkWidget *rb = btn(_("注册新账号"), NULL);
+        GtkWidget *cb = btn(_("用恢复码恢复"), NULL);
         g_signal_connect(lb, "clicked", G_CALLBACK(do_login), v);
         g_signal_connect_swapped(rb, "clicked",
                                  G_CALLBACK(open_register), v);
@@ -1234,7 +1235,7 @@ static GtkWidget *build_signed_out(HbAccountView *v)
     }
     gtk_box_append(GTK_BOX(p), row);
     gtk_box_append(GTK_BOX(p),
-        hint("零知识架构：密码错误则无法解密 Vault，服务端不能帮你重置。",
+        hint(_("零知识架构：密码错误则无法解密 Vault，服务端不能帮你重置。"),
              "plain"));
     gtk_box_append(GTK_BOX(wrap), p);
     return wrap;
@@ -1247,18 +1248,18 @@ static GtkWidget *e2ee_banner(HbAccountView *v)
     GtkWidget *t1, *t2, *rb;
     gtk_widget_add_css_class(b, "e2ee-banner");
     gtk_box_append(GTK_BOX(b), hb_icon_new("lock", 22));
-    t1 = gtk_label_new("端到端加密同步已开启 — 服务端零知识");
+    t1 = gtk_label_new(_("端到端加密同步已开启 — 服务端零知识"));
     gtk_widget_add_css_class(t1, "e2ee-t1");
     gtk_label_set_xalign(GTK_LABEL(t1), 0);
     gtk_box_append(GTK_BOX(vb), t1);
-    t2 = gtk_label_new("主密钥由密码经 Argon2id 派生；Vault 数据在设备端用 "
-                       "XChaCha20-Poly1305 加密后才上传。服务端仅存密文。");
+    t2 = gtk_label_new(_("主密钥由密码经 Argon2id 派生；Vault 数据在设备端用 "
+                       "XChaCha20-Poly1305 加密后才上传。服务端仅存密文。"));
     gtk_widget_add_css_class(t2, "e2ee-t2");
     gtk_label_set_xalign(GTK_LABEL(t2), 0);
     gtk_label_set_wrap(GTK_LABEL(t2), TRUE);
     gtk_box_append(GTK_BOX(vb), t2);
     gtk_box_append(GTK_BOX(b), vb);
-    rb = btn("恢复码", NULL);
+    rb = btn(_("恢复码"), NULL);
     gtk_widget_add_css_class(rb, "hb-btn-small");
     gtk_widget_set_halign(rb, GTK_ALIGN_END);
     gtk_widget_set_hexpand(rb, TRUE);
@@ -1273,9 +1274,9 @@ static char *status_line(HbAccountView *v)
     if (st == HB_SYNC_IDLE && hb_sync_service_last_sync(v->svc)) {
         GDateTime *t = g_date_time_new_from_unix_local(
             hb_sync_service_last_sync(v->svc));
-        char *f = t ? g_date_time_format(t, "已同步 · %H:%M") : NULL;
+        char *f = t ? g_date_time_format(t, _("已同步 · %H:%M")) : NULL;
         if (t) g_date_time_unref(t);
-        return f ? f : g_strdup("已同步");
+        return f ? f : g_strdup(_("已同步"));
     }
     return g_strdup(hb_sync_service_status(v->svc));
 }
@@ -1286,7 +1287,7 @@ static GtkWidget *account_panel(HbAccountView *v)
     GtkWidget *row, *vb, *nm, *sub;
     g_autofree char *sl = NULL;
     const char *em = hb_sync_service_email(v->svc);
-    gtk_box_append(GTK_BOX(p), h4("账号"));
+    gtk_box_append(GTK_BOX(p), h4(_("账号")));
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 11);
     {
         GtkWidget *av = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -1311,14 +1312,14 @@ static GtkWidget *account_panel(HbAccountView *v)
     {
         g_autofree char *t = g_strdup_printf(
             "%s · TOTP %s · %s",
-            hb_sync_service_totp_enabled(v->svc) ? "两步验证已开启" : "两步验证关闭",
+            hb_sync_service_totp_enabled(v->svc) ? _("两步验证已开启") : _("两步验证关闭"),
             sl, "");
         (void)t;
     }
     {
         g_autofree char *t = g_strdup_printf(
             "TOTP %s · %s",
-            hb_sync_service_totp_enabled(v->svc) ? "已开启" : "未开启", sl);
+            hb_sync_service_totp_enabled(v->svc) ? _("已开启") : _("未开启"), sl);
         sub = gtk_label_new(t);
     }
     gtk_widget_add_css_class(sub, "hb-dim");
@@ -1326,7 +1327,7 @@ static GtkWidget *account_panel(HbAccountView *v)
     gtk_box_append(GTK_BOX(vb), sub);
     gtk_box_append(GTK_BOX(row), vb);
     {
-        GtkWidget *ob = btn("退出", NULL);
+        GtkWidget *ob = btn(_("退出"), NULL);
         gtk_widget_add_css_class(ob, "hb-btn-small");
         gtk_widget_set_halign(ob, GTK_ALIGN_END);
         gtk_widget_set_hexpand(ob, TRUE);
@@ -1337,9 +1338,9 @@ static GtkWidget *account_panel(HbAccountView *v)
     /* 操作行 */
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     {
-        GtkWidget *sy = btn("立即同步", NULL);
-        GtkWidget *pw = btn("修改密码", NULL);
-        GtkWidget *tt = btn("两步验证", NULL);
+        GtkWidget *sy = btn(_("立即同步"), NULL);
+        GtkWidget *pw = btn(_("修改密码"), NULL);
+        GtkWidget *tt = btn(_("两步验证"), NULL);
         gtk_widget_add_css_class(sy, "hb-btn-small");
         gtk_widget_add_css_class(pw, "hb-btn-small");
         gtk_widget_add_css_class(tt, "hb-btn-small");
@@ -1360,9 +1361,9 @@ static GtkWidget *devices_panel(HbAccountView *v)
 {
     GtkWidget *p = panel();
     guint i;
-    gtk_box_append(GTK_BOX(p), h4("已登录设备"));
+    gtk_box_append(GTK_BOX(p), h4(_("已登录设备")));
     if (!v->devices || !v->devices->len) {
-        gtk_box_append(GTK_BOX(p), psub("正在获取设备列表…"));
+        gtk_box_append(GTK_BOX(p), psub(_("正在获取设备列表…")));
     } else {
         for (i = 0; i < v->devices->len; i++) {
             gtk_box_append(GTK_BOX(p),
@@ -1377,16 +1378,16 @@ static GtkWidget *conflicts_panel(HbAccountView *v)
     GtkWidget *p = panel();
     hb_sync_conflict *cs = NULL;
     size_t n = 0, i;
-    gtk_box_append(GTK_BOX(p), h4("同步冲突"));
+    gtk_box_append(GTK_BOX(p), h4(_("同步冲突")));
     gtk_box_append(GTK_BOX(p),
-        psub("以下字段在两个设备上被同时修改，请选择保留哪个版本。"));
+        psub(_("以下字段在两个设备上被同时修改，请选择保留哪个版本。")));
     if (hb_sync_conflicts(hb_sync_service_sync(v->svc), &cs, &n) == HB_OK) {
         for (i = 0; i < n; i++)
             gtk_box_append(GTK_BOX(p), conflict_card(v, &cs[i]));
         if (cs) hb_sync_conflicts_free(cs, n);
     }
     if (!n)
-        gtk_box_append(GTK_BOX(p), psub("暂无冲突"));
+        gtk_box_append(GTK_BOX(p), psub(_("暂无冲突")));
     return p;
 }
 

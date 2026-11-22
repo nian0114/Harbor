@@ -19,6 +19,7 @@
 
 #include <harbor/vault.h>
 #include <string.h>
+#include <glib/gi18n.h>
 
 #define MAX_PANES 6
 
@@ -92,7 +93,7 @@ static WsNode *leaf_of_page(HbWorkspace *ws, GtkWidget *page)
 
 static void update_title(HbWorkspace *ws)
 {
-    char *t = g_strdup_printf("Workspace · %d 分屏", ws->n_panes);
+    char *t = g_strdup_printf(ngettext("Workspace · %d 分屏", "Workspace · %d 分屏", ws->n_panes), ws->n_panes);
     gtk_label_set_label(GTK_LABEL(ws->tt_label), t);
     g_free(t);
 }
@@ -208,14 +209,14 @@ static GtkWidget *build_head(HbWorkspace *ws, WsNode *n)
 
     eye = gtk_button_new();
     gtk_widget_add_css_class(eye, "pane-head-btn");
-    gtk_widget_set_tooltip_text(eye, "监控设置");
+    gtk_widget_set_tooltip_text(eye, _("监控设置"));
     gtk_button_set_child(GTK_BUTTON(eye), hb_icon_new("eye", 11));
     g_signal_connect(eye, "clicked", G_CALLBACK(on_head_watch), n);
     gtk_box_append(GTK_BOX(h), eye);
 
     n->reconn_btn = gtk_button_new();
     gtk_widget_add_css_class(n->reconn_btn, "pane-head-btn");
-    gtk_widget_set_tooltip_text(n->reconn_btn, "重新连接");
+    gtk_widget_set_tooltip_text(n->reconn_btn, _("重新连接"));
     gtk_button_set_child(GTK_BUTTON(n->reconn_btn), hb_icon_new("refresh", 11));
     g_signal_connect(n->reconn_btn, "clicked",
                      G_CALLBACK(on_head_reconn), n);
@@ -224,7 +225,7 @@ static GtkWidget *build_head(HbWorkspace *ws, WsNode *n)
 
     x = gtk_button_new();
     gtk_widget_add_css_class(x, "pane-head-btn");
-    gtk_widget_set_tooltip_text(x, "关闭分屏 (Ctrl+Shift+W)");
+    gtk_widget_set_tooltip_text(x, _("关闭分屏 (Ctrl+Shift+W)"));
     gtk_button_set_child(GTK_BUTTON(x), hb_icon_new("x", 11));
     g_signal_connect(x, "clicked", G_CALLBACK(on_head_close), n);
     gtk_box_append(GTK_BOX(h), x);
@@ -764,10 +765,10 @@ static void on_bcast(GtkButton *b, gpointer ud)
     ws->broadcast = !ws->broadcast;
     apply_broadcast(ws);
     if (ws->broadcast) {
-        gtk_button_set_label(b, "Broadcast 开");
+        gtk_button_set_label(b, _("Broadcast 开"));
         gtk_widget_add_css_class(GTK_WIDGET(b), "on");
     } else {
-        gtk_button_set_label(b, "Broadcast");
+        gtk_button_set_label(b, _("Broadcast"));
         gtk_widget_remove_css_class(GTK_WIDGET(b), "on");
     }
 }
@@ -866,7 +867,7 @@ static void fill_snippets(HbWorkspace *ws)
         b = gtk_button_new();
         gtk_widget_add_css_class(b, "assist-item");
         r = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-        t = gtk_label_new(title && *title ? title : "snippet");
+        t = gtk_label_new(title && *title ? title : _("snippet"));
         gtk_widget_add_css_class(t, "assist-item-tt");
         gtk_label_set_xalign(GTK_LABEL(t), 0);
         gtk_box_append(GTK_BOX(r), t);
@@ -884,7 +885,7 @@ static void fill_snippets(HbWorkspace *ws)
     }
     if (objs) hb_obj_list_free(objs, n);
     if (!shown) {
-        GtkWidget *l = gtk_label_new("暂无匹配 Snippet");
+        GtkWidget *l = gtk_label_new(_("暂无匹配 Snippet"));
         gtk_widget_add_css_class(l, "assist-item-sub");
         gtk_box_append(GTK_BOX(ws->snip_list), l);
     }
@@ -929,7 +930,7 @@ static GtkWidget *build_assist(HbWorkspace *ws)
         GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     ws->snip_list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scr), ws->snip_list);
-    gtk_stack_add_titled(GTK_STACK(stack), scr, "snip", "Snippets");
+    gtk_stack_add_titled(GTK_STACK(stack), scr, "snip", _("Snippets"));
 
     /* 主题 */
     {
@@ -945,12 +946,12 @@ static GtkWidget *build_assist(HbWorkspace *ws)
         }
         page = tp;
     }
-    gtk_stack_add_titled(GTK_STACK(stack), page, "theme", "主题");
+    gtk_stack_add_titled(GTK_STACK(stack), page, "theme", _("主题"));
 
     /* 自动补全（未实现） */
     {
         GtkWidget *ap = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-        GtkWidget *l = gtk_label_new("即将推出");
+        GtkWidget *l = gtk_label_new(_("即将推出"));
         GtkWidget *tgl = gtk_switch_new();
         gtk_widget_set_margin_top(ap, 8);
         gtk_widget_set_sensitive(tgl, FALSE);
@@ -960,7 +961,7 @@ static GtkWidget *build_assist(HbWorkspace *ws)
         gtk_box_append(GTK_BOX(ap), l);
         page = ap;
     }
-    gtk_stack_add_titled(GTK_STACK(stack), page, "ac", "自动补全");
+    gtk_stack_add_titled(GTK_STACK(stack), page, "ac", _("自动补全"));
 
     fill_snippets(ws);
     return box;
@@ -1029,7 +1030,7 @@ static void hb_workspace_init(HbWorkspace *ws)
     ic = hb_icon_new("cols", 15);
     gtk_widget_add_css_class(ic, "hb-term-tt");
     gtk_box_append(GTK_BOX(bar), ic);
-    ws->tt_label = gtk_label_new("Workspace");
+    ws->tt_label = gtk_label_new(_("Workspace"));
     gtk_widget_add_css_class(ws->tt_label, "hb-term-tt");
     gtk_label_set_xalign(GTK_LABEL(ws->tt_label), 0);
     gtk_box_append(GTK_BOX(bar), ws->tt_label);
@@ -1039,19 +1040,19 @@ static void hb_workspace_init(HbWorkspace *ws)
 
     sb = gtk_button_new();
     gtk_widget_add_css_class(sb, "tbtn");
-    gtk_widget_set_tooltip_text(sb, "在 scrollback 中搜索 (Ctrl+Shift+F)");
+    gtk_widget_set_tooltip_text(sb, _("在 scrollback 中搜索 (Ctrl+Shift+F)"));
     gtk_button_set_child(GTK_BUTTON(sb), hb_icon_new("search", 13));
     g_signal_connect(sb, "clicked", G_CALLBACK(on_search_btn), ws);
     gtk_box_append(GTK_BOX(bar), sb);
 
-    ws->bcast_btn = gtk_button_new_with_label("Broadcast");
+    ws->bcast_btn = gtk_button_new_with_label(_("Broadcast"));
     gtk_widget_add_css_class(ws->bcast_btn, "tbtn");
     gtk_widget_set_tooltip_text(ws->bcast_btn,
-        "向所有 pane 广播输入（各 pane 按自己的终端模式编码）");
+        _("向所有 pane 广播输入（各 pane 按自己的终端模式编码）"));
     g_signal_connect(ws->bcast_btn, "clicked", G_CALLBACK(on_bcast), ws);
     gtk_box_append(GTK_BOX(bar), ws->bcast_btn);
 
-    ws->assist_btn = gtk_button_new_with_label("助手栏");
+    ws->assist_btn = gtk_button_new_with_label(_("助手栏"));
     gtk_widget_add_css_class(ws->assist_btn, "tbtn");
     g_signal_connect(ws->assist_btn, "clicked",
                      G_CALLBACK(on_assist_btn), ws);
@@ -1060,11 +1061,11 @@ static void hb_workspace_init(HbWorkspace *ws)
     ws->focus_btn = gtk_button_new();
     gtk_widget_add_css_class(ws->focus_btn, "tbtn");
     gtk_widget_set_tooltip_text(ws->focus_btn,
-        "Focus 模式：只看焦点 pane (Ctrl+Shift+M)");
+        _("Focus 模式：只看焦点 pane (Ctrl+Shift+M)"));
     {
         GtkWidget *r = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
         gtk_box_append(GTK_BOX(r), hb_icon_new("focus", 13));
-        gtk_box_append(GTK_BOX(r), gtk_label_new("Focus"));
+        gtk_box_append(GTK_BOX(r), gtk_label_new(_("Focus")));
         gtk_button_set_child(GTK_BUTTON(ws->focus_btn), r);
     }
     g_signal_connect(ws->focus_btn, "clicked",
@@ -1227,10 +1228,10 @@ void hb_workspace_pick_targets(GtkWidget *win, HbStore *st)
 
     c->win = win;
     c->st = st;
-    dlg = hb_modal_new("新建 Workspace", &box, &foot);
+    dlg = hb_modal_new(_("新建 Workspace"), &box, &foot);
     c->dlg = dlg;
 
-    l = gtk_label_new("选择 2–4 个分屏目标（并排一行）");
+    l = gtk_label_new(_("选择 2–4 个分屏目标（并排一行）"));
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_widget_add_css_class(l, "assist-item-sub");
     gtk_box_append(GTK_BOX(box), l);
@@ -1240,7 +1241,7 @@ void hb_workspace_pick_targets(GtkWidget *win, HbStore *st)
 
     /* Local */
     {
-        GtkWidget *ck = gtk_check_button_new_with_label("Local · 本地终端");
+        GtkWidget *ck = gtk_check_button_new_with_label(_("Local · 本地终端"));
         gtk_widget_add_css_class(ck, "pick-row");
         g_object_set_data_full(G_OBJECT(ck), "kind",
                                g_strdup("local"), g_free);
@@ -1267,12 +1268,12 @@ void hb_workspace_pick_targets(GtkWidget *win, HbStore *st)
     }
     if (hosts) hb_obj_list_free(hosts, n);
 
-    row = gtk_button_new_with_label("取消");
+    row = gtk_button_new_with_label(_("取消"));
     gtk_widget_add_css_class(row, "hb-btn");
     g_signal_connect_swapped(row, "clicked",
         G_CALLBACK(adw_dialog_close), dlg);
     gtk_box_append(GTK_BOX(foot), row);
-    c->create = gtk_button_new_with_label("创建 Workspace");
+    c->create = gtk_button_new_with_label(_("创建 Workspace"));
     gtk_widget_add_css_class(c->create, "hb-btn");
     gtk_widget_add_css_class(c->create, "primary");
     gtk_widget_set_sensitive(c->create, FALSE);

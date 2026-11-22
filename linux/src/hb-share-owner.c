@@ -7,6 +7,7 @@
 #include "hb-sync.h"
 
 #include <string.h>
+#include <glib/gi18n.h>
 
 typedef struct {
     hb_session *sess;            /* borrowed */
@@ -22,7 +23,7 @@ static void wire_refresh(ShareWire *w)
     const char *sid = hb_share_service_share_for_session(s, w->sess);
     gboolean on = sid != NULL;
     gtk_button_set_label(GTK_BUTTON(w->btn),
-                         on ? "共享中" : "共享");
+                         on ? _("共享中") : _("共享"));
     if (on)
         gtk_widget_add_css_class(w->btn, "on");
     else
@@ -58,17 +59,17 @@ static void on_owner_event(HbShareService *s, const char *sid,
     switch (type) {
     case HB_SH_EV_JOINED:
     case HB_SH_EV_PAKE_OK:
-        title = g_strdup_printf("%s 加入共享",
+        title = g_strdup_printf(_("%s 加入共享"),
             device && *device ? device :
             (name && *name ? name : "guest"));
-        body = g_strdup_printf("正在%s",
+        body = g_strdup_printf(_("正在%s"),
             hb_share_service_mode(s, my) == HB_SHARE_COLLAB
-                ? "协作" : "观看");
+                ? _("协作") : _("观看"));
         hb_notify_post("share", title, body, w->tab_id);
         g_free(title); g_free(body);
         break;
     case HB_SH_EV_LEFT:
-        title = g_strdup_printf("%s 离开",
+        title = g_strdup_printf(_("%s 离开"),
             device && *device ? device :
             (name && *name ? name : "guest"));
         hb_notify_post("share", title, NULL, w->tab_id);

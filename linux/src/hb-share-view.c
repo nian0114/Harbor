@@ -11,6 +11,7 @@
 
 #include <sodium.h>
 #include <string.h>
+#include <glib/gi18n.h>
 
 struct _HbShareView {
     GtkBox       parent;
@@ -117,8 +118,8 @@ static void fill_local(HbShareView *v)
         GtkWidget *c;
         char *sub = g_strdup_printf("%s · %s",
             i->host ? i->host : "localhost",
-            i->mode == HB_SHARE_COLLAB ? "可协作输入" : "仅观看");
-        c = card(i->title ? i->title : "共享", sub, "共享中",
+            i->mode == HB_SHARE_COLLAB ? _("可协作输入") : _("仅观看"));
+        c = card(i->title ? i->title : _("共享"), sub, _("共享中"),
                  G_CALLBACK(on_local_card), v);
         g_free(sub);
         if (i->tab_id)
@@ -162,7 +163,8 @@ static void fill_remote(HbShareView *v, GList *items)
             }
         }
         when = i->created
-            ? g_strdup_printf("%ld 分钟前",
+            ? g_strdup_printf(ngettext("%ld 分钟前", "%ld 分钟前",
+                                  (g_get_real_time() / 1000 - i->created) / 60000),
                               (long)((g_get_real_time() / 1000 -
                                       i->created) / 60000))
             : g_strdup("");
@@ -170,10 +172,10 @@ static void fill_remote(HbShareView *v, GList *items)
                               i->owner_device,
                               (host && *host) ? host : "?",
                               mode == HB_SHARE_COLLAB
-                                  ? "可协作输入" : "仅观看",
+                                  ? _("可协作输入") : _("仅观看"),
                               when);
         g_free(when);
-        c = card((title && *title) ? title : "共享会话", sub, "加入",
+        c = card((title && *title) ? title : _("共享会话"), sub, _("加入"),
                  G_CALLBACK(on_remote_card), v);
         g_free(sub);
         g_object_set_data_full(G_OBJECT(c), "sid",
@@ -270,7 +272,7 @@ static void on_join_btn(GtkButton *b, HbShareView *v)
     (void)b;
 
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(hd),
-        adw_window_title_new("通过配对码加入", NULL));
+        adw_window_title_new(_("通过配对码加入"), NULL));
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(tb), hd);
     gtk_widget_set_margin_start(root, 18);
     gtk_widget_set_margin_end(root, 18);
@@ -279,19 +281,19 @@ static void on_join_btn(GtkButton *b, HbShareView *v)
     gtk_widget_set_size_request(root, 380, -1);
 
     gtk_box_append(GTK_BOX(root),
-        gtk_label_new("粘贴共享链接："));
+        gtk_label_new(_("粘贴共享链接：")));
     jc->link = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(jc->link),
                                    "harbor://share/...");
     gtk_box_append(GTK_BOX(root), jc->link);
 
-    gtk_box_append(GTK_BOX(root), gtk_label_new("6 位配对码："));
+    gtk_box_append(GTK_BOX(root), gtk_label_new(_("6 位配对码：")));
     jc->code = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(jc->code), "482913");
     gtk_entry_set_max_length(GTK_ENTRY(jc->code), 7);
     gtk_box_append(GTK_BOX(root), jc->code);
 
-    go = gtk_button_new_with_label("加入");
+    go = gtk_button_new_with_label(_("加入"));
     gtk_widget_add_css_class(go, "suggested-action");
     gtk_widget_add_css_class(go, "pill");
     gtk_widget_set_margin_top(go, 6);
@@ -330,7 +332,7 @@ static void hb_share_view_init(HbShareView *v)
         gtk_widget_set_hexpand(sp, TRUE);
         gtk_box_append(GTK_BOX(tb), sp);
     }
-    join_btn = gtk_button_new_with_label("通过配对码加入");
+    join_btn = gtk_button_new_with_label(_("通过配对码加入"));
     gtk_widget_add_css_class(join_btn, "suggested-action");
     g_signal_connect(join_btn, "clicked",
                      G_CALLBACK(on_join_btn), v);
@@ -346,13 +348,13 @@ static void hb_share_view_init(HbShareView *v)
     gtk_widget_set_margin_top(v->content, 6);
 
     gtk_box_append(GTK_BOX(v->content),
-                   sec_title("本机正在共享的会话"));
+                   sec_title(_("本机正在共享的会话")));
     v->local_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_box_append(GTK_BOX(v->content), v->local_box);
 
     gtk_box_append(GTK_BOX(v->content),
-        sec_title("来自其它设备的共享（同账号自动发现）"));
-    v->remote_empty = gtk_label_new("暂无可用共享");
+        sec_title(_("来自其它设备的共享（同账号自动发现）")));
+    v->remote_empty = gtk_label_new(_("暂无可用共享"));
     gtk_widget_add_css_class(v->remote_empty, "hb-term-muted");
     gtk_label_set_xalign(GTK_LABEL(v->remote_empty), 0);
     gtk_box_append(GTK_BOX(v->content), v->remote_empty);
@@ -369,8 +371,8 @@ static void hb_share_view_init(HbShareView *v)
     gtk_widget_set_visible(v->signedout, FALSE);
     {
         GtkWidget *l = gtk_label_new(
-            "登录 Harbor 账号后可共享会话或加入共享");
-        GtkWidget *b = gtk_button_new_with_label("前往账号登录");
+            _("登录 Harbor 账号后可共享会话或加入共享"));
+        GtkWidget *b = gtk_button_new_with_label(_("前往账号登录"));
         gtk_widget_set_halign(b, GTK_ALIGN_CENTER);
         g_signal_connect(b, "clicked",
                          G_CALLBACK(on_vault_account), v);

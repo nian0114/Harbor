@@ -1,6 +1,7 @@
 #include "hb-dialogs.h"
 #include "hb-icons.h"
 #include "hb-window.h"
+#include <glib/gi18n.h>
 
 /* ============================ 共用骨架 ============================ */
 
@@ -102,7 +103,7 @@ static GtkWidget *code_box(const char *text, gboolean copy_btn)
     gtk_label_set_wrap_mode(GTK_LABEL(l), PANGO_WRAP_CHAR);
     gtk_box_append(GTK_BOX(b), l);
     if (copy_btn) {
-        GtkWidget *cb = gtk_button_new_with_label("复制");
+        GtkWidget *cb = gtk_button_new_with_label(_("复制"));
         gtk_widget_add_css_class(cb, "hb-btn-small");
         g_signal_connect_data(cb, "clicked",
             G_CALLBACK(copy_to_clipboard), g_strdup(text),
@@ -161,12 +162,12 @@ AdwDialog *hb_dialog_tofu(GtkWindow *parent, const char *host_port,
     d->cb = cb;
     d->ud = ud;
 
-    dlg = modal_new("首次连接 · 验证主机指纹", 470, &body, &foot);
+    dlg = modal_new(_("首次连接 · 验证主机指纹"), 470, &body, &foot);
     d->dlg = ADW_DIALOG(dlg);
 
     gtk_box_append(GTK_BOX(body), hint_box("shield",
-        "该主机不在 known_hosts 中。请通过电话 / 控制台等带外渠道核对指纹后再信任，"
-        "防止中间人攻击。", "amber"));
+        _("该主机不在 known_hosts 中。请通过电话 / 控制台等带外渠道核对指纹后再信任，"
+        "防止中间人攻击。"), "amber"));
 
     row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_hexpand(row, TRUE);
@@ -190,10 +191,10 @@ AdwDialog *hb_dialog_tofu(GtkWindow *parent, const char *host_port,
     }
 
     gtk_box_append(GTK_BOX(body), hint_box("check",
-        "信任后写入 Known Hosts 并经 E2EE 同步。之后指纹若变更将红色告警并阻断连接。",
+        _("信任后写入 Known Hosts 并经 E2EE 同步。之后指纹若变更将红色告警并阻断连接。"),
         "plain"));
 
-    f = footer_new("取消", "信任并继续", "primary", &ok);
+    f = footer_new(_("取消"), _("信任并继续"), "primary", &ok);
     cancel = gtk_widget_get_first_child(f);
     g_signal_connect(cancel, "clicked", G_CALLBACK(tofu_cancel), d);
     g_signal_connect(ok, "clicked", G_CALLBACK(tofu_ok), d);
@@ -244,12 +245,12 @@ AdwDialog *hb_dialog_hostkey_changed(GtkWindow *parent,
     d->cb = cb;
     d->ud = ud;
 
-    dlg = modal_new("警告：主机密钥已变更", 500, &body, &foot);
+    dlg = modal_new(_("警告：主机密钥已变更"), 500, &body, &foot);
     d->dlg = ADW_DIALOG(dlg);
 
     gtk_box_append(GTK_BOX(body), hint_box("shield",
-        "远程主机发来的密钥与本地记录不一致。这可能是系统重装或配置变更，"
-        "也可能是中间人攻击。除非你已带外核实，否则应立即断开。", "red"));
+        _("远程主机发来的密钥与本地记录不一致。这可能是系统重装或配置变更，"
+        "也可能是中间人攻击。除非你已带外核实，否则应立即断开。"), "red"));
 
     {
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
@@ -268,17 +269,17 @@ AdwDialog *hb_dialog_hostkey_changed(GtkWindow *parent,
     gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
     gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
     gtk_widget_set_hexpand(grid, TRUE);
-    l = gtk_label_new("旧指纹"); gtk_widget_add_css_class(l, "hb-dim");
+    l = gtk_label_new(_("旧指纹")); gtk_widget_add_css_class(l, "hb-dim");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_grid_attach(GTK_GRID(grid), l, 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), code_box(old_fp, FALSE), 1, 0, 1, 1);
-    l = gtk_label_new("新指纹"); gtk_widget_add_css_class(l, "hb-dim");
+    l = gtk_label_new(_("新指纹")); gtk_widget_add_css_class(l, "hb-dim");
     gtk_label_set_xalign(GTK_LABEL(l), 0);
     gtk_grid_attach(GTK_GRID(grid), l, 0, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), code_box(new_fp, FALSE), 1, 1, 1, 1);
     gtk_box_append(GTK_BOX(body), grid);
 
-    check = gtk_check_button_new_with_label("我了解风险");
+    check = gtk_check_button_new_with_label(_("我了解风险"));
     gtk_widget_add_css_class(check, "check-row");
     gtk_widget_set_halign(check, GTK_ALIGN_START);
     g_signal_connect(check, "toggled", G_CALLBACK(hk_check_toggled), d);
@@ -287,12 +288,12 @@ AdwDialog *hb_dialog_hostkey_changed(GtkWindow *parent,
     f = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(f, "hb-modal-footer");
     gtk_widget_set_halign(f, GTK_ALIGN_END);
-    cancel = gtk_button_new_with_label("断开连接");
+    cancel = gtk_button_new_with_label(_("断开连接"));
     gtk_widget_add_css_class(cancel, "hb-btn");
     gtk_widget_add_css_class(cancel, "primary");
     g_signal_connect(cancel, "clicked", G_CALLBACK(hk_cancel), d);
     gtk_box_append(GTK_BOX(f), cancel);
-    d->ok = gtk_button_new_with_label("我已核实，更新指纹并继续");
+    d->ok = gtk_button_new_with_label(_("我已核实，更新指纹并继续"));
     gtk_widget_add_css_class(d->ok, "hb-btn");
     gtk_widget_add_css_class(d->ok, "danger");
     gtk_widget_set_sensitive(d->ok, FALSE);
@@ -370,7 +371,7 @@ AdwDialog *hb_dialog_password(GtkWindow *parent, const char *prompt,
     d->cb = cb;
     d->ud = ud;
 
-    dlg = modal_new(is_passphrase ? "私钥密码" : "身份验证", 420, &body, &foot);
+    dlg = modal_new(is_passphrase ? _("私钥密码") : _("身份验证"), 420, &body, &foot);
     d->dlg = ADW_DIALOG(dlg);
 
     {
@@ -386,13 +387,13 @@ AdwDialog *hb_dialog_password(GtkWindow *parent, const char *prompt,
     gtk_box_append(GTK_BOX(body), d->entry);
 
     if (show_remember) {
-        d->remember = gtk_check_button_new_with_label("记住（加密保存）");
+        d->remember = gtk_check_button_new_with_label(_("记住（加密保存）"));
         gtk_widget_add_css_class(d->remember, "check-row");
         gtk_widget_set_halign(d->remember, GTK_ALIGN_START);
         gtk_box_append(GTK_BOX(body), d->remember);
     }
 
-    f = footer_new("取消", "连接", "primary", &ok);
+    f = footer_new(_("取消"), _("连接"), "primary", &ok);
     cancel = gtk_widget_get_first_child(f);
     g_signal_connect(cancel, "clicked", G_CALLBACK(pw_cancel), d);
     g_signal_connect(ok, "clicked", G_CALLBACK(pw_ok), d);
@@ -435,7 +436,7 @@ void hb_toast_undo_destroy(GtkWidget *any_widget, const char *text,
 {
     HbWindow *w = find_win(any_widget);
     if (w)
-        hb_window_toast_action2(w, text, "撤销", 9,
+        hb_window_toast_action2(w, text, _("撤销"), 9,
                                 (GCallback)undo_cb, destroy, ud);
 }
 
@@ -505,7 +506,7 @@ AdwDialog *hb_dialog_confirm(GtkWidget *parent, const char *title,
     gtk_widget_add_css_class(msg, "hb-modal-msg");
     gtk_box_append(GTK_BOX(body), msg);
 
-    f = footer_new("取消", ok_label, danger ? "danger" : "primary", &ok);
+    f = footer_new(_("取消"), ok_label, danger ? "danger" : "primary", &ok);
     cancel = gtk_widget_get_first_child(f);
     g_signal_connect(cancel, "clicked", G_CALLBACK(cfm_cancel), d);
     g_signal_connect(ok, "clicked", G_CALLBACK(cfm_ok), d);
@@ -538,7 +539,7 @@ void hb_dialog_text(GtkWidget *parent, const char *title, const char *text)
     f = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_add_css_class(f, "hb-modal-footer");
     gtk_widget_set_halign(f, GTK_ALIGN_END);
-    ok = gtk_button_new_with_label("关闭");
+    ok = gtk_button_new_with_label(_("关闭"));
     gtk_widget_add_css_class(ok, "hb-btn");
     gtk_widget_add_css_class(ok, "primary");
     gtk_box_append(GTK_BOX(f), ok);
@@ -609,7 +610,7 @@ void hb_dialog_prompt(GtkWidget *parent, const char *title,
     g_signal_connect(d->entry, "activate", G_CALLBACK(prm_activate), d);
     gtk_box_append(GTK_BOX(body), d->entry);
 
-    f = footer_new("取消", "确定", "primary", &ok);
+    f = footer_new(_("取消"), _("确定"), "primary", &ok);
     cancel = gtk_widget_get_first_child(f);
     g_signal_connect(cancel, "clicked", G_CALLBACK(prm_cancel), d);
     g_signal_connect(ok, "clicked", G_CALLBACK(prm_ok), d);

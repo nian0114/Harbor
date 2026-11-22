@@ -13,6 +13,7 @@
 
 #include <string.h>
 #include <unistd.h>
+#include <glib/gi18n.h>
 
 struct _HbTermPage {
     GtkBox parent;
@@ -64,7 +65,7 @@ static hb_session *spawn_local(HbTermPage *p, hb_vt *reuse)
 static void set_status(HbTermPage *p, gboolean alive)
 {
     gtk_label_set_label(GTK_LABEL(p->st_conn),
-        alive ? "● 已连接" : "● 会话已结束");
+        alive ? _("● 已连接") : _("● 会话已结束"));
     if (alive) {
         gtk_widget_add_css_class(p->st_conn, "hb-term-ok");
         gtk_widget_remove_css_class(p->st_conn, "hb-term-ended");
@@ -122,8 +123,8 @@ static void on_notify(HbTerminal *t, const char *title, const char *body,
             hb_obj_free(o);
         }
         if (host_only)
-            hb_notify_post("info", "终端通知 · Local",
-                           "Local 上的任务有新通知", NULL);
+            hb_notify_post("info", _("终端通知 · Local"),
+                           _("Local 上的任务有新通知"), NULL);
         else
             hb_notify_post("info", title, body ? body : "", NULL);
     }
@@ -140,20 +141,20 @@ static void watch_refresh_ui(HbTermPage *p)
         {
             GtkWidget *bx = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
             gtk_box_append(GTK_BOX(bx), hb_icon_new("eye", 13));
-            gtk_box_append(GTK_BOX(bx), gtk_label_new("监控 开"));
+            gtk_box_append(GTK_BOX(bx), gtk_label_new(_("监控 开")));
             gtk_button_set_child(GTK_BUTTON(p->watch_btn), bx);
         }
         gtk_widget_add_css_class(p->watch_btn, "on");
     } else {
         GtkWidget *bx = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
         gtk_box_append(GTK_BOX(bx), hb_icon_new("eye", 13));
-        gtk_box_append(GTK_BOX(bx), gtk_label_new("监控 关"));
+        gtk_box_append(GTK_BOX(bx), gtk_label_new(_("监控 关")));
         gtk_button_set_child(GTK_BUTTON(p->watch_btn), bx);
         gtk_widget_remove_css_class(p->watch_btn, "on");
         t = NULL;
     }
     gtk_label_set_label(GTK_LABEL(p->st_watch),
-                        t ? t : "监控: 关");
+                        t ? t : _("监控: 关"));
     g_free(t);
 }
 
@@ -203,7 +204,7 @@ static void on_share_btn(GtkButton *b, gpointer ud)
     (void)b;
     if (!p->sess) return;
     hb_share_dialog_present(GTK_WIDGET(p), p->sess,
-                            p->disp_title ? p->disp_title : "Local",
+                            p->disp_title ? p->disp_title : _("Local"),
                             "localhost");
 }
 
@@ -231,7 +232,7 @@ static void on_session_ev(HbTerminal *t, const hb_sess_event *ev,
     HbTermPage *p = ud;
     (void)t;
     if (ev->type == HB_SESS_EV_WATCH && ev->watch && p->tab_id)
-        hb_watch_route(GTK_WIDGET(p), p->tab_id, "Local", ev->watch);
+        hb_watch_route(GTK_WIDGET(p), p->tab_id, _("Local"), ev->watch);
     else if (ev->type == HB_SESS_EV_COMMAND && ev->text && *ev->text)
         /* FR-08 shell history：host_id NULL = 本地（密码已被会话过滤） */
         hb_vault_history_add(hb_store_vault(p->store), NULL, ev->text);
@@ -333,7 +334,7 @@ static void apply_settings(HbTermPage *p)
             num[j++] = raw[i++];
         }
         num[j] = 0;
-        txt = g_strdup_printf("scrollback %s 行", num);
+        txt = g_strdup_printf(_("scrollback %s 行"), num);
         gtk_label_set_label(GTK_LABEL(p->st_sb), txt);
         g_free(txt);
     }
@@ -377,7 +378,7 @@ static GtkWidget *build_toolbar(HbTermPage *p)
     {
         GtkWidget *fb = gtk_button_new();
         gtk_widget_add_css_class(fb, "tbtn");
-        gtk_widget_set_tooltip_text(fb, "在 scrollback 中搜索 (Ctrl+Shift+F)");
+        gtk_widget_set_tooltip_text(fb, _("在 scrollback 中搜索 (Ctrl+Shift+F)"));
         gtk_button_set_child(GTK_BUTTON(fb), hb_icon_new("search", 13));
         g_signal_connect(fb, "clicked",
                          G_CALLBACK(on_find_btn), p);
@@ -389,10 +390,10 @@ static GtkWidget *build_toolbar(HbTermPage *p)
                      G_CALLBACK(on_watch_btn), p);
     gtk_box_append(GTK_BOX(bar), p->watch_btn);
 
-    p->share_btn = gtk_button_new_with_label("共享");
+    p->share_btn = gtk_button_new_with_label(_("共享"));
     gtk_widget_add_css_class(p->share_btn, "tbtn");
     gtk_widget_set_tooltip_text(p->share_btn,
-                                "共享会话（端到端加密）");
+                                _("共享会话（端到端加密）"));
     g_signal_connect(p->share_btn, "clicked",
                      G_CALLBACK(on_share_btn), p);
     gtk_box_append(GTK_BOX(bar), p->share_btn);
@@ -405,19 +406,19 @@ static GtkWidget *build_toolbar(HbTermPage *p)
         GtkWidget *b;
 
         gtk_widget_add_css_class(mb, "tbtn");
-        gtk_widget_set_tooltip_text(mb, "分屏");
+        gtk_widget_set_tooltip_text(mb, _("分屏"));
         {
             GtkWidget *r = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
             gtk_box_append(GTK_BOX(r), hb_icon_new("cols", 13));
-            gtk_box_append(GTK_BOX(r), gtk_label_new("分屏"));
+            gtk_box_append(GTK_BOX(r), gtk_label_new(_("分屏")));
             gtk_menu_button_set_child(GTK_MENU_BUTTON(mb), r);
         }
-        b = gtk_button_new_with_label("向右分屏  Ctrl+Shift+D");
+        b = gtk_button_new_with_label(_("向右分屏  Ctrl+Shift+D"));
         gtk_widget_add_css_class(b, "hb-pop-btn");
         g_signal_connect(b, "clicked", G_CALLBACK(on_split_pick),
                          GINT_TO_POINTER(GTK_ORIENTATION_HORIZONTAL));
         gtk_box_append(GTK_BOX(vb), b);
-        b = gtk_button_new_with_label("向下分屏  Ctrl+Shift+E");
+        b = gtk_button_new_with_label(_("向下分屏  Ctrl+Shift+E"));
         gtk_widget_add_css_class(b, "hb-pop-btn");
         g_signal_connect(b, "clicked", G_CALLBACK(on_split_pick),
                          GINT_TO_POINTER(GTK_ORIENTATION_VERTICAL));
@@ -437,7 +438,7 @@ static GtkWidget *build_status(HbTermPage *p)
     GtkWidget *sp;
 
     gtk_widget_add_css_class(bar, "hb-term-status");
-    p->st_conn = gtk_label_new("● 已连接");
+    p->st_conn = gtk_label_new(_("● 已连接"));
     gtk_widget_add_css_class(p->st_conn, "hb-term-ok");
     gtk_box_append(GTK_BOX(bar), p->st_conn);
     gtk_widget_add_css_class(term_lbl, "hb-term-muted");
@@ -449,7 +450,7 @@ static GtkWidget *build_status(HbTermPage *p)
     gtk_widget_set_hexpand(sp, TRUE);
     gtk_box_append(GTK_BOX(bar), sp);
 
-    p->st_watch = gtk_label_new("监控: 关");
+    p->st_watch = gtk_label_new(_("监控: 关"));
     gtk_widget_add_css_class(p->st_watch, "hb-term-muted");
     gtk_box_append(GTK_BOX(bar), p->st_watch);
 
@@ -528,7 +529,7 @@ static void hb_term_page_init(HbTermPage *p)
     gtk_widget_set_valign(sb, GTK_ALIGN_FILL);
     gtk_overlay_add_overlay(GTK_OVERLAY(p->overlay), sb);
 
-    p->dead_lbl = gtk_label_new("[进程已退出 · 按 Enter 重新启动]");
+    p->dead_lbl = gtk_label_new(_("[进程已退出 · 按 Enter 重新启动]"));
     gtk_widget_add_css_class(p->dead_lbl, "hb-term-dead");
     gtk_widget_set_halign(p->dead_lbl, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(p->dead_lbl, GTK_ALIGN_END);
@@ -633,7 +634,7 @@ static HbTerminal *sp_terminal(HbSessionPage *sp)
 static const char *sp_title(HbSessionPage *sp)
 {
     HbTermPage *p = HB_TERM_PAGE(sp);
-    return p->disp_title ? p->disp_title : "Local";
+    return p->disp_title ? p->disp_title : _("Local");
 }
 
 static const char *sp_icon(HbSessionPage *sp)

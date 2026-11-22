@@ -18,6 +18,7 @@
 #include <harbor/session.h>
 #include <string.h>
 #include <stdio.h>
+#include <glib/gi18n.h>
 
 /* ------------------------------------------------------------------ */
 
@@ -91,15 +92,15 @@ static const char *host_avatar(const hb_obj *h)
 
 /* Vault sections —— 与 hb-vault-page.c SECTIONS 保持一致 */
 static const struct { const char *id, *label, *icon; } PAL_SECTIONS[] = {
-    { "hosts",       "Hosts",          "grid"      },
-    { "keys",        "Keychain",       "key"       },
-    { "fwd",         "Port Forwarding","fwd"       },
-    { "snippets",    "Snippets",       "snippet"   },
-    { "known_hosts", "Known Hosts",    "shield"    },
+    { "hosts",       N_("Hosts"),          "grid"      },
+    { "keys",        N_("Keychain"),       "key"       },
+    { "fwd",         N_("Port Forwarding"),"fwd"       },
+    { "snippets",    N_("Snippets"),       "snippet"   },
+    { "known_hosts", N_("Known Hosts"),    "shield"    },
     { "logs",        "Logs",           "clock"     },
-    { "share",       "共享会话",        "broadcast" },
-    { "appearance",  "外观与终端",      "palette"   },
-    { "account",     "账号与同步",      "cloud"     },
+    { "share",       N_("共享会话"),        "broadcast" },
+    { "appearance",  N_("外观与终端"),      "palette"   },
+    { "account",     N_("账号与同步"),      "cloud"     },
 };
 
 static char *str_fold(const char *s)
@@ -155,7 +156,7 @@ static void collect_items(PalCtx *c, GPtrArray *out)
         const char *tags  = hb_obj_get_str(h, "tags");
         char *sub, *kw, *pup;
         pup = g_ascii_strup(proto && *proto ? proto : "ssh", -1);
-        sub = g_strdup_printf("连接 · %s%s%s", pup,
+        sub = g_strdup_printf(_("连接 · %s%s%s"), pup,
                               user && *user ? " " : "",
                               user && *user ? user : "");
         kw  = g_strdup_printf("%s %s %s %s %s",
@@ -171,11 +172,11 @@ static void collect_items(PalCtx *c, GPtrArray *out)
 
     /* 2. sections */
     for (i = 0; i < G_N_ELEMENTS(PAL_SECTIONS); i++) {
-        char *kw = g_strdup_printf("%s %s", PAL_SECTIONS[i].label,
+        char *kw = g_strdup_printf("%s %s", _(PAL_SECTIONS[i].label),
                                    PAL_SECTIONS[i].id);
         g_ptr_array_add(out, item_new(PAL_SECTION,
-            PAL_SECTIONS[i].icon, NULL, PAL_SECTIONS[i].label,
-            "Vault 页面", kw, PAL_SECTIONS[i].id, ord++));
+            PAL_SECTIONS[i].icon, NULL, _(PAL_SECTIONS[i].label),
+            _("Vault 页面"), kw, PAL_SECTIONS[i].id, ord++));
         g_free(kw);
     }
 
@@ -212,7 +213,7 @@ static void collect_items(PalCtx *c, GPtrArray *out)
                                  body ? body : "");
             g_ptr_array_add(out, item_new(PAL_SNIPPET, "snippet", NULL,
                 title && *title ? title : "snippet",
-                "发送 Snippet", kw, id, ord++));
+                _("发送 Snippet"), kw, id, ord++));
             g_free(kw);
         }
         if (objs) hb_obj_list_free(objs, n);
@@ -220,16 +221,16 @@ static void collect_items(PalCtx *c, GPtrArray *out)
 
     /* 4. commands */
     g_ptr_array_add(out, item_new(PAL_CMD, "terminal", NULL,
-        "Local 终端", "命令", "Local 终端 local terminal",
+        _("Local 终端"), _("命令"), _("Local 终端 local terminal"),
         "local", ord++));
     g_ptr_array_add(out, item_new(PAL_CMD, "clock", NULL,
-        "导出连接日志 CSV", "命令", "导出连接日志 CSV export logs csv",
+        _("导出连接日志 CSV"), _("命令"), _("导出连接日志 CSV export logs csv"),
         "export-logs", ord++));
     g_ptr_array_add(out, item_new(PAL_CMD, "palette", NULL,
-        "外观与终端", "命令", "外观与终端 appearance settings theme",
+        _("外观与终端"), _("命令"), _("外观与终端 appearance settings theme"),
         "appearance", ord++));
     g_ptr_array_add(out, item_new(PAL_CMD, "cols", NULL,
-        "Workspace 分屏", "命令", "Workspace 分屏 workspace split panes",
+        _("Workspace 分屏"), _("命令"), _("Workspace 分屏 workspace split panes"),
         "workspace", ord++));
 }
 
@@ -333,7 +334,7 @@ static void render_list(PalCtx *c)
 
     if (!c->items->len) {
         GtkWidget *lr = gtk_list_box_row_new();
-        GtkWidget *l = gtk_label_new("无匹配结果 — 试试主机名或「日志」");
+        GtkWidget *l = gtk_label_new(_("无匹配结果 — 试试主机名或「日志」"));
         gtk_widget_add_css_class(l, "pal-empty");
         gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(lr), FALSE);
         gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(lr), FALSE);
@@ -386,10 +387,10 @@ static void csv_save_done(GObject *src, GAsyncResult *res, gpointer ud)
         !csv ||
         !g_file_replace_contents(gf, csv, strlen(csv), NULL, FALSE,
                                  G_FILE_CREATE_NONE, NULL, NULL, &err)) {
-        hb_window_toast(win, "导出失败");
+        hb_window_toast(win, _("导出失败"));
         if (err) g_error_free(err);
     } else {
-        hb_window_toast(win, "连接日志已导出");
+        hb_window_toast(win, _("连接日志已导出"));
     }
     free(csv);
     g_object_unref(gf);
@@ -400,10 +401,10 @@ static void run_export_logs(HbWindow *win)
     GtkFileDialog *d = gtk_file_dialog_new();
     GtkFileFilter *ff = gtk_file_filter_new();
     GListStore *fs = g_list_store_new(GTK_TYPE_FILE_FILTER);
-    gtk_file_dialog_set_title(d, "导出连接日志 CSV");
+    gtk_file_dialog_set_title(d, _("导出连接日志 CSV"));
     gtk_file_dialog_set_initial_name(d, "harbor-logs.csv");
     gtk_file_filter_add_suffix(ff, "csv");
-    gtk_file_filter_set_name(ff, "CSV 文件");
+    gtk_file_filter_set_name(ff, _("CSV 文件"));
     g_list_store_append(fs, ff);
     gtk_file_dialog_set_filters(d, G_LIST_MODEL(fs));
     gtk_file_dialog_save(d, GTK_WINDOW(win), NULL, csv_save_done, win);
@@ -613,7 +614,7 @@ void hb_palette_open(HbWindow *win)
     gtk_widget_add_css_class(c->entry, "pal-entry");
     gtk_widget_set_hexpand(c->entry, TRUE);
     g_object_set(c->entry, "placeholder-text",
-        "搜索主机、页面、Snippet 或命令…", NULL);
+        _("搜索主机、页面、Snippet 或命令…"), NULL);
     g_signal_connect(c->entry, "changed", G_CALLBACK(on_changed), c);
     gtk_box_append(GTK_BOX(input_row), c->entry);
     g_object_set_data(G_OBJECT(scrim), "pal-entry", c->entry);

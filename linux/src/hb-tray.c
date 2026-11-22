@@ -6,6 +6,7 @@
 #include "hb-tray.h"
 #include <gio/gio.h>
 #include <string.h>
+#include <glib/gi18n.h>
 
 #define SNI_PATH   "/StatusNotifierItem"
 #define MENU_PATH  "/dev/harbor/Harbor/MenuBar"
@@ -114,12 +115,12 @@ struct _HbTray {
 static const char *item_label(HbTray *t, int id, char *buf, size_t n)
 {
     switch (id) {
-    case M_SHOW:    return "显示 Harbor";
+    case M_SHOW:    return _("显示 Harbor");
     case M_COUNT:
-        g_snprintf(buf, n, "%d 个会话在线", t->online);
+        g_snprintf(buf, n, ngettext("%d 个会话在线", "%d 个会话在线", t->online), t->online);
         return buf;
-    case M_DISCONN: return "全部断开";
-    case M_QUIT:    return "退出";
+    case M_DISCONN: return _("全部断开");
+    case M_QUIT:    return _("退出");
     default:        return "";
     }
 }
@@ -409,8 +410,8 @@ static GVariant *render_icon_pixmap(int size)
 static GVariant *tooltip_variant(HbTray *t)
 {
     char title[64];
-    g_snprintf(title, sizeof title, "Harbor · %d 个会话在线",
-               t->online);
+    g_snprintf(title, sizeof title, ngettext("Harbor · %d 个会话在线", "Harbor · %d 个会话在线",
+               t->online), t->online);
     return g_variant_new("(s@a(iiay)ss)", "dev.harbor.Harbor",
                          render_icon_pixmap(24), title, "");
 }
