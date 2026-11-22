@@ -620,6 +620,25 @@ static void on_dev_setsecret(GSimpleAction *a, GVariant *param, gpointer ud)
     g_strfreev(f);
 }
 
+/* app.chksecret "id|field" → 打印 secret 是否存在及长度（dev 验证） */
+static void on_dev_chksecret(GSimpleAction *a, GVariant *param,
+                             gpointer ud)
+{
+    gchar **f;
+    char *sec;
+    (void)a; (void)ud;
+    if (!param) return;
+    f = g_strsplit(g_variant_get_string(param, NULL), "|", 2);
+    if (!f || !f[0] || !f[1]) { g_strfreev(f); return; }
+    sec = hb_vault_get_secret(hb_store_vault(hb_store_default()),
+                              f[0], f[1]);
+    g_printerr("CHKSECRET id=%s field=%s len=%zu\n", f[0], f[1],
+               sec ? strlen(sec) : (size_t)0);
+    if (sec) hb_secret_free(sec);
+    fflush(stderr);
+    g_strfreev(f);
+}
+
 /* app.resolve "id|other" / "id|keep" → 调 UI 冲突按钮同一处理（dev） */
 static void on_dev_resolve(GSimpleAction *a, GVariant *param, gpointer ud)
 {
@@ -1002,6 +1021,25 @@ static void on_dev_ui(GSimpleAction *a, GVariant *param, gpointer ud)
         if (hv)
             hb_hosts_view_set_list_mode(HB_HOSTS_VIEW(hv),
                                         !strcmp(f[1], "1"));
+    } else if (!strcmp(f[0], "bkexport") || !strcmp(f[0], "bkimport")) {
+        GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
+        GtkWidget *sv = vp ? hb_vault_page_settings_view(
+                                HB_VAULT_PAGE(vp)) : NULL;
+        if (sv && !strcmp(f[0], "bkexport"))
+            hb_settings_view_export_backup(HB_SETTINGS_VIEW(sv));
+        else if (sv && f[1] && *f[1])
+            hb_settings_view_import_backup_dev(HB_SETTINGS_VIEW(sv),
+                                               f[1]);
+        else if (sv)
+            hb_settings_view_import_backup(HB_SETTINGS_VIEW(sv));
+    } else if (!strcmp(f[0], "bkout") && f[1]) {
+        hb_settings_view_bk_dev_out(f[1]);
+    } else if (!strcmp(f[0], "bkfill") && f[1]) {
+        hb_settings_view_bk_dev_fill(f[1]);
+    } else if (!strcmp(f[0], "bkpress")) {
+        hb_settings_view_bk_dev_press();
+    } else if (!strcmp(f[0], "bkconfirm")) {
+        hb_settings_view_bk_dev_confirm(!f[1] || strcmp(f[1], "0"));
     } else if ((!strcmp(f[0], "scedit") || !strcmp(f[0], "sckey"))
                && f[1]) {
         GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
@@ -1154,6 +1192,12 @@ static void hb_application_startup(GApplication *app)
 
         sa = g_simple_action_new("resolve", G_VARIANT_TYPE_STRING);
         g_signal_connect(sa, "activate", G_CALLBACK(on_dev_resolve), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
+        sa = g_simple_action_new("chksecret", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_chksecret),
+                         app);
         g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
         g_object_unref(sa);
 

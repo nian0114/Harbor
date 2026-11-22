@@ -13,8 +13,10 @@
 #include "hb-dialogs.h"
 
 #include <adwaita.h>
+#include <sodium.h>
 #include <string.h>
 
+#include "harbor/backup.h"
 
 #define SAVE_DEBOUNCE_MS 150
 
@@ -638,6 +640,7 @@ typedef struct ScRow_ ScRow;
 static void sc_commit(ScRow *r, const char *accel);
 static void sc_row_update(ScRow *r);
 static void sc_refresh_all(HbSettingsView *v);
+static GtkWidget *build_backup_panel(HbSettingsView *v);
 
 struct ScRow_ {
     HbSettingsView *v;
@@ -1159,6 +1162,8 @@ static void hb_settings_view_init(HbSettingsView *v)
     /* ===== 底部：快捷键 ===== */
     gtk_box_append(GTK_BOX(outer), build_shortcuts_panel(v));
 
+    /* ===== 底部：数据 ===== */
+    gtk_box_append(GTK_BOX(outer), build_backup_panel(v));
 
     v->changed_handler = g_signal_connect(v->store, "changed",
         G_CALLBACK(on_store_changed), v);
@@ -1167,6 +1172,446 @@ static void hb_settings_view_init(HbSettingsView *v)
 
 
 /* ------------------------------------------------------------------ */
+/* 数据备份（FR-15）：.harbor-backup 加密导出 / 导入。                  */
+/* Argon2id KDF ~1.2s：export 与 preview 放 GTask worker；import 最后  */
+/* 一步写 vault 会同步触发 store "changed"，留在主线程（一次性 ~1.5s）。*/
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+    HbSettingsView *v;
+    AdwDialog      *dlg;
+    GtkWidget      *pw1;          /* 口令（导出=新密码，导入=解密密码） */
+    GtkWidget      *pw2;          /* 确认（仅导出） */
+    GtkWidget      *hint;         /* 强度/错误提示 */
+    GtkWidget      *ok;           /* 当前对话框主按钮（dev 驱动用） */
+    char           *path;         /* 导出目标路径 */
+    char           *pw_stash;     /* 关窗后 worker 要用的口令副本 */
+    uint8_t        *data;         /* 导入文件字节 */
+    size_t          data_len;
+    gboolean        busy;         /* 已点确定进入下一阶段 → 关窗不回收 */
+} BkUi;
+
+static BkUi *bk_cur;              /* dev 驱动：当前打开的备份对话框 */
+static char *bk_dev_out;          /* dev 驱动：导出目标（跳过文件对话框） */
+
+static void bkui_free(BkUi *b)
+{
+    if (bk_cur == b) bk_cur = NULL;
+    if (b->pw_stash) {
+        sodium_memzero(b->pw_stash, strlen(b->pw_stash));
+        g_clear_pointer(&b->pw_stash, g_free);
+    }
+    g_clear_pointer(&b->path, g_free);
+    if (b->data) {
+        sodium_memzero(b->data, b->data_len);
+        g_clear_pointer(&b->data, g_free);
+    }
+    g_free(b);
+}
+
+static void bkui_closed(BkUi *b)
+{
+    if (!b->busy)
+        bkui_free(b);
+}
+
+static void wipe_pw_entry(GtkWidget *e)
+{
+    gtk_editable_set_text(GTK_EDITABLE(e), "");
+}
+
+/* 口令强度：长度+字符类别，实时提示 */
+static const char *pw_strength(const char *pw)
+{
+    size_t n = pw ? strlen(pw) : 0;
+    gboolean lo = FALSE, up = FALSE, dg = FALSE, sym = FALSE;
+    const char *p;
+    int cls;
+    for (p = pw; p && *p; p++) {
+        if (*p >= 'a' && *p <= 'z') lo = TRUE;
+        else if (*p >= 'A' && *p <= 'Z') up = TRUE;
+        else if (*p >= '0' && *p <= '9') dg = TRUE;
+        else sym = TRUE;
+    }
+    cls = lo + up + dg + sym;
+    if (n >= 12 && cls >= 3) return "强度：强";
+    if (n >= 8)              return "强度：中（建议 12+ 位混合字符）";
+    if (n > 0)               return "强度：弱（至少 8 位）";
+    return "";
+}
+
+static void bk_pw_changed(GtkEditable *e, gpointer ud)
+{
+    BkUi *b = ud;
+    const char *a = gtk_editable_get_text(GTK_EDITABLE(b->pw1));
+    const char *c = b->pw2 ? gtk_editable_get_text(GTK_EDITABLE(b->pw2))
+                           : NULL;
+    char msg[128];
+
+    g_strlcpy(msg, pw_strength(a), sizeof msg);
+    if (c && *c && strcmp(a, c))
+        g_strlcat(msg, "　·　两次输入不一致", sizeof msg);
+    gtk_label_set_label(GTK_LABEL(b->hint), msg);
+    (void)e;
+}
+
+/* ---- 导出：worker 里跑 KDF+加密+写盘 ---- */
+typedef struct {
+    hb_vault *vault;
+    char     *pw;
+    char     *path;
+    hb_err    err;
+} BkExportJob;
+
+static void bk_export_work(GTask *task, gpointer src, gpointer data,
+                           GCancellable *cancellable)
+{
+    BkExportJob *j = data;
+    (void)task;
+    uint8_t *out = NULL;
+    size_t out_len = 0;
+    (void)src; (void)cancellable;
+
+    j->err = hb_backup_export(j->vault, j->pw, &out, &out_len);
+    sodium_memzero(j->pw, strlen(j->pw));
+    if (j->err == HB_OK && out &&
+        !g_file_set_contents(j->path, (const char *)out,
+                             (gssize)out_len, NULL))
+        j->err = HB_ERR_IO;
+    if (out) { sodium_memzero(out, out_len); free(out); }
+}
+
+static void bk_export_done(GObject *src, GAsyncResult *res, gpointer ud)
+{
+    BkUi *b = ud;
+    BkExportJob *j = g_task_get_task_data(G_TASK(res));
+    (void)src;
+    if (j->err == HB_OK)
+        hb_toast(GTK_WIDGET(b->v), "加密备份已导出");
+    else
+        hb_toast(GTK_WIDGET(b->v), "导出失败");
+    bkui_free(b);
+}
+
+static void bk_export_job_free(BkExportJob *j)
+{
+    g_free(j->pw);
+    g_free(j->path);
+    g_free(j);
+}
+
+static void bk_export_launch(BkUi *b)
+{
+    GTask *t;
+    BkExportJob *j = g_new0(BkExportJob, 1);
+    j->vault = hb_store_vault(b->v->store);
+    j->pw = g_strdup(b->pw_stash); /* worker 里 memzero 后释放 */
+    j->path = g_strdup(b->path);
+    t = g_task_new(NULL, NULL, bk_export_done, b);
+    g_task_set_task_data(t, j, (GDestroyNotify)bk_export_job_free);
+    g_task_run_in_thread(t, bk_export_work);
+    g_object_unref(t);
+}
+
+static void bk_save_cb(GObject *src, GAsyncResult *res, gpointer ud)
+{
+    BkUi *b = ud;
+    GFile *gf = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(src),
+                                            res, NULL);
+    if (!gf) { bkui_free(b); return; }
+    g_free(b->path);
+    b->path = g_file_get_path(gf);
+    g_object_unref(gf);
+    if (!b->path) { bkui_free(b); return; }
+    bk_export_launch(b);
+}
+
+static void bk_export_go(GtkButton *btn, gpointer ud)
+{
+    BkUi *b = ud;
+    const char *a = gtk_editable_get_text(GTK_EDITABLE(b->pw1));
+    const char *c = gtk_editable_get_text(GTK_EDITABLE(b->pw2));
+    (void)btn;
+
+    if (!*a) {
+        gtk_label_set_label(GTK_LABEL(b->hint), "请输入备份密码");
+        return;
+    }
+    if (strcmp(a, c)) {
+        gtk_label_set_label(GTK_LABEL(b->hint), "两次输入不一致");
+        return;
+    }
+    if (strlen(a) < 8)
+        hb_toast(GTK_WIDGET(b->v), "密码少于 8 位，仍继续导出");
+    b->busy = TRUE;
+    /* 关窗后 pw 控件即销毁，先留副本给 worker */
+    g_free(b->pw_stash);
+    b->pw_stash = g_strdup(a);
+    wipe_pw_entry(b->pw1);
+    if (b->pw2) wipe_pw_entry(b->pw2);
+    if (bk_dev_out) {
+        g_free(b->path);
+        b->path = g_strdup(bk_dev_out);
+        adw_dialog_close(b->dlg);
+        bk_export_launch(b);
+        return;
+    }
+    {
+        GtkFileDialog *d = gtk_file_dialog_new();
+        adw_dialog_close(b->dlg);
+        gtk_file_dialog_set_title(d, "保存加密备份");
+        gtk_file_dialog_set_initial_name(d, "harbor" HB_BACKUP_EXT);
+        gtk_file_dialog_save(d, NULL, NULL, bk_save_cb, b);
+        g_object_unref(d);
+    }
+}
+
+/* ---- 导入：读文件 → 密码 → worker preview → 确认 → import ---- */
+typedef struct {
+    char    *pw;
+    uint8_t *data;
+    size_t   data_len;
+    hb_err   err;
+    hb_backup_stat st;
+} BkImportJob;
+
+static void bk_preview_work(GTask *task, gpointer src, gpointer data,
+                            GCancellable *cancellable)
+{
+    BkImportJob *j = data;
+    (void)task;
+    (void)src; (void)cancellable;
+    j->err = hb_backup_preview(j->data, j->data_len, j->pw, &j->st);
+}
+
+static void bk_import_do(BkUi *b, const char *pw)
+{
+    hb_backup_stat st;
+    hb_err e = hb_backup_import(hb_store_vault(b->v->store),
+                                b->data, b->data_len, pw, &st);
+    if (e == HB_OK) {
+        char msg[160];
+        g_snprintf(msg, sizeof msg,
+                   "已导入 %zu 个对象：新建 %zu · 覆盖 %zu",
+                   st.total, st.created, st.overwritten);
+        hb_toast(GTK_WIDGET(b->v), msg);
+        /* settings 可能被覆盖 → 立即重挂主题 */
+        hb_application_apply_theme();
+    } else {
+        hb_toast(GTK_WIDGET(b->v), "口令错误或文件已损坏");
+    }
+}
+
+static void bk_confirm_cb(gboolean yes, gpointer ud)
+{
+    BkUi *b = ud;
+    if (yes)
+        bk_import_do(b, (const char *)b->path);  /* pw 暂存 path */
+    if (b->path) sodium_memzero(b->path, strlen(b->path));
+    bkui_free(b);
+}
+
+static void bk_preview_done(GObject *src, GAsyncResult *res, gpointer ud)
+{
+    BkUi *b = ud;
+    BkImportJob *j = g_task_get_task_data(G_TASK(res));
+    (void)src;
+    if (j->err != HB_OK) {
+        hb_toast(GTK_WIDGET(b->v), "口令错误或文件已损坏");
+        if (b->path) sodium_memzero(b->path, strlen(b->path));
+        bkui_free(b);
+        return;
+    }
+    {
+        char msg[200];
+        g_snprintf(msg, sizeof msg,
+                   "备份文件校验通过，包含 <b>%zu</b> 个对象"
+                   "（含密钥与密文）。导入将按对象覆盖同名数据。",
+                   j->st.total);
+        b->dlg = hb_dialog_confirm(GTK_WIDGET(b->v),
+                                   "导入加密备份", msg,
+                                   "导入", FALSE, bk_confirm_cb, b);
+    }
+}
+
+static void bk_import_job_free(BkImportJob *j)
+{
+    if (j->pw) {
+        sodium_memzero(j->pw, strlen(j->pw));
+        g_free(j->pw);
+    }
+    g_free(j);
+}
+
+static void bk_import_go(GtkButton *btn, gpointer ud)
+{
+    BkUi *b = ud;
+    const char *pw = gtk_editable_get_text(GTK_EDITABLE(b->pw1));
+    GTask *t;
+    BkImportJob *j;
+    (void)btn;
+
+    if (!*pw) {
+        gtk_label_set_label(GTK_LABEL(b->hint), "请输入备份密码");
+        return;
+    }
+    b->busy = TRUE;
+    /* 关窗后 pw 控件即销毁，先留副本（bkui_free 负责 memzero） */
+    g_free(b->path);
+    b->path = g_strdup(pw);        /* 临时借 path 存明文，confirm 后清 */
+    wipe_pw_entry(b->pw1);
+    adw_dialog_close(b->dlg);
+    j = g_new0(BkImportJob, 1);
+    j->pw = g_strdup(b->path);     /* pw 指向已销毁控件，用副本 */
+    j->data = b->data;
+    j->data_len = b->data_len;
+    t = g_task_new(NULL, NULL, bk_preview_done, b);
+    g_task_set_task_data(t, j, (GDestroyNotify)bk_import_job_free);
+    g_task_run_in_thread(t, bk_preview_work);
+    g_object_unref(t);
+}
+
+static void bk_import_pw_dialog(BkUi *b)
+{
+    GtkWidget *body, *foot;
+    AdwDialog *d;
+    GtkWidget *hint;
+
+    d = hb_modal_new("导入加密备份", &body, &foot);
+    b->dlg = d;
+    gtk_box_append(GTK_BOX(body),
+        gtk_label_new("输入该备份的导出密码："));
+    b->pw1 = gtk_password_entry_new();
+    gtk_password_entry_set_show_peek_icon(
+        GTK_PASSWORD_ENTRY(b->pw1), TRUE);
+    gtk_box_append(GTK_BOX(body), b->pw1);
+    hint = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(hint), 0);
+    gtk_widget_add_css_class(hint, "hb-dim");
+    gtk_box_append(GTK_BOX(body), hint);
+    b->hint = hint;
+    {
+        GtkWidget *ok = gtk_button_new_with_label("下一步");
+        gtk_widget_add_css_class(ok, "primary");
+        g_signal_connect(ok, "clicked", G_CALLBACK(bk_import_go), b);
+        gtk_box_append(GTK_BOX(foot), ok);
+        b->ok = ok;
+    }
+    g_signal_connect_swapped(d, "closed",
+                             G_CALLBACK(bkui_closed), b);
+    adw_dialog_present(d, GTK_WIDGET(b->v));
+    bk_cur = b;
+}
+
+static void bk_file_cb(GObject *src, GAsyncResult *res, gpointer ud)
+{
+    BkUi *b = ud;
+    GFile *gf = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(src),
+                                            res, NULL);
+    char *contents = NULL;
+    gsize len = 0;
+
+    if (!gf) { bkui_free(b); return; }
+    if (!g_file_load_contents(gf, NULL, &contents, &len, NULL, NULL)) {
+        g_object_unref(gf);
+        hb_toast(GTK_WIDGET(b->v), "无法读取备份文件");
+        bkui_free(b);
+        return;
+    }
+    g_object_unref(gf);
+    b->data = (uint8_t *)contents;
+    b->data_len = len;
+    bk_import_pw_dialog(b);
+}
+
+static void on_bk_export(GtkButton *btn, gpointer ud)
+{
+    HbSettingsView *v = ud;
+    BkUi *b = g_new0(BkUi, 1);
+    GtkWidget *body, *foot;
+    AdwDialog *d;
+    GtkWidget *l, *hint, *ok;
+    (void)btn;
+
+    b->v = v;
+    d = hb_modal_new("导出加密备份", &body, &foot);
+    b->dlg = d;
+    l = gtk_label_new("备份包含全部主机、密钥与密文；密码用于"
+                      " Argon2id 加密，遗失无法恢复。");
+    gtk_label_set_wrap(GTK_LABEL(l), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(l), 0);
+    gtk_box_append(GTK_BOX(body), l);
+    b->pw1 = gtk_password_entry_new();
+    gtk_password_entry_set_show_peek_icon(
+        GTK_PASSWORD_ENTRY(b->pw1), TRUE);
+        gtk_box_append(GTK_BOX(body), b->pw1);
+    b->pw2 = gtk_password_entry_new();
+    gtk_password_entry_set_show_peek_icon(
+        GTK_PASSWORD_ENTRY(b->pw2), TRUE);
+        gtk_box_append(GTK_BOX(body), b->pw2);
+    hint = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(hint), 0);
+    gtk_widget_add_css_class(hint, "hb-dim");
+    gtk_box_append(GTK_BOX(body), hint);
+    b->hint = hint;
+    g_signal_connect(b->pw1, "changed", G_CALLBACK(bk_pw_changed), b);
+    g_signal_connect(b->pw2, "changed", G_CALLBACK(bk_pw_changed), b);
+    ok = gtk_button_new_with_label("导出…");
+    gtk_widget_add_css_class(ok, "primary");
+    g_signal_connect(ok, "clicked", G_CALLBACK(bk_export_go), b);
+    gtk_box_append(GTK_BOX(foot), ok);
+    b->ok = ok;
+    g_signal_connect_swapped(d, "closed",
+                             G_CALLBACK(bkui_closed), b);
+    adw_dialog_present(d, GTK_WIDGET(v));
+    bk_cur = b;
+}
+
+static void on_bk_import(GtkButton *btn, gpointer ud)
+{
+    HbSettingsView *v = ud;
+    BkUi *b = g_new0(BkUi, 1);
+    GtkFileDialog *d;
+    (void)btn;
+    b->v = v;
+    d = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(d, "导入加密备份");
+    gtk_file_dialog_open(d, NULL, NULL, bk_file_cb, b);
+    g_object_unref(d);
+}
+
+void hb_settings_view_export_backup(HbSettingsView *v)
+{
+    on_bk_export(NULL, v);
+}
+
+void hb_settings_view_import_backup(HbSettingsView *v)
+{
+    on_bk_import(NULL, v);
+}
+
+static GtkWidget *build_backup_panel(HbSettingsView *v)
+{
+    GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    GtkWidget *row, *be, *bi;
+
+    gtk_widget_add_css_class(panel, "panel");
+    gtk_box_append(GTK_BOX(panel),
+        panel_head("keyring", "数据",
+                   "加密备份包含主机、密钥、密文与设置（.harbor-backup）。"));
+    row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    be = gtk_button_new_with_label("导出加密备份…");
+    bi = gtk_button_new_with_label("导入备份…");
+    gtk_widget_add_css_class(be, "hb-btn");
+    gtk_widget_add_css_class(bi, "hb-btn");
+    g_signal_connect(be, "clicked", G_CALLBACK(on_bk_export), v);
+    g_signal_connect(bi, "clicked", G_CALLBACK(on_bk_import), v);
+    gtk_box_append(GTK_BOX(row), be);
+    gtk_box_append(GTK_BOX(row), bi);
+    gtk_widget_set_halign(row, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(panel), row);
+    return panel;
+}
 
 static void hb_settings_view_dispose(GObject *o)
 {
@@ -1231,4 +1676,71 @@ gboolean hb_settings_view_sc_dev(HbSettingsView *v, size_t idx,
     if (!gtk_accelerator_parse(accel, &k, &m) || !k)
         return FALSE;
     return sc_capture_key(NULL, k, 0, m, r);
+}
+
+void hb_settings_view_bk_dev_out(const char *path)
+{
+    g_free(bk_dev_out);
+    bk_dev_out = g_strdup(path);
+}
+
+void hb_settings_view_bk_dev_fill(const char *txt)
+{
+    BkUi *b = bk_cur;
+    if (!b) return;
+    if (b->pw1)
+        gtk_editable_set_text(GTK_EDITABLE(b->pw1), txt ? txt : "");
+    if (b->pw2)
+        gtk_editable_set_text(GTK_EDITABLE(b->pw2), txt ? txt : "");
+}
+
+void hb_settings_view_bk_dev_press(void)
+{
+    if (bk_cur && bk_cur->ok)
+        gtk_widget_activate(bk_cur->ok);
+}
+
+static GtkWidget *find_button_lbl(GtkWidget *w, const char *lbl)
+{
+    GtkWidget *c;
+    if (GTK_IS_BUTTON(w)) {
+        const char *t = gtk_button_get_label(GTK_BUTTON(w));
+        if (t && lbl && !strcmp(t, lbl))
+            return w;
+    }
+    for (c = gtk_widget_get_first_child(w); c;
+         c = gtk_widget_get_next_sibling(c)) {
+        GtkWidget *r = find_button_lbl(c, lbl);
+        if (r) return r;
+    }
+    return NULL;
+}
+
+/* 确认/取消：走真按钮，cfm_closed 会以 accepted 回调并负责回收 */
+void hb_settings_view_bk_dev_confirm(gboolean yes)
+{
+    BkUi *b = bk_cur;
+    GtkWidget *btn;
+    if (!b || !b->dlg) return;
+    btn = find_button_lbl(GTK_WIDGET(b->dlg), yes ? "导入" : "取消");
+    if (btn) gtk_widget_activate(btn);
+    else if (!yes) adw_dialog_close(b->dlg);   /* pw 阶段直接关窗 */
+}
+
+void hb_settings_view_import_backup_dev(HbSettingsView *v,
+                                        const char *path)
+{
+    BkUi *b = g_new0(BkUi, 1);
+    char *contents = NULL;
+    gsize len = 0;
+    b->v = v;
+    if (!path ||
+        !g_file_get_contents(path, &contents, &len, NULL)) {
+        hb_toast(GTK_WIDGET(v), "无法读取备份文件");
+        bkui_free(b);
+        return;
+    }
+    b->data = (uint8_t *)contents;
+    b->data_len = len;
+    bk_import_pw_dialog(b);
 }
