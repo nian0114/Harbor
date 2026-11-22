@@ -7,3 +7,4 @@
 /.cache/
 /.pkg-deb/
 /.pkg-appimage/
+/po/harbor.pot
