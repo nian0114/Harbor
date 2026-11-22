@@ -5,3 +5,5 @@
 *.so
 *.a
 /.cache/
+/.pkg-deb/
+/.pkg-appimage/
