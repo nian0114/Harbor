@@ -1458,6 +1458,9 @@ void hb_share_owner_incoming(hb_share_owner *o, const uint8_t *data,
 struct hb_share_peer {
     pthread_mutex_t mu;
     char     *share_id, *server_url, *device, *name, *title;
+    char     *host;            /* meta 明文（member，仅 UI 卡片用） */
+    int       mode;            /* meta 中的初始 mode */
+    int64_t   started;         /* meta started（unix ms） */
     uint8_t  *vk;              /* sodium 32（member） */
     uint8_t  *k_out;           /* sodium 32 */
     uint8_t  *k_in;            /* sodium 32 */
@@ -1568,8 +1571,18 @@ hb_share_peer *hb_share_peer_new_member(const char *share_id,
     p->name = xstrndup(name ? name : "", strlen(name ? name : ""));
     {
         const char *t = json_str(j, "title");
+        const char *h = json_str(j, "host");
+        const char *m = json_str(j, "mode");
+        cJSON *st = cJSON_GetObjectItem(j, "started");
         if (t)
             p->title = xstrndup(t, strlen(t));
+        if (h)
+            p->host = xstrndup(h, strlen(h));
+        if (m)
+            p->mode = !strcmp(m, "collab") ? HB_SHARE_COLLAB
+                                           : HB_SHARE_VIEW;
+        if (cJSON_IsNumber(st))
+            p->started = (int64_t)st->valuedouble;
     }
     p->vk = sodium_malloc(32);
     p->k_out = sodium_malloc(32);
@@ -1695,6 +1708,21 @@ hb_vt *hb_share_peer_vt(hb_share_peer *p)
 int hb_share_peer_perm(hb_share_peer *p)
 {
     return p ? p->perm : HB_SHARE_VIEW;
+}
+
+const char *hb_share_peer_host(hb_share_peer *p)
+{
+    return p ? p->host : NULL;
+}
+
+int hb_share_peer_meta_mode(hb_share_peer *p)
+{
+    return p ? p->mode : HB_SHARE_VIEW;
+}
+
+int64_t hb_share_peer_started(hb_share_peer *p)
+{
+    return p ? p->started : 0;
 }
 
 int hb_share_peer_fd(hb_share_peer *p) { return p ? p->q.r : -1; }
@@ -2087,6 +2115,7 @@ void hb_share_peer_free(hb_share_peer *p)
     free(p->device);
     free(p->name);
     free(p->title);
+    free(p->host);
     outq_free(&p->q);
     pthread_mutex_destroy(&p->mu);
     free(p);

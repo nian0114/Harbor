@@ -149,6 +149,9 @@ const char *hb_share_peer_server(hb_share_peer *p);   /* guest：链接中的 se
 hb_vt      *hb_share_peer_vt(hb_share_peer *p);
 int         hb_share_peer_perm(hb_share_peer *p);     /* HB_SHARE_*，未授权时 VIEW */
 const char *hb_share_peer_title(hb_share_peer *p);    /* member：meta 中的 title */
+const char *hb_share_peer_host(hb_share_peer *p);     /* member：meta 中的 host */
+int         hb_share_peer_meta_mode(hb_share_peer *p);/* member：meta 中的初始 mode */
+int64_t     hb_share_peer_started(hb_share_peer *p);  /* member：meta started（unix ms） */
 uint32_t    hb_share_peer_self_id(hb_share_peer *p);  /* hello 之后的自身 id */
 
 void hb_share_peer_incoming(hb_share_peer *p, const uint8_t *data,
