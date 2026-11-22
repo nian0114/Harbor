@@ -286,6 +286,8 @@ static void hb_slice_model_dispose(GObject *o)
         g_source_remove(s->drain);
         s->drain = 0;
     }
+    if (s->src)
+        g_signal_handlers_disconnect_by_data(s->src, s);
     g_clear_object(&s->src);
     g_clear_pointer(&s->pub, g_ptr_array_unref);
     g_clear_pointer(&s->tgt, g_ptr_array_unref);
@@ -1739,8 +1741,8 @@ static void attach_sel_model(HbHostsView *hv, gboolean list)
     const char *sid = cur ? cur->id : NULL;
 
     gtk_single_selection_set_model(hide, NULL);
-    gtk_single_selection_set_model(show,
-        G_LIST_MODEL(g_object_ref(hv->visible)));
+    /* set_model 是普通属性 setter（不消耗引用）：直接传 hv->visible */
+    gtk_single_selection_set_model(show, G_LIST_MODEL(hv->visible));
     if (cur) {
         guint i, n = g_list_model_get_n_items(hv->visible);
         for (i = 0; i < n; i++) {
@@ -1960,8 +1962,13 @@ static GtkWidget *build_table_head(void)
 static void hb_hosts_view_dispose(GObject *o)
 {
     HbHostsView *hv = HB_HOSTS_VIEW(o);
-    if (hv->store && hv->changed_handler)
+    if (hv->store && hv->changed_handler) {
         g_signal_handler_disconnect(hv->store, hv->changed_handler);
+        hv->changed_handler = 0;
+    }
+    /* 列表 widget 经 selection 持有模型链，会比本对象的引用活得久 */
+    if (hv->filtered)
+        g_signal_handlers_disconnect_by_data(hv->filtered, hv);
     g_clear_object(&hv->all);
     g_clear_object(&hv->visible);
     g_clear_object(&hv->grid_sel);
@@ -1970,13 +1977,15 @@ static void hb_hosts_view_dispose(GObject *o)
     g_clear_object(&hv->sorted);
     g_clear_object(&hv->filter);
     g_clear_object(&hv->sorter);
-    if (hv->pending_reload)
+    if (hv->pending_reload) {
         g_source_remove(hv->pending_reload);
-    g_free(hv->search_text);
-    g_free(hv->chip);
-    g_free(hv->sel_id);
-    g_free(hv->sel_restore);
-    g_free(hv->focus_key);
+        hv->pending_reload = 0;
+    }
+    g_clear_pointer(&hv->search_text, g_free);
+    g_clear_pointer(&hv->chip, g_free);
+    g_clear_pointer(&hv->sel_id, g_free);
+    g_clear_pointer(&hv->sel_restore, g_free);
+    g_clear_pointer(&hv->focus_key, g_free);
     G_OBJECT_CLASS(hb_hosts_view_parent_class)->dispose(o);
 }
 
@@ -2012,9 +2021,10 @@ GtkWidget *hb_hosts_view_new(HbStore *st)
         G_LIST_MODEL(g_object_ref(hv->all)),
         GTK_SORTER(g_object_ref(hv->sorter)));
     hv->filter = gtk_custom_filter_new(filter_fn, hv, NULL);
+    /* 两个参数都是 transfer full：hv 自己还持有 filter，必须另给一份引用 */
     hv->filtered = gtk_filter_list_model_new(
         G_LIST_MODEL(g_object_ref(hv->sorted)),
-        GTK_FILTER(hv->filter));
+        GTK_FILTER(g_object_ref(hv->filter)));
     /* 大列表：分片过滤 + 分片 items-changed，同步路径不进 item manager
      * 的大窗口重建（见 FR-01 验收 5 的 100ms 预算） */
     gtk_filter_list_model_set_incremental(hv->filtered, TRUE);
@@ -2068,14 +2078,15 @@ GtkWidget *hb_hosts_view_new(HbStore *st)
     f = gtk_signal_list_item_factory_new();
     g_signal_connect(f, "setup", G_CALLBACK(grid_setup), NULL);
     g_signal_connect(f, "bind", G_CALLBACK(grid_bind), hv);
-    hv->grid = gtk_grid_view_new(sel, f);
+    /* gtk_*_view_new 消耗传入的 model/factory 引用：
+     * 多传一引用保住 hv->grid_sel 自有引用，f 则归 view */
+    hv->grid = gtk_grid_view_new(g_object_ref(sel), f);
     gtk_widget_set_margin_start(hv->grid, 16);
     gtk_widget_set_margin_end(hv->grid, 16);
     gtk_widget_set_margin_bottom(hv->grid, 16);
     scrolled = gtk_scrolled_window_new();
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), hv->grid);
     gtk_stack_add_named(GTK_STACK(hv->body), scrolled, "grid");
-    /* sel/f ownership is transferred to the view */
 
     /* 列表 */
     hv->list_sel = gtk_single_selection_new(NULL);
@@ -2084,7 +2095,7 @@ GtkWidget *hb_hosts_view_new(HbStore *st)
     f = gtk_signal_list_item_factory_new();
     g_signal_connect(f, "setup", G_CALLBACK(list_setup), NULL);
     g_signal_connect(f, "bind", G_CALLBACK(list_bind), hv);
-    hv->list = gtk_list_view_new(sel, f);
+    hv->list = gtk_list_view_new(g_object_ref(sel), f);
     gtk_widget_set_margin_start(hv->list, 16);
     gtk_widget_set_margin_end(hv->list, 16);
     listbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);

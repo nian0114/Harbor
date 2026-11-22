@@ -688,7 +688,8 @@ static void hb_settings_view_init(HbSettingsView *v)
         }
         g_free(fams);
         v->family_dd = gtk_drop_down_new(G_LIST_MODEL(m), NULL);
-        g_object_unref(m);
+        /* gtk_drop_down_new 消耗 m 的引用：不可再 unref，否则
+         * dd->model 悬空，拆卸时 sel/filter 链读到已释放对象 */
         g_signal_connect(v->family_dd, "notify::selected",
                          G_CALLBACK(on_dd_changed), v);
     }
@@ -716,7 +717,7 @@ static void hb_settings_view_init(HbSettingsView *v)
         for (i = 0; i < N_SB; i++)
             gtk_string_list_append(m, lbls[i]);
         v->sb_dd = gtk_drop_down_new(G_LIST_MODEL(m), NULL);
-        g_object_unref(m);
+        /* 同上：_new 已消耗引用 */
         g_signal_connect(v->sb_dd, "notify::selected",
                          G_CALLBACK(on_dd_changed), v);
         row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
