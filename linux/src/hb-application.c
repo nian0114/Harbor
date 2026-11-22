@@ -17,9 +17,17 @@
 #include "hb-forward-mgr.h"
 #include "hb-share.h"
 #include "hb-login.h"
+#include "hb-palette.h"
+#include "hb-host-form.h"
+#include "hb-shortcuts.h"
+#include "hb-settings-view.h"
 #ifndef NDEBUG
 #include "hb-share.h"
 #include "hb-login.h"
+#include "hb-palette.h"
+#include "hb-host-form.h"
+#include "hb-shortcuts.h"
+#include "hb-settings-view.h"
 #include "hb-share-page.h"
 #include "hb-share-dialog.h"
 #include <stdio.h>
@@ -882,6 +890,143 @@ static gboolean bg_check(gpointer ud)
     return G_SOURCE_CONTINUE;
 }
 
+/* 暗色 token provider：有效主题为暗时加载 theme-dark.css 覆盖同名
+ * @define-color，style.css 里的全部颜色即随之翻转。 */
+static GtkCssProvider *dark_css;
+
+static void update_dark_provider(void)
+{
+    gboolean dark = adw_style_manager_get_dark(
+        adw_style_manager_get_default());
+    GdkDisplay *d = gdk_display_get_default();
+
+    if (dark && !dark_css) {
+        dark_css = gtk_css_provider_new();
+        gtk_css_provider_load_from_resource(
+            dark_css, "/dev/harbor/Harbor/theme-dark.css");
+        gtk_style_context_add_provider_for_display(
+            d, GTK_STYLE_PROVIDER(dark_css),
+            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+    } else if (!dark && dark_css) {
+        gtk_style_context_remove_provider_for_display(
+            d, GTK_STYLE_PROVIDER(dark_css));
+        g_clear_object(&dark_css);
+    }
+}
+
+static void on_dark_changed(GObject *o, GParamSpec *ps, gpointer ud)
+{
+    (void)o; (void)ps; (void)ud;
+    update_dark_provider();
+}
+
+static void on_store_changed_theme(HbStore *st, const char *type,
+                                   const char *id, gpointer ud)
+{
+    (void)st; (void)id; (void)ud;
+    if (!g_strcmp0(type, "settings"))
+        hb_application_apply_theme();
+}
+
+void hb_application_apply_theme(void)
+{
+    hb_obj *o = NULL;
+    const char *t = "light";
+    AdwStyleManager *m = adw_style_manager_get_default();
+
+    if (hb_vault_settings(hb_store_vault(hb_store_default()), &o) == HB_OK
+        && o) {
+        const char *x = hb_obj_get_str(o, "ui_theme");
+        if (x && *x)
+            t = x;
+    }
+    if (!strcmp(t, "dark"))
+        adw_style_manager_set_color_scheme(m, ADW_COLOR_SCHEME_FORCE_DARK);
+    else if (!strcmp(t, "system"))
+        adw_style_manager_set_color_scheme(m, ADW_COLOR_SCHEME_DEFAULT);
+    else
+        adw_style_manager_set_color_scheme(m, ADW_COLOR_SCHEME_FORCE_LIGHT);
+    hb_obj_free(o);
+    update_dark_provider();
+}
+
+#ifndef NDEBUG
+/* app.dev-ui "cmd|arg"：调试构建的 UI 驱动钩子（截图/无头验证）。
+ * cmd: section|name  drawer|hid  hostform[|hid]  palette  notif
+ *      toast|text  sftp|hid  key|accel  scheme|light|dark|system
+ *      listmode|0|1  bkexport  bkimport  drawerclose  closetop */
+static void on_dev_ui(GSimpleAction *a, GVariant *param, gpointer ud)
+{
+    GtkWindow *win;
+    gchar **f;
+    (void)a;
+    if (!param) return;
+    f = g_strsplit(g_variant_get_string(param, NULL), "|", 4);
+    if (!f || !f[0]) { g_strfreev(f); return; }
+    win = gtk_application_get_active_window(GTK_APPLICATION(ud));
+    if (!HB_IS_WINDOW(win)) { g_strfreev(f); return; }
+
+    if (!strcmp(f[0], "section") && f[1]) {
+        GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
+        if (vp) hb_vault_page_set_section(HB_VAULT_PAGE(vp), f[1]);
+    } else if (!strcmp(f[0], "drawer") && f[1]) {
+        GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
+        GtkWidget *hv = vp ? hb_vault_page_hosts_view(HB_VAULT_PAGE(vp))
+                           : NULL;
+        if (hv) hb_hosts_view_show_drawer(HB_HOSTS_VIEW(hv), f[1]);
+    } else if (!strcmp(f[0], "hostform")) {
+        hb_host_form_open(GTK_WIDGET(win), hb_store_default(),
+                          f[1] && *f[1] ? f[1] : NULL);
+    } else if (!strcmp(f[0], "palette")) {
+        hb_palette_open(HB_WINDOW(win));
+    } else if (!strcmp(f[0], "notifpost") && f[1]) {
+        hb_notify_post("info", f[1], f[2] ? f[2] : "", NULL);
+    } else if (!strcmp(f[0], "notif")) {
+        hb_window_notif_toggle(HB_WINDOW(win));
+    } else if (!strcmp(f[0], "toast") && f[1]) {
+        hb_toast(GTK_WIDGET(win), f[1]);
+    } else if (!strcmp(f[0], "sftp") && f[1]) {
+        hb_host_action_sftp(GTK_WIDGET(win), hb_store_default(), f[1]);
+    } else if (!strcmp(f[0], "scheme") && f[1]) {
+        AdwStyleManager *m = adw_style_manager_get_default();
+        if (!strcmp(f[1], "dark"))
+            adw_style_manager_set_color_scheme(m, ADW_COLOR_SCHEME_FORCE_DARK);
+        else if (!strcmp(f[1], "system"))
+            adw_style_manager_set_color_scheme(m, ADW_COLOR_SCHEME_DEFAULT);
+        else
+            adw_style_manager_set_color_scheme(m, ADW_COLOR_SCHEME_FORCE_LIGHT);
+    } else if (!strcmp(f[0], "listmode") && f[1]) {
+        GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
+        GtkWidget *hv = vp ? hb_vault_page_hosts_view(HB_VAULT_PAGE(vp))
+                           : NULL;
+        if (hv)
+            hb_hosts_view_set_list_mode(HB_HOSTS_VIEW(hv),
+                                        !strcmp(f[1], "1"));
+    } else if (!strcmp(f[0], "drawerclose")) {
+        GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
+        GtkWidget *hv = vp ? hb_vault_page_hosts_view(HB_VAULT_PAGE(vp))
+                           : NULL;
+        if (hv) hb_hosts_view_close_drawer(HB_HOSTS_VIEW(hv));
+    } else if (!strcmp(f[0], "closetop")) {
+        GtkWidget *pal = g_object_get_data(G_OBJECT(win), "hb-palette");
+        GList *tl, *l;
+        if (pal) gtk_widget_unparent(pal);
+        tl = gtk_window_list_toplevels();
+        for (l = tl; l; l = l->next) {
+            GtkWidget *w = l->data;
+            if (w == (GtkWidget *)win) continue;
+            if (ADW_IS_DIALOG(w)) adw_dialog_close(ADW_DIALOG(w));
+            else if (GTK_IS_POPOVER(w)) gtk_popover_popdown(GTK_POPOVER(w));
+            else if (GTK_IS_WINDOW(w)) gtk_window_close(GTK_WINDOW(w));
+        }
+        g_list_free(tl);
+    }
+    fflush(stderr);
+    g_strfreev(f);
+}
+#endif /* !NDEBUG */
+
+
 static void hb_application_startup(GApplication *app)
 {
     GtkCssProvider *css;
@@ -922,9 +1067,15 @@ static void hb_application_startup(GApplication *app)
     }
 
 #ifndef NDEBUG
+
     /* shot/feed/open-host 会经 org.gtk.Actions 导出到 session bus，
      * 任何同 bus 进程都能驱动会话 —— 仅 debug build + 显式开关。 */
     if (!g_strcmp0(g_getenv("HARBOR_DEV_ACTIONS"), "1")) {
+        sa = g_simple_action_new("dev-ui", G_VARIANT_TYPE_STRING);
+        g_signal_connect(sa, "activate", G_CALLBACK(on_dev_ui), app);
+        g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
+        g_object_unref(sa);
+
         sa = g_simple_action_new("shot", G_VARIANT_TYPE_STRING);
         g_signal_connect(sa, "activate", G_CALLBACK(on_dev_shot), app);
         g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(sa));
@@ -1078,6 +1229,7 @@ static void hb_application_startup(GApplication *app)
     }
 #endif
 
+
     css = gtk_css_provider_new();
     gtk_css_provider_load_from_resource(css, "/dev/harbor/Harbor/style.css");
     gtk_style_context_add_provider_for_display(
@@ -1085,8 +1237,12 @@ static void hb_application_startup(GApplication *app)
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(css);
 
-    adw_style_manager_set_color_scheme(
-        adw_style_manager_get_default(), ADW_COLOR_SCHEME_FORCE_LIGHT);
+    g_signal_connect(adw_style_manager_get_default(), "notify::dark",
+        G_CALLBACK(on_dark_changed), NULL);
+    /* settings.shortcuts/ui_theme 被本机或 sync 改动时即时应用 */
+    g_signal_connect(hb_store_default(), "changed",
+        G_CALLBACK(on_store_changed_theme), NULL);
+    hb_application_apply_theme();
     hb_term_theme_install_css();
 }
 

@@ -1421,6 +1421,7 @@ hb_err hb_vault_settings(hb_vault *v, hb_obj **out)
     if (!o)
         return HB_ERR_NOMEM;
     hb_obj_set_str(o, "theme", "harbor");
+    hb_obj_set_str(o, "ui_theme", "light");
     hb_obj_set_int(o, "font_size", 13);
     hb_obj_set_double(o, "line_height", 1.5);
     hb_obj_set_bool(o, "autocomplete", false);

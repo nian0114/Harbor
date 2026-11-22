@@ -2141,3 +2141,15 @@ void hb_hosts_view_set_list_mode(HbHostsView *hv, gboolean list)
 {
     set_mode(hv, list);
 }
+
+void hb_hosts_view_show_drawer(HbHostsView *hv, const char *host_id)
+{
+    if (hv->drawer && host_id)
+        hb_host_drawer_show(hv->drawer, host_id);
+}
+
+void hb_hosts_view_close_drawer(HbHostsView *hv)
+{
+    if (hv->drawer)
+        hb_host_drawer_close(hv->drawer);
+}

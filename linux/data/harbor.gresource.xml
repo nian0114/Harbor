@@ -2,5 +2,6 @@
 <gresources>
   <gresource prefix="/dev/harbor/Harbor">
     <file>style.css</file>
+    <file>theme-dark.css</file>
   </gresource>
 </gresources>

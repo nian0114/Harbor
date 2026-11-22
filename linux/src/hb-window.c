@@ -835,6 +835,17 @@ static void on_sidebar_toggle(GtkButton *b, gpointer ud)
         hb_vault_page_toggle_sidebar(HB_VAULT_PAGE(win->vault_page));
 }
 
+void hb_window_notif_toggle(HbWindow *win)
+{
+    GtkPopover *p;
+    if (!win->bell) return;
+    p = gtk_menu_button_get_popover(GTK_MENU_BUTTON(win->bell));
+    if (!p) return;
+    /* 无 WM 的 headless 下 grab 失败会立刻 autohide，dev 截图需要常驻 */
+    gtk_popover_set_autohide(p, FALSE);
+    gtk_popover_popup(p);
+}
+
 void hb_window_set_vault_page(HbWindow *win, GtkWidget *vault_page)
 {
     win->vault_page = vault_page;

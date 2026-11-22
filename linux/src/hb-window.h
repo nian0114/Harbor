@@ -63,6 +63,7 @@ void hb_window_switch_tab_rel(HbWindow *win, int dir);
 /* Vault 页指针：标题栏侧栏开关要翻转它的侧栏可见性 */
 void hb_window_set_vault_page(HbWindow *win, GtkWidget *vault_page);
 GtkWidget *hb_window_vault_page(HbWindow *win);   /* borrowed，可能为 NULL */
+void       hb_window_notif_toggle(HbWindow *win);
 
 /* 全窗口浮层（palette 等）：调用方 unparent/remove 自己来关闭 */
 void hb_window_overlay_add(HbWindow *win, GtkWidget *w);

@@ -12,6 +12,7 @@ HbApplication *hb_application_new(void);
 
 /* FR-16 托盘/自启动：settings 页查询 watcher、写 user unit。 */
 gboolean hb_application_tray_available(void);
+void     hb_application_apply_theme(void);   /* ui_theme 设置 → 立即生效 */
 
 void     hb_app_note_sessions(void);   /* 会话数可能变了 → 刷托盘 */
 extern int hb_opt_background;

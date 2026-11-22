@@ -10,13 +10,13 @@
 #include <unistd.h>
 
 /* 颜色标签 palette（与 data-model color 字段值一致：存色彩名） */
-static const struct { const char *name, *css, *hex; } kColors[] = {
-    { "red",    "c-red",    "#e5484d" },
-    { "orange", "c-orange", "#f0a13a" },
-    { "green",  "c-green",  "#22a06b" },
-    { "blue",   "c-blue",   "#2f7cf6" },
-    { "purple", "c-purple", "#8b5cf6" },
-    { "pink",   "c-pink",   "#ec4899" },
+static const struct { const char *name, *css; } kColors[] = {
+    { "red",    "c-red"    },
+    { "orange", "c-orange" },
+    { "green",  "c-green"  },
+    { "blue",   "c-blue"   },
+    { "purple", "c-purple" },
+    { "pink",   "c-pink"   },
 };
 #define N_COLORS (sizeof(kColors) / sizeof(kColors[0]))
 

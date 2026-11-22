@@ -2,11 +2,11 @@
 
 @define-color hb_titlebar      #222939;
 @define-color hb_titlebar_tab  #39415a;
-@define-color hb_titlebar_text #cdd4e4;
+@define-color hb_titlebar_text @hb_rd_fg;
 @define-color hb_page          #e9edf1;
 @define-color hb_content       #edf1f4;
 @define-color hb_sidebar       #f7f9fb;
-@define-color hb_sidebar_act   #e3e8ee;
+@define-color hb_sidebar_act   @hb_xfer_fill;
 @define-color hb_card          #ffffff;
 @define-color hb_line          #dfe4ea;
 @define-color hb_text          #1c2333;
@@ -29,6 +29,92 @@
 @define-color accent_color     #2f7cf6;
 @define-color accent_fg_color  #ffffff;
 
+/* 语义化 token（亮色；暗色值见 theme-dark.css） */
+@define-color hb_tab_term_bg  #12351f;
+@define-color hb_tab_term_line  #1f5c33;
+@define-color hb_tab_term_fg  #7fe0a3;
+@define-color hb_dot_ok  #2ecc71;
+@define-color hb_dot_err  #ff5f57;
+@define-color hb_dot_pend  #f5a623;
+@define-color hb_dot_share  #4aa3ff;
+@define-color hb_hover  #eef1f5;
+@define-color hb_grad1  #4aa3ff;
+@define-color hb_grad2  #7b61ff;
+@define-color hb_subtle  #f4f6f8;
+@define-color hb_primary_hover  #2468d8;
+@define-color hb_danger_bg  #fbe9ea;
+@define-color hb_card_hover  #c9d4e2;
+@define-color hb_sel  #eaf2fd;
+@define-color hb_blue_pill_bg  #e8f0fe;
+@define-color hb_blue_pill_fg  #2b6cd4;
+@define-color hb_green_pill_bg  #e6f6ee;
+@define-color hb_green_pill_fg  #1d7a4f;
+@define-color hb_chip  #f0f3f7;
+@define-color hb_table_head  #fbfcfd;
+@define-color hb_row_line  #eef1f4;
+@define-color hb_row_hover  #f6f9fc;
+@define-color hb_scroll1  #e7ebf0;
+@define-color hb_scroll2  #d9dee5;
+@define-color hb_notif_hover  #f2f5f9;
+@define-color hb_notif_unread  #f0f6ff;
+@define-color hb_pending  #cfd6de;
+@define-color hb_err_bg  #fdf0f0;
+@define-color hb_err_line  #f3c6c8;
+@define-color hb_hint_amber_bg  #fdf6ea;
+@define-color hb_hint_amber_line  #f3e2bb;
+@define-color hb_hint_amber_fg  #8a6a1f;
+@define-color hb_hint_red_bg  #fdefef;
+@define-color hb_hint_red_fg  #a03033;
+@define-color hb_hint_blue_bg  #f0f6ff;
+@define-color hb_hint_blue_line  #d6e6fb;
+@define-color hb_hint_blue_fg  #2b5c9e;
+@define-color hb_warn_bg  #fdf3da;
+@define-color hb_scrim  alpha(#10141c,0.45);
+@define-color hb_pal_scrim  alpha(#0f1626,0.45);
+@define-color hb_pal_shadow  alpha(#0a1428,0.4);
+@define-color hb_shadow  alpha(black,0.05);
+@define-color hb_focus_green  #2ea043;
+@define-color hb_pill_err_bg  #fdebec;
+@define-color hb_pill_err_fg  #b3373b;
+@define-color hb_pill_run_bg  #e8f1fd;
+@define-color hb_pill_run_fg  #2f66c4;
+@define-color hb_pill_wait_bg  #fdf3e3;
+@define-color hb_pill_wait_fg  #b4761a;
+@define-color hb_xfer_fill  #e3e8ee;
+@define-color hb_xfer_done  #2da44e;
+@define-color hb_xfer_fail  #d1242f;
+@define-color hb_xfer_cancel  #9aa3ad;
+@define-color hb_avatar_local  #3b4559;
+@define-color hb_avatar_vnc  #3f8cff;
+@define-color hb_avatar_rdp  #0f6cbd;
+@define-color hb_rd_bg  #10141f;
+@define-color hb_rd_banner  #10233c;
+@define-color hb_rd_banner_fg  #7db8f2;
+@define-color hb_rd_line  #1c3a5e;
+@define-color hb_rd_tag_fg  #9ecbf5;
+@define-color hb_rd_dim_fg  #5d87b8;
+@define-color hb_rd_hint  #f2c97d;
+@define-color hb_rd_ovl  rgba(16,20,31,0.55);
+@define-color hb_rd_ovl2  rgba(16,20,31,0.9);
+@define-color hb_rd_card_line  #2a3454;
+@define-color hb_rd_fg  #cdd4e4;
+@define-color hb_c_purple  #8b5cf6;
+@define-color hb_c_pink  #ec4899;
+@define-color hb_share_banner_bg #f0fdf6;
+@define-color hb_share_banner_line #d7eedd;
+
+/* 语义扩展 token：强调前景、键帽、深色表面上的白色叠层、浮起阴影 */
+@define-color hb_on_accent    #ffffff;
+@define-color hb_kbd_bg       #ffffff;
+@define-color hb_shadow_raised alpha(black,0.09);
+@define-color hb_od_hover     alpha(white,.06);   /* 深色标题栏 tab 悬停 */
+@define-color hb_od_hover2    alpha(white,.08);   /* 深色表面按钮悬停/底色 */
+@define-color hb_od_active    alpha(white,.12);   /* 深色表面按钮强悬停 */
+@define-color hb_od_selected  alpha(white,.14);   /* 深色表面选中态 */
+@define-color hb_od_strong    alpha(white,.16);   /* 终端工具钮悬停 */
+@define-color hb_od_line      alpha(white,.08);   /* 深色表面分隔线 */
+@define-color hb_end_ovl rgba(255,255,255,0.92);
+
 * { font-family: "Ubuntu", "Cantarell", "Noto Sans", "Noto Sans CJK SC", sans-serif;
     font-size: 14px; }
 
@@ -49,15 +135,15 @@ window { background-color: @hb_content; }
     border: 1px solid transparent;
     margin: 9px 0;
 }
-.hb-tab:hover { background-color: alpha(white, .06); }
+.hb-tab:hover { background-color: @hb_od_hover; }
 .hb-tab.active {
     background-color: @hb_titlebar_tab;
-    border-color: alpha(white, .08);
+    border-color: @hb_od_line;
 }
 .hb-tab.term.active {
-    background-color: #12351f;
-    border-color: #1f5c33;
-    color: #7fe0a3;
+    background-color: @hb_tab_term_bg;
+    border-color: @hb_tab_term_line;
+    color: @hb_tab_term_fg;
 }
 .hb-tab > button.hb-tab-main {
     background: none; border: none; box-shadow: none;
@@ -70,12 +156,12 @@ window { background-color: @hb_content; }
     color: inherit; opacity: .5; min-width: 18px; min-height: 18px;
     padding: 0; margin-right: 6px; border-radius: 4px;
 }
-.hb-tab button.hb-tab-x:hover { opacity: 1; background-color: alpha(white, .12); }
+.hb-tab button.hb-tab-x:hover { opacity: 1; background-color: @hb_od_active; }
 .hb-tab-dot { border-radius: 50%; min-width: 7px; min-height: 7px; margin-right: 6px; }
-.hb-tab-dot.ok    { background-color: #2ecc71; }
-.hb-tab-dot.err   { background-color: #ff5f57; }
-.hb-tab-dot.pending { background-color: #f5a623; }
-.hb-tab-dot.share { background-color: #4aa3ff; animation: hb_pulse 1.6s infinite; }
+.hb-tab-dot.ok    { background-color: @hb_dot_ok; }
+.hb-tab-dot.err   { background-color: @hb_dot_err; }
+.hb-tab-dot.pending { background-color: @hb_dot_pend; }
+.hb-tab-dot.share { background-color: @hb_dot_share; animation: hb_pulse 1.6s infinite; }
 @keyframes hb_pulse { 50% { opacity: .45; } }
 
 button.hb-icobtn {
@@ -83,11 +169,11 @@ button.hb-icobtn {
     color: @hb_titlebar_text; padding: 6px 8px; border-radius: 7px;
     min-width: 0; min-height: 0;
 }
-button.hb-icobtn:hover { background-color: alpha(white, .08); }
-button.hb-icobtn.on { background-color: alpha(white, .14); }
+button.hb-icobtn:hover { background-color: @hb_od_hover2; }
+button.hb-icobtn.on { background-color: @hb_od_selected; }
 
 .hb-badge {
-    background-color: @hb_red; color: white;
+    background-color: @hb_red; color: @hb_on_accent;
     font-size: 10px; font-weight: 600;
     min-width: 16px; min-height: 16px; border-radius: 8px;
     padding: 0 4px;
@@ -105,7 +191,7 @@ button.hb-side-item {
     color: @hb_text; font-size: 13.5px;
     padding: 9px 12px; border-radius: 8px; min-height: 0;
 }
-button.hb-side-item:hover { background-color: #eef1f5; }
+button.hb-side-item:hover { background-color: @hb_hover; }
 button.hb-side-item.active { background-color: @hb_sidebar_act; font-weight: 600; }
 button.hb-side-item .s-ico { color: @hb_text_2; margin-right: 10px; }
 
@@ -115,13 +201,13 @@ button.hb-account-chip {
     background: none; border: none; box-shadow: none;
     padding: 9px 12px; border-radius: 8px;
 }
-button.hb-account-chip:hover { background-color: #eef1f5; }
+button.hb-account-chip:hover { background-color: @hb_hover; }
 .hb-avatar {
     border-radius: 50%; min-width: 26px; min-height: 26px;
-    background-image: linear-gradient(135deg, #4aa3ff, #7b61ff);
-    color: white; font-size: 12px; font-weight: 700;
+    background-image: linear-gradient(135deg, @hb_grad1, @hb_grad2);
+    color: @hb_on_accent; font-size: 12px; font-weight: 700;
 }
-.hb-avatar label { color: white; padding: 0; }
+.hb-avatar label { color: @hb_on_accent; padding: 0; }
 .hb-a-name { font-size: 12.5px; font-weight: 600; color: @hb_text; }
 .hb-a-sub  { font-size: 11px; color: @hb_text_3; }
 
@@ -129,7 +215,7 @@ button.hb-account-chip:hover { background-color: #eef1f5; }
 
 /* ---------- quickbar / toolbar ---------- */
 .hb-quickbar {
-    background-color: #f4f6f8;
+    background-color: @hb_subtle;
     border: 1px solid @hb_line;
     border-radius: 10px;
     min-height: 40px;
@@ -152,24 +238,24 @@ button.hb-btn {
     padding: 8px 14px; border-radius: 8px; min-height: 0;
 }
 button.hb-btn:hover { background-color: @hb_btn_hover; }
-button.hb-btn.primary { background-color: @hb_blue; color: white; }
-button.hb-btn.primary:hover { background-color: #2468d8; }
+button.hb-btn.primary { background-color: @hb_blue; color: @hb_on_accent; }
+button.hb-btn.primary:hover { background-color: @hb_primary_hover; }
 button.hb-btn.ghost { background-color: transparent; }
 button.hb-btn.ghost:hover { background-color: @hb_btn; }
-button.hb-btn.danger { background-color: #fbe9ea; color: @hb_red; }
+button.hb-btn.danger { background-color: @hb_danger_bg; color: @hb_red; }
 button.hb-btn.sm { padding: 5px 10px; font-size: 12px; }
 
 button.hb-chip {
-    background-color: white; border: 1px solid @hb_line;
+    background-color: @hb_on_accent; border: 1px solid @hb_line;
     color: @hb_text_2; font-size: 12px; font-weight: 600;
     padding: 5px 12px; border-radius: 20px; min-height: 0;
 }
-button.hb-chip.on { background-color: @hb_blue; border-color: @hb_blue; color: white; }
+button.hb-chip.on { background-color: @hb_blue; border-color: @hb_blue; color: @hb_on_accent; }
 
 .hb-chiprow { padding: 0 18px 4px; }
 
 .hb-sortsel {
-    border: 1px solid @hb_line; background-color: white;
+    border: 1px solid @hb_line; background-color: @hb_on_accent;
     border-radius: 8px; padding: 2px 10px;
     font-size: 12.5px; color: @hb_text_2;
 }
@@ -192,11 +278,11 @@ button.hb-viewbtn.on { color: @hb_blue; background-color: @hb_btn; }
 .hb-host-card {
     background-color: @hb_card; border-radius: 10px;
     border: 1px solid transparent;
-    box-shadow: 0 1px 2px alpha(black, .05);
+    box-shadow: 0 1px 2px @hb_shadow;
     padding: 13px 15px;
 }
-.hb-host-card:hover { border-color: #c9d4e2;
-    box-shadow: 0 4px 14px rgba(25,35,60,.09); }
+.hb-host-card:hover { border-color: @hb_card_hover;
+    box-shadow: 0 4px 14px @hb_shadow_raised; }
 .hb-h-name { font-weight: 600; font-size: 13.5px; color: @hb_text; }
 .hb-h-sub  { font-size: 12px; color: @hb_text_3; margin-top: 2px; }
 
@@ -208,18 +294,18 @@ listview > *:selected {
     box-shadow: none;
 }
 .hb-host-card.sel { border: 1.5px solid @hb_blue; }
-.hb-table-row.sel { background-color: #eaf2fd; }
+.hb-table-row.sel { background-color: @hb_sel; }
 
-.hb-os-avatar { border-radius: 10px; color: white; }
+.hb-os-avatar { border-radius: 10px; color: @hb_on_accent; }
 .hb-os-avatar.sm { border-radius: 6px; }
 .hb-os-avatar.ubuntu  { background-color: @hb_ubuntu; }
 .hb-os-avatar.generic { background-color: @hb_amber; }
 .hb-os-avatar.debian  { background-color: @hb_amber; }
-.hb-os-avatar.local   { background-color: #3b4559; }
-.hb-os-avatar.vnc     { background-color: #3f8cff; }
-.hb-os-avatar.rdp     { background-color: #0f6cbd; }
-.hb-os-avatar.win     { background-color: #0f6cbd; }
-.hb-os-avatar widget, .hb-os-avatar label { color: white; }
+.hb-os-avatar.local   { background-color: @hb_avatar_local; }
+.hb-os-avatar.vnc     { background-color: @hb_avatar_vnc; }
+.hb-os-avatar.rdp     { background-color: @hb_avatar_rdp; }
+.hb-os-avatar.win     { background-color: @hb_avatar_rdp; }
+.hb-os-avatar widget, .hb-os-avatar label { color: @hb_on_accent; }
 
 .mono-ico {
     font-family: "Ubuntu Mono", "DejaVu Sans Mono", Menlo, monospace;
@@ -249,30 +335,30 @@ listview > *:selected {
 
 .hb-tag {
     font-size: 10.5px; padding: 2px 7px; border-radius: 6px;
-    background-color: #e8f0fe; color: #2b6cd4; font-weight: 600;
+    background-color: @hb_blue_pill_bg; color: @hb_blue_pill_fg; font-weight: 600;
 }
-.hb-tag.tun { background-color: #e6f6ee; color: @hb_green; }
+.hb-tag.tun { background-color: @hb_green_pill_bg; color: @hb_green; }
 
 button.hb-card-go {
-    background-color: #f0f3f7; border: none; box-shadow: none;
+    background-color: @hb_chip; border: none; box-shadow: none;
     color: @hb_text_3; border-radius: 8px;
     min-width: 30px; min-height: 30px; padding: 0;
 }
-button.hb-card-go:hover { background-color: @hb_blue; color: white; }
+button.hb-card-go:hover { background-color: @hb_blue; color: @hb_on_accent; }
 
 .pill { border-radius: 9px; padding: 2px 9px; font-size: 11px;
     font-weight: 600; }
-.pill.on  { background-color: #e6f6ee; color: #1d7a4f; }
-.pill.off { background-color: #f0f3f7; color: @hb_text_3; }
+.pill.on  { background-color: @hb_green_pill_bg; color: @hb_green_pill_fg; }
+.pill.off { background-color: @hb_chip; color: @hb_text_3; }
 .fingerprint-art { font-family: "Ubuntu Mono", "DejaVu Sans Mono",
     Menlo, monospace; font-size: 11px; line-height: 1.15; }
 .hb-table { background-color: @hb_card; border-radius: 10px;
-    box-shadow: 0 1px 2px alpha(black, .05); }
-.hb-table-head { background-color: #fbfcfd; border-bottom: 1px solid @hb_line; }
+    box-shadow: 0 1px 2px @hb_shadow; }
+.hb-table-head { background-color: @hb_table_head; border-bottom: 1px solid @hb_line; }
 .hb-table-head label { font-size: 12px; color: @hb_text_2; font-weight: 600;
     padding: 11px 0; }
-.hb-table-row { border-bottom: 1px solid #eef1f4; }
-.hb-table-row:hover { background-color: #f6f9fc; }
+.hb-table-row { border-bottom: 1px solid @hb_row_line; }
+.hb-table-row:hover { background-color: @hb_row_hover; }
 .hb-table-row label { font-size: 13px; padding: 11px 0; }
 .hb-table-row .hb-tag { padding: 2px 7px; }
 .hb-table-row .hb-c0 { padding: 11px 0; }
@@ -284,7 +370,7 @@ button.hb-card-go:hover { background-color: @hb_blue; color: white; }
 .hb-empty { color: @hb_text_2; }
 .hb-e-ico {
     min-width: 58px; min-height: 58px; border-radius: 14px;
-    background-image: linear-gradient(180deg, #e7ebf0, #d9dee5);
+    background-image: linear-gradient(180deg, @hb_scroll1, @hb_scroll2);
     color: @hb_text_2; margin-bottom: 8px;
 }
 .hb-e-title { font-size: 15px; font-weight: 700; color: @hb_text; }
@@ -293,7 +379,7 @@ button.hb-card-go:hover { background-color: @hb_blue; color: white; }
 .kbd {
     font-size: 11px; color: @hb_text_3; border: 1px solid @hb_line;
     border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px;
-    background-color: white;
+    background-color: @hb_on_accent;
 }
 
 /* ---------- notification panel ---------- */
@@ -301,9 +387,9 @@ button.hb-card-go:hover { background-color: @hb_blue; color: white; }
 .hb-notif-head { font-weight: 700; font-size: 13.5px; color: @hb_text;
     padding: 8px 10px; }
 .hb-notif-item { border-radius: 9px; padding: 10px; }
-.hb-notif-item:hover { background-color: #f2f5f9; }
-.hb-notif-item.unread { background-color: #f0f6ff; }
-.hb-n-ico { min-width: 30px; min-height: 30px; border-radius: 8px; color: white; }
+.hb-notif-item:hover { background-color: @hb_notif_hover; }
+.hb-notif-item.unread { background-color: @hb_hint_blue_bg; }
+.hb-n-ico { min-width: 30px; min-height: 30px; border-radius: 8px; color: @hb_on_accent; }
 .hb-n-ico.ok   { background-color: @hb_green; }
 .hb-n-ico.err  { background-color: @hb_red; }
 .hb-n-ico.info { background-color: @hb_blue; }
@@ -323,24 +409,24 @@ button.hb-card-go:hover { background-color: @hb_blue; color: white; }
 .progress-track { min-width: 430px; margin-top: 14px; margin-bottom: 8px; }
 .progress-track .node {
     min-width: 22px; min-height: 22px; border-radius: 11px;
-    background-color: @hb_blue; color: white;
+    background-color: @hb_blue; color: @hb_on_accent;
 }
-.progress-track .node.pending { background-color: #cfd6de; }
+.progress-track .node.pending { background-color: @hb_pending; }
 .progress-track .node.done    { background-color: @hb_blue; }
 .progress-track .node.spin { animation: hb-pulse 1s infinite; }
 @keyframes hb-pulse { 50% { opacity: .45; } }
 .progress-track .bar { min-height: 3px; background-color: @hb_blue; }
-.progress-track .bar.pending { background-color: #cfd6de; }
+.progress-track .bar.pending { background-color: @hb_pending; }
 
 .connect-log {
-    background-color: #f4f6f8; border-radius: 10px;
+    background-color: @hb_subtle; border-radius: 10px;
     margin-top: 6px; min-height: 180px;
 }
 .connect-log-line { font-size: 13px; color: @hb_text; }
 .connect-log-line label { font-size: 13px; }
 
 .connect-errcard {
-    background-color: #fdf0f0; border: 1px solid #f3c6c8;
+    background-color: @hb_err_bg; border: 1px solid @hb_err_line;
     border-radius: 10px; padding: 14px 16px; margin-top: 12px;
 }
 
@@ -361,15 +447,15 @@ button.hb-card-go:hover { background-color: @hb_blue; color: white; }
     font-size: 12px; line-height: 1.6;
 }
 .hintbox label { font-size: 12px; }
-.hintbox.amber { background-color: #fdf6ea; border: 1px solid #f3e2bb;
-    color: #8a6a1f; }
-.hintbox.red   { background-color: #fdefef; border: 1px solid #f3c6c8;
-    color: #a03033; }
-.hintbox.plain { background-color: #f0f6ff; border: 1px solid #d6e6fb;
-    color: #2b5c9e; }
+.hintbox.amber { background-color: @hb_hint_amber_bg; border: 1px solid @hb_hint_amber_line;
+    color: @hb_hint_amber_fg; }
+.hintbox.red   { background-color: @hb_hint_red_bg; border: 1px solid @hb_err_line;
+    color: @hb_hint_red_fg; }
+.hintbox.plain { background-color: @hb_hint_blue_bg; border: 1px solid @hb_hint_blue_line;
+    color: @hb_hint_blue_fg; }
 
 .codebox {
-    background-color: #f4f6f8; border: 1px solid @hb_line;
+    background-color: @hb_subtle; border: 1px solid @hb_line;
     border-radius: 9px; padding: 10px 13px;
 }
 .codebox label { font-family: "Ubuntu Mono", "DejaVu Sans Mono", Menlo,
@@ -377,7 +463,7 @@ button.hb-card-go:hover { background-color: @hb_blue; color: white; }
 
 .fingerprint-art {
     font-family: "Ubuntu Mono", "DejaVu Sans Mono", Menlo, monospace;
-    font-size: 11px; background-color: #f4f6f8; border-radius: 9px;
+    font-size: 11px; background-color: @hb_subtle; border-radius: 9px;
     padding: 12px; color: @hb_text_2;
 }
 
@@ -391,10 +477,10 @@ button.hb-btn-small:hover { background-color: @hb_btn_hover; }
 
 button.tbtn {
     padding: 4px 10px; font-size: 12px; border-radius: 7px;
-    background-color: alpha(white, .08); border: none; box-shadow: none;
+    background-color: @hb_od_hover2; border: none; box-shadow: none;
     color: inherit;
 }
-button.tbtn:hover { background-color: alpha(white, .16); }
+button.tbtn:hover { background-color: @hb_od_strong; }
 
 .hb-red  { color: @hb_red; }
 .hb-dim  { color: @hb_text_3; font-size: 12px; }
@@ -402,7 +488,7 @@ button.tbtn:hover { background-color: alpha(white, .16); }
 /* ---------- 外观与终端设置页（FR-21） ---------- */
 .panel {
     background-color: @hb_card; border-radius: 12px; padding: 18px;
-    box-shadow: 0 1px 2px alpha(black, .05);
+    box-shadow: 0 1px 2px @hb_shadow;
 }
 .set-h4 { font-size: 13.5px; color: @hb_text; }
 .p-sub { font-size: 12px; color: @hb_text_3; margin-top: -4px; }
@@ -442,7 +528,7 @@ button.theme-card.on .tc-check { opacity: 1; }
 
 /* ---------- 断线重连条 ---------- */
 .hb-disc-strip {
-    background-color: #fdf3da; color: #8a6a1f;
+    background-color: @hb_warn_bg; color: @hb_hint_amber_fg;
     padding: 6px 14px; font-size: 12.5px;
 }
 .hb-disc-strip label { font-size: 12.5px; }
@@ -450,7 +536,7 @@ button.theme-card.on .tc-check { opacity: 1; }
 /* ------------------------------ 主机 CRUD（Phase 2） ------------------------------ */
 
 .hb-drawer-scrim {
-    background-color: alpha(#10141c, 0.45);
+    background-color: @hb_scrim;
     border-radius: 0;
 }
 .hb-drawer {
@@ -490,12 +576,12 @@ button.theme-card.on .tc-check { opacity: 1; }
     border-color: @hb_blue;
 }
 .hb-color-none { padding: 3px 10px; }
-.c-red    { background-color: #e5484d; }
-.c-orange { background-color: #f0a13a; }
-.c-green  { background-color: #22a06b; }
-.c-blue   { background-color: #2f7cf6; }
-.c-purple { background-color: #8b5cf6; }
-.c-pink   { background-color: #ec4899; }
+.c-red    { background-color: @hb_red; }
+.c-orange { background-color: @hb_amber; }
+.c-green  { background-color: @hb_green; }
+.c-blue   { background-color: @hb_blue; }
+.c-purple { background-color: @hb_c_purple; }
+.c-pink   { background-color: @hb_c_pink; }
 .hb-imp-list { margin: 6px 0; }
 .hb-imp-row  { font-size: 12.5px; font-family: monospace; }
 .hb-imp-sub  { font-size: 11.5px; color: @hb_text_2; font-family: monospace; }
@@ -535,11 +621,11 @@ button.theme-card.on .tc-check { opacity: 1; }
 .find-bar button.icon-btn:hover { background-color: @hb_btn_hover; }
 
 /* ---------- command palette (FR-20) ---------- */
-.pal-scrim { background-color: alpha(#0f1626, .45); }
+.pal-scrim { background-color: @hb_pal_scrim; }
 .pal-box {
     background-color: @hb_card;
     border-radius: 14px;
-    box-shadow: 0 24px 70px alpha(#0a1428, .4);
+    box-shadow: 0 24px 70px @hb_pal_shadow;
 }
 .pal-input {
     padding: 13px 16px;
@@ -556,12 +642,12 @@ list.pal-list { padding: 6px; background: none; }
 list.pal-list row { background: none; padding: 0; }
 list.pal-list row:selected { background: none; }
 .pal-item { padding: 9px 12px; border-radius: 9px; font-size: 13px; }
-.pal-item.on { background-color: #e8f0fe; }
+.pal-item.on { background-color: @hb_blue_pill_bg; }
 .pal-item .pi-ico {
     min-width: 26px; min-height: 26px; border-radius: 7px;
     background-color: @hb_sidebar_act; color: @hb_text_2;
 }
-.pal-item.on .pi-ico { background-color: white; color: @hb_blue; }
+.pal-item.on .pi-ico { background-color: @hb_on_accent; color: @hb_blue; }
 .pal-item .pi-title { font-weight: 600; color: @hb_text; }
 .pal-item .pi-sub   { font-size: 11.5px; color: @hb_text_3; }
 .pal-empty { padding: 18px; color: @hb_text_3; font-size: 12.5px; }
@@ -578,8 +664,8 @@ button.kbd-btn:hover > label { border-color: @hb_text_3; }
 }
 .pane.focused { border-color: @accent_bg_color; }
 .pane.broadcast {
-    border-color: #2ea043;
-    box-shadow: inset 0 0 0 1px alpha(#2ea043, .35);
+    border-color: @hb_focus_green;
+    box-shadow: inset 0 0 0 1px alpha(@hb_focus_green, .35);
 }
 .pane-head { min-height: 27px; padding: 3px 10px; }
 .pane-head-ic { opacity: .8; }
@@ -589,7 +675,7 @@ button.pane-head-btn {
     background: none; border: none; box-shadow: none;
     border-radius: 5px; color: inherit; opacity: .75;
 }
-button.pane-head-btn:hover { background-color: alpha(white, .12); opacity: 1; }
+button.pane-head-btn:hover { background-color: @hb_od_active; opacity: 1; }
 
 .ws-paned > separator { min-width: 5px; min-height: 5px; }
 
@@ -605,8 +691,8 @@ button.assist-item:hover { background-color: @hb_btn_hover; }
 
 /* 工具栏开关态（Broadcast 开 / 助手栏 / Focus） */
 button.tbtn.on {
-    background-color: #12351f; color: #6fe09c;
-    border: 1px solid #1f5c33;
+    background-color: @hb_tab_term_bg; color: @hb_tab_term_fg;
+    border: 1px solid @hb_tab_term_line;
 }
 
 /* 分屏菜单 / 目标选择 */
@@ -621,21 +707,21 @@ checkbutton.pick-row { padding: 7px 8px; }
 .snip-list { }
 .snip-card { background-color: @hb_card; border-radius: 10px;
     border: 1px solid @hb_line; padding: 12px 14px;
-    box-shadow: 0 1px 2px alpha(black, .04); }
-.snip-card:hover { border-color: #c9d3dd; }
+    box-shadow: 0 1px 2px @hb_shadow; }
+.snip-card:hover { border-color: @hb_card_hover; }
 .snip-title { font-size: 13px; font-weight: 600; }
 .snip-code { font-size: 12px; color: @hb_text_2;
     background-color: @hb_sidebar_act; border-radius: 6px; padding: 8px 10px; }
-.pill.err { background-color: #fdebec; color: #b3373b; }
-.pill.run { background-color: #e8f1fd; color: #2f66c4; }
-.pill.wait { background-color: #fdf3e3; color: #b4761a; }
+.pill.err { background-color: @hb_pill_err_bg; color: @hb_pill_err_fg; }
+.pill.run { background-color: @hb_pill_run_bg; color: @hb_pill_run_fg; }
+.pill.wait { background-color: @hb_pill_wait_bg; color: @hb_pill_wait_fg; }
 .hb-iconbtn.saved { color: @hb_blue; }
 
 /* ---------- SFTP 双栏 ---------- */
 .sftp-col { background-color: @hb_sidebar_act; }
 .sftp-view {}
 .sftp-pane {
-    background-color: #ffffff;
+    background-color: @hb_card;
     border-right: 1px solid @hb_line;
 }
 .sftp-pane-r { border-left: 1px solid @hb_line; }
@@ -674,7 +760,7 @@ checkbutton.pick-row { padding: 7px 8px; }
 .hb-mono { font-family: Monospace; font-size: 12px; }
 
 /* ---------- 传输队列 ---------- */
-.xfer-wrap { border-top: 1px solid @hb_line; background-color: #ffffff; }
+.xfer-wrap { border-top: 1px solid @hb_line; background-color: @hb_card; }
 .xfer-head {
     padding: 6px 12px; font-size: 12.5px; font-weight: 600;
     color: @hb_text;
@@ -684,35 +770,35 @@ checkbutton.pick-row { padding: 7px 8px; }
 .xfer .x-dir { font-size: 11.5px; color: @hb_text_3; }
 .xfer .x-track {
     min-height: 6px; border-radius: 3px;
-    background-color: #e3e8ee;
+    background-color: @hb_xfer_fill;
 }
 .xfer .x-fill {
     min-height: 6px; border-radius: 3px;
     background-color: @hb_blue;
 }
-.xfer .x-fill.xfer-done { background-color: #2da44e; }
-.xfer .x-fill.xfer-fail { background-color: #d1242f; }
-.xfer .x-fill.xfer-cancel { background-color: #9aa3ad; }
+.xfer .x-fill.xfer-done { background-color: @hb_xfer_done; }
+.xfer .x-fill.xfer-fail { background-color: @hb_xfer_fail; }
+.xfer .x-fill.xfer-cancel { background-color: @hb_xfer_cancel; }
 .xfer .x-pct { font-size: 11.5px; color: @hb_text_2; }
 
 /* ---------- FR-07 远程桌面页 ---------- */
-.hb-rd-view { background-color: #10141f; }
+.hb-rd-view { background-color: @hb_rd_bg; }
 .hb-rd-banner {
-    background-color: #10233c; color: #7db8f2;
+    background-color: @hb_rd_banner; color: @hb_rd_banner_fg;
     font-size: 12px; padding: 7px 14px;
-    border-bottom: 1px solid #1c3a5e;
+    border-bottom: 1px solid @hb_rd_line;
 }
-.hb-rd-banner .hb-tag { background-color: #1c3a5e; color: #9ecbf5; }
-.hb-rd-banner .hb-dim { color: #5d87b8; }
-.hb-rd-hint { color: #f2c97d; font-size: 11.5px; }
-.hb-rd-wrap { background-color: #10141f; }
-.hb-rd-dim { background-color: rgba(16, 20, 31, .55); }
+.hb-rd-banner .hb-tag { background-color: @hb_rd_line; color: @hb_rd_tag_fg; }
+.hb-rd-banner .hb-dim { color: @hb_rd_dim_fg; }
+.hb-rd-hint { color: @hb_rd_hint; font-size: 11.5px; }
+.hb-rd-wrap { background-color: @hb_rd_bg; }
+.hb-rd-dim { background-color: @hb_rd_ovl; }
 .hb-rd-discbox {
-    background-color: rgba(16, 20, 31, .9);
-    border: 1px solid #2a3454; border-radius: 10px;
+    background-color: @hb_rd_ovl2;
+    border: 1px solid @hb_rd_card_line; border-radius: 10px;
     padding: 18px 26px;
 }
-.hb-rd-disc { color: #cdd4e4; font-size: 14px; font-weight: 600; }
+.hb-rd-disc { color: @hb_rd_fg; font-size: 14px; font-weight: 600; }
 .hb-code { font-family: Monospace; font-size: 11.5px; }
 
 /* ==== FR-11 账号与同步 ==== */
@@ -742,24 +828,24 @@ checkbutton.pick-row { padding: 7px 8px; }
 
 /* FR-12 共享 */
 .hb-share-pill { font-size: 10px; padding: 1px 8px; border-radius: 8px;
-    background-color: #f0f3f7; color: @hb_text_3; }
-.hb-share-pill.collab { background-color: #e6f6ee; color: #1d7a4f; }
+    background-color: @hb_chip; color: @hb_text_3; }
+.hb-share-pill.collab { background-color: @hb_green_pill_bg; color: @hb_green_pill_fg; }
 .hb-share-code { font-family: monospace; font-size: 15px; letter-spacing: 1px; }
 .hb-share-sec { font-size: 12px; font-weight: 600; color: @hb_text_3;
     margin-top: 6px; }
-button.hb-share-card { background-color: #fff; border: 1px solid #e3e7ee;
+button.hb-share-card { background-color: @hb_card; border: 1px solid @hb_line;
     border-radius: 10px; padding: 10px 14px; }
-button.hb-share-card:hover { border-color: #b9c4d4; }
+button.hb-share-card:hover { border-color: @hb_card_hover; }
 .hb-share-card-title { font-weight: 600; font-size: 13px; }
 .hb-share-card-sub { font-size: 11px; color: @hb_text_3; }
-.hb-share-banner { background-color: #f0fdf6; border-bottom: 1px solid #d7eedd;
+.hb-share-banner { background-color: @hb_share_banner_bg; border-bottom: 1px solid @hb_share_banner_line;
     min-height: 34px; }
 .hb-share-banner-title { font-weight: 600; font-size: 12.5px; }
-.hb-share-notice { font-size: 11px; color: #8a6d1d;
-    background-color: #fdf7e3; padding: 3px 12px; }
-.hb-share-ended { background-color: rgba(255,255,255,0.92);
+.hb-share-notice { font-size: 11px; color: @hb_hint_amber_fg;
+    background-color: @hb_hint_amber_bg; padding: 3px 12px; }
+.hb-share-ended { background-color: @hb_end_ovl;
     border-radius: 14px; padding: 26px 34px; }
 .hb-share-ended-txt { font-size: 15px; font-weight: 600; }
 .hb-share-hint-title { font-weight: 600; }
 .hb-share-row-title { font-size: 12.5px; color: @hb_text_3; }
-.tbtn.on { background-color: #e6f6ee; color: #1d7a4f; }
+.tbtn.on { background-color: @hb_green_pill_bg; color: @hb_green_pill_fg; }

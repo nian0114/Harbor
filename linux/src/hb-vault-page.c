@@ -31,6 +31,7 @@ struct _HbVaultPage {
     GtkBox parent;
     GtkWidget *sidebar;
     GtkWidget *stack;
+    GtkWidget *settings_view;
     GtkWidget *hosts_view;
     GtkWidget *side_btns[N_SECTIONS];
     const char *active;
@@ -106,6 +107,11 @@ void hb_vault_page_toggle_sidebar(HbVaultPage *vp)
 {
     gtk_widget_set_visible(vp->sidebar,
                            !gtk_widget_get_visible(vp->sidebar));
+}
+
+GtkWidget *hb_vault_page_settings_view(HbVaultPage *vp)
+{
+    return vp->settings_view;
 }
 
 GtkWidget *hb_vault_page_hosts_view(HbVaultPage *vp)
@@ -216,7 +222,7 @@ static void hb_vault_page_init(HbVaultPage *vp)
     for (i = 2; i < N_SECTIONS; i++) {
         GtkWidget *page;
         if (!strcmp(SECTIONS[i].id, "appearance"))
-            page = hb_settings_view_new();
+            page = vp->settings_view = hb_settings_view_new();
         else if (!strcmp(SECTIONS[i].id, "snippets"))
             page = hb_snippets_view_new(hb_store_default());
         else if (!strcmp(SECTIONS[i].id, "known_hosts"))

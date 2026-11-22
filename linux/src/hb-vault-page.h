@@ -16,6 +16,7 @@ void hb_vault_page_toggle_sidebar(HbVaultPage *vp);
 
 /* hosts view 子控件（dev flag 用） */
 GtkWidget *hb_vault_page_hosts_view(HbVaultPage *vp);
+GtkWidget *hb_vault_page_settings_view(HbVaultPage *vp);
 
 G_END_DECLS
 

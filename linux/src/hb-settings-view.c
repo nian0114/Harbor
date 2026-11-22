@@ -5,7 +5,6 @@
 #include "hb-settings-view.h"
 #include "hb-store.h"
 #include "hb-icons.h"
-#include "hb-shortcuts.h"
 #include "hb-terminal.h"
 #include "hb-term-theme.h"
 #include "hb-application.h"
@@ -14,6 +13,7 @@
 
 #include <adwaita.h>
 #include <string.h>
+
 
 #define SAVE_DEBOUNCE_MS 150
 
@@ -52,6 +52,7 @@ struct _HbSettingsView {
     GtkWidget   *family_dd, *sb_dd;
     GtkWidget   *blink_sw, *osc52_sw;
     GtkWidget   *tray_sw, *login_sw;
+    GtkWidget   *ui_dd;         /* 外观：浅色/深色/跟随系统 */
     GtkWidget   *sftp_spin;
     GtkWidget   *pv_view;       /* .hb-term-view.theme-* 容器 */
     GtkWidget   *pv_term;       /* HbTerminal（预览模式） */
@@ -156,6 +157,8 @@ static void apply_preview(HbSettingsView *v)
         gtk_switch_get_active(GTK_SWITCH(v->osc52_sw)));
 }
 
+static const char *cur_ui_theme(const HbSettingsView *v);
+
 static gboolean save_cb(gpointer ud)
 {
     HbSettingsView *v = ud;
@@ -181,6 +184,7 @@ static gboolean save_cb(gpointer ud)
             gtk_switch_get_active(GTK_SWITCH(v->tray_sw)));
         hb_obj_set_bool(o, "start_at_login",
             gtk_switch_get_active(GTK_SWITCH(v->login_sw)));
+        hb_obj_set_str(o, "ui_theme", cur_ui_theme(v));
         hb_vault_put(hb_store_vault(v->store), o);
         hb_obj_free(o);
     }
@@ -193,6 +197,22 @@ static void schedule_save(HbSettingsView *v)
         return;
     if (!v->save_src)
         v->save_src = g_timeout_add(SAVE_DEBOUNCE_MS, save_cb, v);
+}
+
+static const char *const UI_THEME_IDS[] = { "light", "dark", "system" };
+
+static const char *cur_ui_theme(const HbSettingsView *v)
+{
+    guint s = gtk_drop_down_get_selected(GTK_DROP_DOWN(v->ui_dd));
+    return s < G_N_ELEMENTS(UI_THEME_IDS) ? UI_THEME_IDS[s] : "light";
+}
+
+static void on_ui_dd(GtkDropDown *dd, GParamSpec *ps, gpointer ud)
+{
+    HbSettingsView *v = ud;
+    (void)dd; (void)ps;
+    save_cb(v);                      /* 先落库，apply_theme 读得到新值 */
+    hb_application_apply_theme();
 }
 
 /* ------------------------------------------------------------------ */
@@ -308,6 +328,7 @@ static void refresh(HbSettingsView *v)
 {
     hb_obj *o = NULL;
     const char *theme = "harbor", *family = "Monospace";
+    const char *uit = "light";
     double fs = 13, lh = 1.5;
     int sb = 10000;
     gboolean blink = TRUE, osc52 = FALSE;
@@ -324,7 +345,9 @@ static void refresh(HbSettingsView *v)
         osc52 = hb_obj_get_bool(o, "osc52", false);
         ctt = hb_obj_get_bool(o, "close_to_tray", true);
         sal = hb_obj_get_bool(o, "start_at_login", false);
+        uit = hb_obj_get_str(o, "ui_theme");
     }
+    if (!uit || !*uit) uit = "light";
     if (!theme || !*theme) theme = "harbor";
     if (!family || !*family) family = "Monospace";
 
@@ -374,6 +397,12 @@ static void refresh(HbSettingsView *v)
     gtk_switch_set_active(GTK_SWITCH(v->osc52_sw), osc52);
     gtk_switch_set_active(GTK_SWITCH(v->tray_sw), ctt);
     gtk_switch_set_active(GTK_SWITCH(v->login_sw), sal);
+    {
+        guint sel = 0;
+        for (i = 0; i < G_N_ELEMENTS(UI_THEME_IDS); i++)
+            if (!strcmp(UI_THEME_IDS[i], uit)) sel = (guint)i;
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(v->ui_dd), sel);
+    }
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(v->sftp_spin),
         CLAMP((double)hb_obj_get_int(o, "sftp_concurrency", 3), 1, 8));
     v->updating = FALSE;
@@ -596,38 +625,8 @@ static GtkWidget *build_preview(HbSettingsView *v)
     return view;
 }
 
-static GtkWidget *build_shortcuts_panel(void)
-{
-    GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    GtkWidget *grid;
-    const HbShortcut *sc;
-    size_t n, i;
-    int row = 0;
-
-    gtk_widget_add_css_class(panel, "panel");
-    gtk_box_append(GTK_BOX(panel),
-        panel_head("terminal", "快捷键",
-                   "自定义快捷键将在后续版本提供"));
-    grid = gtk_grid_new();
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 18);
-    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
-    sc = hb_shortcuts(&n);
-    for (i = 0; i < n; i++) {
-        GtkWidget *l = gtk_label_new(sc[i].label);
-        GtkWidget *k = gtk_label_new(sc[i].accel);
-        gtk_label_set_xalign(GTK_LABEL(l), 0);
-        gtk_widget_add_css_class(k, "kbd");
-        gtk_widget_set_halign(k, GTK_ALIGN_END);
-        gtk_grid_attach(GTK_GRID(grid), l, (int)(row % 2) * 2,
-                        row / 2, 1, 1);
-        gtk_grid_attach(GTK_GRID(grid), k, (int)(row % 2) * 2 + 1,
-                        row / 2, 1, 1);
-        row++;
-    }
-    gtk_box_append(GTK_BOX(panel), grid);
-    return panel;
-}
-
+/* ------------------------------------------------------------------ */
+/* 快捷键编辑                                                          */
 /* start_at_login 开关：立即写/删 user unit；失败则回退开关。 */
 static void on_login_sw(GObject *sw, GParamSpec *ps, gpointer ud)
 {
@@ -876,6 +875,37 @@ static void hb_settings_view_init(HbSettingsView *v)
         gtk_box_append(GTK_BOX(right), hint);
     }
 
+    /* ===== 底部：外观 ===== */
+    {
+        GtkWidget *grp = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+        GtkWidget *row, *col, *t;
+        gtk_widget_add_css_class(grp, "panel");
+        gtk_box_append(GTK_BOX(outer), grp);
+        gtk_box_append(GTK_BOX(grp),
+            panel_head("monitor", "外观",
+                       "界面配色主题；终端配色在上方预览区单独选择。"));
+
+        row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        t = gtk_label_new("界面主题");
+        gtk_label_set_xalign(GTK_LABEL(t), 0);
+        gtk_widget_add_css_class(t, "sl-title");
+        gtk_box_append(GTK_BOX(col), t);
+        gtk_widget_set_hexpand(col, TRUE);
+        gtk_box_append(GTK_BOX(row), col);
+        {
+            const char *lbls[] = { "浅色", "深色", "跟随系统", NULL };
+            v->ui_dd = gtk_drop_down_new_from_strings(
+                (const char * const *)lbls);
+        }
+        gtk_widget_set_valign(v->ui_dd, GTK_ALIGN_CENTER);
+        gtk_box_append(GTK_BOX(row), v->ui_dd);
+        gtk_widget_add_css_class(row, "check-row");
+        gtk_box_append(GTK_BOX(grp), row);
+        g_signal_connect(v->ui_dd, "notify::selected",
+                         G_CALLBACK(on_ui_dd), v);
+    }
+
     /* ===== 底部：系统托盘与启动 ===== */
     {
         GtkWidget *grp = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
@@ -902,13 +932,15 @@ static void hb_settings_view_init(HbSettingsView *v)
                        &v->login_sw, G_CALLBACK(on_login_sw), v));
     }
 
-    /* ===== 底部：快捷键 ===== */
-    gtk_box_append(GTK_BOX(outer), build_shortcuts_panel());
+
 
     v->changed_handler = g_signal_connect(v->store, "changed",
         G_CALLBACK(on_store_changed), v);
     refresh(v);
 }
+
+
+/* ------------------------------------------------------------------ */
 
 static void hb_settings_view_dispose(GObject *o)
 {
