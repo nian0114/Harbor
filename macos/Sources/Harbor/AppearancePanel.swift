@@ -73,6 +73,11 @@ final class AppearancePanel: NSView {
         meta.frame = NSRect(x: 24, y: y, width: 220, height: 22)
         addSubview(meta)
         y += 30
+        let conc = NSTextField()
+        conc.stringValue = v.setting("sftp_concurrency") ?? "3"
+        conc.target = self; conc.action = #selector(changed)
+        conc.tag = 5
+        row(L("SFTP 并发传输数"), conc)
         y += 6
 
         // ---- 系统集成（设备本地，不同步）----
@@ -251,7 +256,11 @@ final class AppearancePanel: NSView {
         } else if let b = s as? NSButton {
             v.setSetting("term_option_meta", b.state == .on ? "1" : "0")
         } else if let t = s as? NSTextField {
-            if Double(t.stringValue) != nil {
+            if t.tag == 5 {
+                if let n = Int(t.stringValue), (1...8).contains(n) {
+                    v.setSetting("sftp_concurrency", String(n))
+                }
+            } else if Double(t.stringValue) != nil {
                 if t.stringValue.contains(".") {
                     v.setSetting("term_line_height", t.stringValue)
                 } else if let n = Int(t.stringValue), n > 1000 {
