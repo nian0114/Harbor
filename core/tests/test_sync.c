@@ -1217,16 +1217,21 @@ static void t_e2e(void)
         hb_obj *sa_obj = hb_obj_new_with_id("settings", "settings");
         hb_obj *sb_obj;
         hb_obj_set_int(sa_obj, "font_size", 13);
+        hb_obj_set_int(sa_obj, "keep_connected", 1);
         hb_obj_set_str(sa_obj, "theme", "dark");
         CHECK_EQ_INT(hb_vault_put(va, sa_obj), HB_OK);
         sb_obj = hb_obj_new_with_id("settings", "settings");
         hb_obj_set_int(sb_obj, "font_size", 15);
+        hb_obj_set_int(sb_obj, "keep_connected", 0);
         hb_obj_set_str(sb_obj, "theme", "dark");
         CHECK_EQ_INT(hb_vault_put(vb, sb_obj), HB_OK);
         converge(sa, sb, &fs);
         /* font_size 各保本地值（不收敛） */
         CHECK_EQ_INT(fint(va, "settings", "font_size", 0), 13);
         CHECK_EQ_INT(fint(vb, "settings", "font_size", 0), 15);
+        /* keep_connected（macOS 休眠断言）同为设备本地 */
+        CHECK_EQ_INT(fint(va, "settings", "keep_connected", -1), 1);
+        CHECK_EQ_INT(fint(vb, "settings", "keep_connected", -1), 0);
         /* theme 同步 */
         CHECK_EQ_STR(fstr(va, "settings", "theme"), fstr(vb, "settings", "theme"));
         CHECK(fstr(va, "settings", "theme")[0] != 0);

@@ -890,7 +890,8 @@ static bool is_device_local(const char *type, const char *f)
     if (!strcmp(type, "settings"))
         return !strcmp(f, "font_size") || !strcmp(f, "line_height") ||
                !strcmp(f, "font_family") || !strcmp(f, "close_to_tray") ||
-               !strcmp(f, "start_at_login") || !strcmp(f, "language");
+               !strcmp(f, "start_at_login") || !strcmp(f, "language") ||
+               !strcmp(f, "keep_connected");
     return false;
 }
 
