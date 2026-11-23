@@ -164,6 +164,8 @@ final class DevServer {
         case "stall-reset":
             win?.maxRunloopStall = 0; return "OK"
         case "set":    return cmdSet(arg)
+        case "backup-export": return cmdBackupExport(arg)
+        case "backup-import": return cmdBackupImport(arg)
         case "setbool":
             // setbool <key> <0|1> —— bool 型设置（settingsBool 读的
             // 是 cJSON bool，"1" 字符串读不出）。
@@ -669,7 +671,49 @@ final class DevServer {
         guard kv.count == 2 else { return "ERR set-args" }
         Vault.shared.setSetting(String(kv[0]), String(kv[1]))
         win?.applySettings()
+        if kv[0] == "ui_theme" { (NSApp.delegate as? App)?.applyTheme() }
+        if kv[0] == "language" {
+            Lang.apply(String(kv[1]))
+            UserDefaults.standard.set(String(kv[1]),
+                                      forKey: "harbor.language")
+        }
         return "OK"
+    }
+    /// backup-export <path> <password>：直接走 core 导出（验证跨平台）。
+    private func cmdBackupExport(_ arg: String) -> String {
+        let a = arg.split(separator: " ", maxSplits: 1)
+        guard a.count == 2, let v = Vault.shared.vault
+        else { return "ERR args" }
+        var out: UnsafeMutablePointer<UInt8>?
+        var len = 0
+        let e = a[1].withCString { pw in
+            hb_backup_export(v, pw, &out, &len) }
+        guard e == HB_OK, let o = out else { return "ERR export \(e.rawValue)" }
+        let d = Data(bytes: o, count: len)
+        for i in 0..<len { o[i] = 0 }
+        free(o)
+        do {
+            try d.write(to: URL(fileURLWithPath: String(a[0])))
+            return "OK \(len)"
+        } catch { return "ERR write" }
+    }
+    /// backup-import <path> <password>：preview + import，报统计。
+    private func cmdBackupImport(_ arg: String) -> String {
+        let a = arg.split(separator: " ", maxSplits: 1)
+        guard a.count == 2, let v = Vault.shared.vault,
+              let d = try? Data(contentsOf:
+                  URL(fileURLWithPath: String(a[0])))
+        else { return "ERR args" }
+        var st = hb_backup_stat()
+        var e = HB_ERR_INVALID
+        d.withUnsafeBytes { raw in
+            e = a[1].withCString { pw in
+                hb_backup_import(v,
+                    raw.baseAddress!.assumingMemoryBound(to: UInt8.self),
+                    raw.count, pw, &st) }
+        }
+        guard e == HB_OK else { return "ERR import \(e.rawValue)" }
+        return "OK \(st.total) \(st.created) \(st.overwritten)"
     }
     private func cmdSelect(_ arg: String) -> String {
         // select <r0,c0,r1,c1[,block]> —— r/c 为屏幕行列（scrollback 用负数）
