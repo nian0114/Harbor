@@ -39,6 +39,11 @@ final class App: NSObject, NSApplicationDelegate {
         } else {
             NSApp.setActivationPolicy(.accessory)
         }
+        // --local：启动即开一个本地终端（scripting/冒烟测试用；
+        // 与 linux 端等价入口 newtab 对应）。
+        if ProcessInfo.processInfo.arguments.contains("--local") {
+            win.newLocalTab()
+        }
         #if DEBUG
         if dev == nil,
            ProcessInfo.processInfo.environment["HARBOR_DEV_ACTIONS"] == "1" {
