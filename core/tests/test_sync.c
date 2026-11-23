@@ -1218,11 +1218,13 @@ static void t_e2e(void)
         hb_obj *sb_obj;
         hb_obj_set_int(sa_obj, "font_size", 13);
         hb_obj_set_int(sa_obj, "keep_connected", 1);
+        hb_obj_set_int(sa_obj, "option_meta", 1);
         hb_obj_set_str(sa_obj, "theme", "dark");
         CHECK_EQ_INT(hb_vault_put(va, sa_obj), HB_OK);
         sb_obj = hb_obj_new_with_id("settings", "settings");
         hb_obj_set_int(sb_obj, "font_size", 15);
         hb_obj_set_int(sb_obj, "keep_connected", 0);
+        hb_obj_set_int(sb_obj, "option_meta", 0);
         hb_obj_set_str(sb_obj, "theme", "dark");
         CHECK_EQ_INT(hb_vault_put(vb, sb_obj), HB_OK);
         converge(sa, sb, &fs);
@@ -1232,6 +1234,9 @@ static void t_e2e(void)
         /* keep_connected（macOS 休眠断言）同为设备本地 */
         CHECK_EQ_INT(fint(va, "settings", "keep_connected", -1), 1);
         CHECK_EQ_INT(fint(vb, "settings", "keep_connected", -1), 0);
+        /* option_meta（macOS Option-as-Meta，键盘相关）设备本地 */
+        CHECK_EQ_INT(fint(va, "settings", "option_meta", -1), 1);
+        CHECK_EQ_INT(fint(vb, "settings", "option_meta", -1), 0);
         /* theme 同步 */
         CHECK_EQ_STR(fstr(va, "settings", "theme"), fstr(vb, "settings", "theme"));
         CHECK(fstr(va, "settings", "theme")[0] != 0);
