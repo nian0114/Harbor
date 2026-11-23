@@ -44,9 +44,10 @@ final class App: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.arguments.contains("--local") {
             win.newLocalTab()
         }
-        // FR-15 主题：settings.ui_theme 经同步推送或界面修改都要
-        // 即时重应用。
+        // FR-15 主题 + 快捷键：settings.ui_theme/shortcuts_macos
+        // 经同步推送或界面修改都要即时重应用。
         applyTheme()
+        ShortcutKit.shared.reload()    // 有效绑定 → 菜单键位
         appObs = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
             if Theme.mode == .system { self?.applyTheme() }
         }
@@ -56,6 +57,7 @@ final class App: NSObject, NSApplicationDelegate {
             if (n.userInfo?["type"] as? String) == "settings" {
                 self?.applyTheme()
                 self?.win.applySettings()
+                ShortcutKit.shared.reload()
             }
         }
         #if DEBUG
