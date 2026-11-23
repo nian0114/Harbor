@@ -24,6 +24,8 @@ ALLOWLIST = [
      'snippet scope value written by the vault, matched as data not UI'),
     ('macos/Tests/HarborTests/PaletteRankTests.swift', '"全局"',
      'test data mirroring the vault snippet scope value'),
+    ('macos/Tests/HarborTests/M2bVaultTests.swift', '"管理员"',
+     'CSV test data verifying Chinese UTF-8 round-trips through core'),
 ]
 
 def scan(src):

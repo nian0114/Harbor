@@ -16,7 +16,7 @@ let package = Package(
                           dependencies: ["HarborKit"],
                           path: "Sources/Harbor"),
         .testTarget(name: "HarborTests",
-                    dependencies: ["HarborKit"],
+                    dependencies: ["HarborKit", "CHarbor"],
                     path: "Tests/HarborTests"),
     ]
 )
