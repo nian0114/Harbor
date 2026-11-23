@@ -206,6 +206,21 @@ final class ConnCtl {
     }
 
     private func confirmKeys(_ lines: [String], rows: Int32, cols: Int32) {
+        // FR-02：有生物识别 → 签名需 Touch ID（LAContext 评估，拒绝即
+        // 中止、secret 不出 Vault）；无 → 回退确认对话框（同 Linux）。
+        if Biometric.canEvaluate() {
+            Biometric.evaluate(lines.joined(separator: "\n")) {
+                [weak self] ok in
+                guard let self else { return }
+                if ok { self.continueConnect(rows: rows, cols: cols) }
+                else {
+                    self.logFinish("cancelled", "key confirm denied")
+                    self.delegate?.connFailed(self, code: 0,
+                        title: L("已拒绝使用密钥，连接已取消"), details: nil)
+                }
+            }
+            return
+        }
         let a = NSAlert()
         a.messageText = L("确认使用密钥")
         a.informativeText = lines.joined(separator: "\n")

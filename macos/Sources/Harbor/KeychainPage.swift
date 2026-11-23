@@ -19,14 +19,16 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         func btn(_ t: String, _ a: Selector, _ id: String) {
             let b = NSButton(title: t, target: self, action: a)
             b.bezelStyle = .rounded
-            b.frame = NSRect(x: x, y: 8, width: 96, height: 24)
+            let w = max(96, b.fittingSize.width + 18)
+            b.frame = NSRect(x: x, y: 8, width: w, height: 24)
             b.setAccessibilityIdentifier(id)
-            bar.addSubview(b); x += 104
+            bar.addSubview(b); x += w + 8
         }
         btn(L("+ 生成密钥"), #selector(genKey), "kc-gen")
-        btn(L("导入密钥"), #selector(importKeyBtn), "kc-import")
+        btn(L("导入私钥"), #selector(importKeyBtn), "kc-import")
         btn(L("+ 密码凭据"), #selector(newCred), "kc-cred")
-        btn(L("导出公钥"), #selector(exportPub), "kc-export")
+        btn(L("导出公钥…"), #selector(exportPub), "kc-export")
+        btn(L("编辑…"), #selector(editKey), "kc-edit")
         btn(L("删除"), #selector(del), "kc-delete")
         let scroll = NSScrollView(frame: NSRect(
             x: 0, y: 0, width: frame.width, height: frame.height - 40))
@@ -122,6 +124,49 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         reload()
     }
 
+    // MARK: 编辑（名称/确认签名）
+    @objc private func editKey() {
+        let r = table.selectedRow
+        guard r >= 0, r < items.count, items[r].kind == "key",
+              let o = Vault.shared.get(items[r].id) else { return }
+        let a = NSAlert()
+        a.messageText = L("编辑密钥")
+        a.addButton(withTitle: L("保存")); a.addButton(withTitle: L("取消"))
+        let name = NSTextField(frame: NSRect(x: 0, y: 76, width: 240, height: 22))
+        name.stringValue = hb_obj_get_str(o, "name").str
+        name.setAccessibilityIdentifier("kedit-name")
+        // FR-02：签名需 Touch ID —— 数据模型上是 key.confirm（Linux 语义
+        // "使用前确认"）。有生物识别 → 用 LAContext 评估；没有（VM）→
+        // 选项禁用并说明原因，已置位的密钥仍按确认框执行。
+        let bio = Biometric.canEvaluate()
+        let conf = NSButton(checkboxWithTitle:
+            bio ? L("签名需 Touch ID") : L("每次用此密钥签名前先确认"),
+            target: nil, action: nil)
+        conf.state = hb_obj_get_bool(o, "confirm", false) ? .on : .off
+        conf.isEnabled = bio
+        conf.frame = NSRect(x: 0, y: 44, width: 260, height: 22)
+        conf.setAccessibilityIdentifier("kedit-confirm")
+        let note = NSTextField(wrappingLabelWithString:
+            bio ? "" : L("此设备没有可用的 Touch ID，已开启的密钥仍可要求确认。"))
+        note.font = .systemFont(ofSize: 11)
+        note.textColor = .secondaryLabelColor
+        note.frame = NSRect(x: 0, y: 0, width: 260, height: 40)
+        let vv = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 104))
+        vv.addSubview(name); vv.addSubview(conf); vv.addSubview(note)
+        a.accessoryView = vv
+        DialogRegistry.shared.present(alert: a, kind: "kedit",
+                                      in: window) { [weak self] ok in
+            guard ok else { hb_obj_free(o); return }
+            hb_obj_set_str(o, "name", name.stringValue)
+            if bio {
+                hb_obj_set_bool(o, "confirm", conf.state == .on)
+            }
+            Vault.shared.put(o)
+            hb_obj_free(o)
+            self?.reload()
+        }
+    }
+
     // MARK: 导入
     @objc private func importKeyBtn() { importKey(path: nil) }
     func importKey(path: String?) {
@@ -163,7 +208,7 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let pub = hb_obj_get_str(o, "public").str
         guard !pub.isEmpty else { NSSound.beep(); return }
         let a = NSAlert()
-        a.messageText = L("导出公钥")
+        a.messageText = L("导出公钥…")
         a.addButton(withTitle: L("复制到剪贴板"))
         a.addButton(withTitle: L("保存到文件…"))
         a.addButton(withTitle: L("取消"))
