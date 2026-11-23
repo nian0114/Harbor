@@ -242,7 +242,27 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         vaultTab.editHostById(id)
     }
 
+    /// rdp/vnc 主机 → 桌面 tab（hosts 页/命令面板/cmdConnect 共用入口）。
+    /// 桌面页无终端，不进 Workspace（linux 同样是独立 page 类型）。
+    func openDesktop(hostId: String, title: String) {
+        let leaf = DesktopTab(hostId: hostId, title: title)
+        tabs.append(leaf)
+        leaf.onChange = { [weak self] in self?.strip.needsDisplay = true }
+        strip.tabs = tabs
+        select(tabs.count - 1)
+        applySettings()
+        leaf.startSession()     // view 已入 content、尺寸定稿
+    }
+
     func openSSH(hostId: String?, quickTarget: String?, title: String) {
+        if let hostId, let o = Vault.shared.get(hostId) {
+            let proto = hb_obj_get_str(o, "proto").str
+            hb_obj_free(o)
+            if proto == "rdp" || proto == "vnc" {
+                openDesktop(hostId: hostId, title: title)
+                return
+            }
+        }
         let leaf = SSHTab(hostId: hostId, quickTarget: quickTarget,
                           window: self, title: title)
         let t = WsTab(leaf: leaf)

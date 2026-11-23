@@ -79,9 +79,13 @@ final class Session {
         sess.map { hb_session_steal_vt($0) }
     }
     func close() { sess.map { hb_session_close($0) } }
-    func free_() {
+    /// 主线程摘除事件源（先于后台 free_，保证无在途 drain 碰 sess）。
+    func stopSource() {
         source?.cancel()
         source = nil
+    }
+    func free_() {
+        stopSource()
         sess.map { hb_session_free($0) }
         sess = nil
     }

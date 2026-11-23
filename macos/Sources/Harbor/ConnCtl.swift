@@ -569,6 +569,12 @@ final class ConnCtl {
         start(rows: 24, cols: 80)
     }
 
+    /// 摘走当前 Session 所有权（调用方负责 free_）——desktop tab 的
+    /// 后台收尾（linux hb_conn_ctl_steal_session）。
+    func stealSession() -> Session? {
+        let s = sess; sess = nil; return s
+    }
+
     func cancel() {
         stopped = true
         reconnectPending = false

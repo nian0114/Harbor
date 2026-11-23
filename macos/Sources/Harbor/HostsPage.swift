@@ -17,6 +17,9 @@ final class HostStore {
             h.address = hb_obj_get_str(o, "address").str
             h.port = Int(hb_obj_get_int(o, "port", 22))
             h.user = hb_obj_get_str(o, "user").str
+            h.domain = hb_obj_get_str(o, "domain").str
+            h.tunnel = hb_obj_get_str(o, "tunnel").str
+            h.via = hb_obj_get_str(o, "via").str
             h.group = hb_obj_get_str(o, "group").str
             h.color = hb_obj_get_str(o, "color").str
             h.os = hb_obj_get_str(o, "os").str
@@ -44,6 +47,9 @@ final class HostStore {
         hb_obj_set_str(o, "address", h.address)
         hb_obj_set_int(o, "port", Int64(h.port))
         hb_obj_set_str(o, "user", h.user)
+        hb_obj_set_str(o, "domain", h.domain)
+        hb_obj_set_str(o, "tunnel", h.tunnel)
+        hb_obj_set_str(o, "via", h.via)
         hb_obj_set_str(o, "group", h.group)
         hb_obj_set_str(o, "color", h.color)
         hb_obj_set_str(o, "os", h.os)
