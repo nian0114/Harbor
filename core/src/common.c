@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef __APPLE__
+# include <signal.h>
+#endif
 
 #include <libssh2.h>
 #include <sodium.h>
@@ -41,6 +44,13 @@ int hb_core_init(void)
         return -1;
     if (libssh2_init(0) != 0)
         return -1;
+#ifdef __APPLE__
+    /* FreeRDP 等第三方库内部 socket 拿不到逐 fd 设置的 SO_NOSIGPIPE；
+       对端断开时 send 触发 SIGPIPE 会杀进程——全局忽略，send 改返回
+       EPIPE。SIG_IGN 会跨 exec 继承，pty 子进程在 exec 前
+       已把所有信号复位为 SIG_DFL（pty.c）。 */
+    signal(SIGPIPE, SIG_IGN);
+#endif
     inited = 1;
     return 0;
 }
