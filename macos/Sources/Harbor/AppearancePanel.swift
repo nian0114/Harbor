@@ -10,16 +10,25 @@ final class AppearancePanel: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = Theme.content.color.cgColor
+        layer?.hbBg = "content"
         var y: CGFloat = 14
         func row(_ label: String, _ ctrl: NSView) {
-            let l = NSTextField(labelWithString: L(label))
+            let l = NSTextField(labelWithString: label)
             l.font = .systemFont(ofSize: 12)
             l.frame = NSRect(x: 24, y: y + 2, width: 140, height: 20)
             ctrl.frame = NSRect(x: 170, y: y, width: 200, height: 24)
             addSubview(l); addSubview(ctrl)
             y += 34
         }
+        // ---- 界面（主题/语言；主题同步、语言设备本地）----
+        let uiTheme = NSPopUpButton()
+        uiTheme.tag = 3
+        uiTheme.addItems(withTitles: [L("浅色"), L("深色"), L("跟随系统")])
+        uiTheme.selectItem(at: ["light","dark","system"]
+            .firstIndex(of: v.setting("ui_theme") ?? "light") ?? 0)
+        uiTheme.target = self; uiTheme.action = #selector(changed)
+        row(L("界面主题"), uiTheme)
+
         let fonts = NSPopUpButton()
         fonts.addItems(withTitles: ["Menlo", "Monaco", "SF Mono", "Courier New"])
         fonts.selectItem(withTitle: v.setting("term_font") ?? "Menlo")
@@ -56,12 +65,13 @@ final class AppearancePanel: NSView {
             ? .on : .off
         meta.frame = NSRect(x: 24, y: y, width: 220, height: 22)
         addSubview(meta)
-        y += 40
+        y += 30
+        y += 6
 
         // ---- 系统集成（设备本地，不同步）----
         let sect = NSTextField(labelWithString: L("系统集成"))
         sect.font = .systemFont(ofSize: 12, weight: .semibold)
-        sect.textColor = Theme.termDim.color
+        sect.hbText = "termDim"
         sect.frame = NSRect(x: 24, y: y, width: 200, height: 20)
         addSubview(sect)
         y += 28
@@ -81,7 +91,7 @@ final class AppearancePanel: NSView {
         y += 24
         loginNote = NSTextField(wrappingLabelWithString: "")
         loginNote.font = .systemFont(ofSize: 11)
-        loginNote.textColor = Theme.amber.color
+        loginNote.hbText = "amber"
         loginNote.frame = NSRect(x: 44, y: y, width: 400, height: 30)
         addSubview(loginNote)
         y += 36
@@ -92,6 +102,10 @@ final class AppearancePanel: NSView {
         keep.frame = NSRect(x: 24, y: y, width: 380, height: 22)
         addSubview(keep)
         y += 34
+
+        y += 14
+
+        y += 40
         frame = NSRect(x: 0, y: 0, width: 480, height: y)
     }
     required init?(coder: NSCoder) { nil }
@@ -122,14 +136,22 @@ final class AppearancePanel: NSView {
     }
     @objc private func changed(_ s: NSControl) {
         if let p = s as? NSPopUpButton {
-            if p.tag == 1 {
+            switch p.tag {
+            case 1:
                 let t = TermTheme.all[max(0, p.indexOfSelectedItem)]
                 v.setSetting("term_theme", t.id)
-            } else if p.tag == 2 {
+            case 2:
                 v.setSetting("term_cursor",
                              String(p.indexOfSelectedItem))
-            } else if let t = p.titleOfSelectedItem {
-                v.setSetting("term_font", t)
+            case 3:
+                let th = ["light","dark","system"][max(0,
+                    p.indexOfSelectedItem)]
+                v.setSetting("ui_theme", th)
+                (NSApp.delegate as? App)?.applyTheme()
+            default:
+                if let t = p.titleOfSelectedItem {
+                    v.setSetting("term_font", t)
+                }
             }
         } else if let b = s as? NSButton {
             v.setSetting("term_option_meta", b.state == .on ? "1" : "0")
@@ -146,4 +168,5 @@ final class AppearancePanel: NSView {
         }
         onChange?()
     }
+
 }

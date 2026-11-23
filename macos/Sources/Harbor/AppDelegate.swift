@@ -20,10 +20,10 @@ final class App: NSObject, NSApplicationDelegate {
         #endif
     }
     func applicationDidFinishLaunching(_ n: Notification) {
-        buildMenus()
         // MenuBar/SleepPolicy/applyLoginItem 都会经 Vault 取设置——
         // 必须先建主窗口：全新数据目录下首次触 Vault 会弹 DEK
         // runModal，不能发生在窗口存在之前（会阻塞 launch）。
+        buildMenus()
         win = MainWindow()
         MenuBar.shared.install()
         SleepPolicy.shared.install()
@@ -44,6 +44,20 @@ final class App: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.arguments.contains("--local") {
             win.newLocalTab()
         }
+        // FR-15 主题：settings.ui_theme 经同步推送或界面修改都要
+        // 即时重应用。
+        applyTheme()
+        appObs = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            if Theme.mode == .system { self?.applyTheme() }
+        }
+        NotificationCenter.default.addObserver(
+            forName: .hbVaultChanged, object: nil, queue: .main)
+        { [weak self] n in
+            if (n.userInfo?["type"] as? String) == "settings" {
+                self?.applyTheme()
+                self?.win.applySettings()
+            }
+        }
         #if DEBUG
         if dev == nil,
            ProcessInfo.processInfo.environment["HARBOR_DEV_ACTIONS"] == "1" {
@@ -52,6 +66,28 @@ final class App: NSObject, NSApplicationDelegate {
         dev?.win = win
         #endif
     }
+    private var appObs: NSKeyValueObservation?
+
+    /// ui_theme: light→强制亮 / dark→强制暗 / system→NSApp 跟随系统。
+    /// Theme.mode 决定 token 解析；reapply 重算注册的 layer/文字色，
+    /// 逐 view 标脏重绘（draw 路径按访问时 mode 现取色）。
+    func applyTheme() {
+        let m = Vault.shared.setting("ui_theme") ?? "light"
+        Theme.mode = Theme.Mode(rawValue: m) ?? .light
+        switch Theme.mode {
+        case .light:  NSApp.appearance = NSAppearance(named: .aqua)
+        case .dark:   NSApp.appearance = NSAppearance(named: .darkAqua)
+        case .system: NSApp.appearance = nil
+        }
+        Theme.reapply()
+        for w in NSApp.windows { markDirty(w.contentView) }
+    }
+    private func markDirty(_ v: NSView?) {
+        guard let v else { return }
+        v.needsDisplay = true
+        v.subviews.forEach { markDirty($0) }
+    }
+
     /// 显示主窗口（系统通知点击、菜单栏"显示 Harbor"同路）。
     /// 窗口被关到菜单栏（orderOut）或 accessory 策略下都能唤回。
     func showMainWindow() {
