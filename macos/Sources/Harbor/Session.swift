@@ -86,6 +86,8 @@ final class Session {
     }
     func free_() {
         stopSource()
+        // FR-12：session 先于引擎死 → 摘 tap 前停止其共享
+        ShareService.shared.stopSession(self)
         sess.map { hb_session_free($0) }
         sess = nil
     }

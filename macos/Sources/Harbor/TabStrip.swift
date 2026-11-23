@@ -49,7 +49,9 @@ final class TabStrip: NSView {
                 img.draw(in: NSRect(x: rc.minX+7, y: rc.midY-7,
                                     width: 13, height: 13))
             } else {
-                t.statusDot.color.setFill()
+                // FR-12：共享中 → 蓝点覆盖状态点（对齐 tab dot "share"）
+                (t.shareOn ? Theme.dotShare : t.statusDot)
+                    .color.setFill()
                 NSBezierPath(ovalIn: NSRect(x: rc.minX+8, y: rc.midY-3,
                                             width: 6, height: 6)).fill()
             }

@@ -22,6 +22,8 @@ final class ConnCtl {
     var hostId: String?
     private(set) var quickTarget: String?     // "user@host:port"
     private var hname = "", huser = ""
+    /// FR-12 share meta host（对齐 hb-ssh-page 的 hname）。
+    var shareHost: String { hname }
     private(set) var sess: Session?
     weak var delegate: ConnDelegate?
     weak var window: NSWindow?

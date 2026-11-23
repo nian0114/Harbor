@@ -34,6 +34,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     private var headH: [UUID: NSLayoutConstraint] = [:]
     private var headBtns: [UUID: (img: NSImageView, lbl: NSTextField,
                                   reconn: NSButton, watch: NSButton,
+                                  share: NSButton,
                                   badge: NSTextField)] = [:]
     /// 内节点 → 渲染出的 splitView（focus 还原 / frac 回收用）
     private var splitOf: [ObjectIdentifier: (sv: NSSplitView,
@@ -45,6 +46,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     private let ttLabel = NSTextField(labelWithString: "")
     private var bcastBtn: NSButton!
     private var focusBtn: NSButton!
+    private var shareBtn: NSButton!
     let findHost = NSView()          // find bar 宿主（⌘F，见 find 补丁）
     private var findH: NSLayoutConstraint?
 
@@ -90,6 +92,14 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         search.target = self
         search.action = #selector(onSearchBtn)
         search.setAccessibilityIdentifier("ws-find")
+        // FR-12 共享（对齐 hb-ssh-page/hb-term-page 的 共享 按钮，
+        // 作用于焦点叶；pane-head 另有逐叶入口）
+        let sh = NSButton(title: L("共享"), target: self,
+                          action: #selector(onShareBtn))
+        sh.bezelStyle = .texturedRounded
+        sh.font = .systemFont(ofSize: 11.5)
+        sh.setAccessibilityIdentifier("ws-share")
+        shareBtn = sh
         bcastBtn = NSButton(title: L("Broadcast"), target: self,
                             action: #selector(toggleBroadcast))
         bcastBtn.bezelStyle = .texturedRounded
@@ -108,12 +118,13 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         ab.setAccessibilityIdentifier("ws-assist")
         assistBtn = ab
         [bar, ic, ttLabel, search, bcastBtn, focusBtn, ab, bodyHost,
-         findHost, assistHost].forEach {
+         findHost, assistHost, shareBtn].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false }
         view.addSubview(bar)
         bar.addSubview(ic); bar.addSubview(ttLabel)
-        bar.addSubview(search); bar.addSubview(bcastBtn)
-        bar.addSubview(focusBtn); bar.addSubview(ab)
+        bar.addSubview(search); bar.addSubview(sh)
+        bar.addSubview(bcastBtn); bar.addSubview(focusBtn)
+        bar.addSubview(ab)
         view.addSubview(findHost); view.addSubview(bodyHost)
         view.addSubview(assistHost)
         assistW = assistHost.widthAnchor.constraint(equalToConstant: 0)
@@ -143,6 +154,9 @@ final class Workspace: NSObject, NSSplitViewDelegate {
                 equalTo: bcastBtn.leadingAnchor, constant: -6),
             search.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             search.widthAnchor.constraint(equalToConstant: 28),
+            shareBtn.trailingAnchor.constraint(
+                equalTo: search.leadingAnchor, constant: -6),
+            shareBtn.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             findHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             findHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             findHost.topAnchor.constraint(equalTo: bar.bottomAnchor),
@@ -207,8 +221,12 @@ final class Workspace: NSObject, NSSplitViewDelegate {
                 bg == "err" ? Theme.red.color
                 : bg == "pending" ? Theme.amber.color
                 : Theme.green.color
+            hb.share.image = hbIcon("broadcast", size: 11,
+                tint: leaf.shareOn ? Theme.blue.color
+                                   : Theme.termDim.color)
         }
         updateTitle()
+        syncShareState()
         tab?.syncFromWorkspace()
     }
 
@@ -528,6 +546,8 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         }
         let eye = headBtn("eye", #selector(onHeadWatch(_:)),
                           "pane-watch", L("监控设置"))
+        let shr = headBtn("broadcast", #selector(onHeadShare(_:)),
+                          "pane-share", L("共享"))
         let reconn = headBtn("refresh", #selector(onHeadReconn(_:)),
                              "pane-reconn", L("重新连接"))
         reconn.isHidden = !leaf.wsDead
@@ -536,7 +556,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         // watch 命中角标（对齐 hb_window_set_watch_dot）
         let badge = NSTextField(labelWithString: "")
         badge.font = .systemFont(ofSize: 11, weight: .bold)
-        [ic, lbl, badge, eye, reconn, x].forEach {
+        [ic, lbl, badge, eye, shr, reconn, x].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             h.addSubview($0)
         }
@@ -559,15 +579,18 @@ final class Workspace: NSObject, NSSplitViewDelegate {
                                              constant: -2),
             reconn.centerYAnchor.constraint(equalTo: h.centerYAnchor),
             eye.trailingAnchor.constraint(
-                equalTo: reconn.leadingAnchor, constant: -2),
+                equalTo: shr.leadingAnchor, constant: -2),
             eye.centerYAnchor.constraint(equalTo: h.centerYAnchor),
+            shr.trailingAnchor.constraint(
+                equalTo: reconn.leadingAnchor, constant: -2),
+            shr.centerYAnchor.constraint(equalTo: h.centerYAnchor),
         ])
         // 点击 head 区聚焦该 pane
         h.identifier = NSUserInterfaceItemIdentifier(
             "panehead-\(id.uuidString.prefix(8))")
         h.addGestureRecognizer(NSClickGestureRecognizer(
             target: self, action: #selector(onPaneClick(_:))))
-        headBtns[id] = (ic, lbl, reconn, eye, badge)
+        headBtns[id] = (ic, lbl, reconn, eye, shr, badge)
         return h
     }
 
@@ -597,6 +620,32 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         leafOfBtn(b).map { _ = closeLeaf($0) }
     }
     @objc private func onSearchBtn() { openFind() }
+    @objc private func onShareBtn() {
+        guard let leaf = focusedLeaf, let s = leaf.session
+        else { return }
+        ShareDialog.present(sess: s, title: leaf.shareTitle,
+                            host: leaf.shareHost,
+                            in: view.window as? MainWindow)
+    }
+    @objc private func onHeadShare(_ b: NSButton) {
+        guard let id = leafOfBtn(b), let leaf = pages[id],
+              let s = leaf.session else { return }
+        ShareDialog.present(sess: s, title: leaf.shareTitle,
+                            host: leaf.shareHost,
+                            in: view.window as? MainWindow)
+    }
+    /// 叶共享态变化 → bar 按钮文案 + tab 蓝点（对齐 wire_refresh）。
+    func syncShareState() {
+        shareBtn?.title = focusedLeaf?.shareOn == true
+            ? L("共享中") : L("共享")
+        tab?.shareOn = leavesList.contains { $0.shareOn }
+        if let id = model.focused.leafId,
+           let hb = headBtns[id] {
+            hb.share.image = hbIcon("broadcast", size: 11,
+                tint: pages[id]?.shareOn == true
+                    ? Theme.blue.color : Theme.termDim.color)
+        }
+    }
 
     /// ⌘F：焦点 pane 的查找栏（findHost 承载，绑定打开时的焦点 term）。
     private lazy var findBar: FindBar = {

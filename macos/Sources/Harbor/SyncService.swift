@@ -148,7 +148,8 @@ final class SyncService {
             token = nil
         }
     }
-    private func tokenString() -> String? {
+    /// 供 ShareService 复用（FR-12：同一账号/服务器/认证）。
+    func tokenString() -> String? {
         token.map { String(cString: $0) }
     }
 
@@ -1042,6 +1043,12 @@ final class SyncService {
                                        : L("账号已退出"),
                             tabIndex: nil)
                         return
+                    }
+                    // FR-12：relay 推 share 列表变化 → 共享页刷新
+                    if txt.contains("\"shares\"") {
+                        NotificationCenter.default.post(
+                            name: ShareService.nListChanged,
+                            object: nil)
                     }
                     if txt.contains("\"changed\"") { self.syncKick() }
                     self.wsReceive()   // 继续收

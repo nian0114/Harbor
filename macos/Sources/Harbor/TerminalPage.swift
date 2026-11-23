@@ -14,12 +14,72 @@ class TermTab: NSObject {
     var iconName: String?
     var title: String { didSet { onChange?() } }
     var statusDot: Theme.RGBA = Theme.dotPend { didSet { onChange?() } }
+    /// FR-12：本叶 session 正被共享 → tab 蓝点（对齐 tab dot "share"）。
+    var shareOn = false { didSet { onChange?() } }
     var view: NSView
-    var session: Session?
+    var session: Session? {
+        didSet { refreshShare() }
+    }
     var term: TerminalView?
     var onChange: (() -> Void)?
     var onExit: ((Int32) -> Void)?
     private var exitBar: NSView?
+    private var shareObs: [NSObjectProtocol] = []
+
+    // ---- FR-12 owner wire（对齐 hb_share_owner_wire） ----
+    /// 共享对话框标题/主机：Local=页标题+localhost；SSHTab 覆盖。
+    var shareTitle: String { title }
+    var shareHost: String { "localhost" }
+    /// 本叶 session 是否正被共享（含 starting）。
+    var shareId: String? {
+        session.flatMap { ShareService.shared.shareForSession($0) }
+    }
+    private func wireShare() {
+        guard shareObs.isEmpty else { return }
+        let nc = NotificationCenter.default
+        shareObs.append(nc.addObserver(
+            forName: ShareService.nChanged, object: nil,
+            queue: .main) { [weak self] _ in self?.refreshShare() })
+        shareObs.append(nc.addObserver(
+            forName: ShareService.nOwnerEvent, object: nil,
+            queue: .main) { [weak self] n in self?.onShareEv(n) })
+    }
+    func refreshShare() {
+        guard session != nil else { setShareOn(false); return }
+        wireShare()
+        let sid = shareId
+        setShareOn(sid != nil)
+        // bind_tab：视图卡片点击 → 切到本叶所在 tab
+        if let sid, let t = wsLeaf?.tab {
+            ShareService.shared.bindTab(sid, t)
+        }
+    }
+    private func setShareOn(_ on: Bool) {
+        if shareOn != on { shareOn = on }
+        wsLeaf?.syncShareState()
+    }
+    /// 对齐 hb-share-owner.c on_owner_event → 应用内通知。
+    private func onShareEv(_ n: Notification) {
+        guard let sid = n.object as? String, sid == shareId,
+              let ev = n.userInfo?["ev"] as? ShareService.ShareEv
+        else { return }
+        let who = ev.device.isEmpty
+            ? (ev.name.isEmpty ? "guest" : ev.name) : ev.device
+        switch ev.type {
+        case HB_SH_EV_JOINED, HB_SH_EV_PAKE_OK:
+            let collab = ShareService.shared.mode(sid)
+                == HB_SHARE_COLLAB
+            NotifyCenter.shared.post(
+                kind: "share", title: L("\(who) 加入共享"),
+                body: collab ? L("正在协作") : L("正在观看"),
+                tabIndex: nil)
+        case HB_SH_EV_LEFT:
+            NotifyCenter.shared.post(
+                kind: "share", title: L("\(who) 离开"),
+                body: "", tabIndex: nil)
+        default: break
+        }
+    }
 
     // ---- Workspace 叶钩子（对齐 Linux HbSessionPage 的面） ----
     /// pane-head 图标；Local=terminal，SSH=os tile。
@@ -230,7 +290,11 @@ class TermTab: NSObject {
     }
     var running: Bool { session?.alive ?? false }
     /// 终止会话并 join 线程（关 tab / 退出时）。
-    func kill() { session?.free_() }
+    func kill() {
+        for o in shareObs { NotificationCenter.default.removeObserver(o) }
+        shareObs = []
+        session?.free_()
+    }
 }
 
 /// 工作区 tab：tabs[] 里的会话页包装（对齐 Linux tab→workspace 壳）。
