@@ -59,6 +59,7 @@ final class App: NSObject, NSApplicationDelegate {
     // terminateNow 不保证 windowWillClose —— 显式 kill 全部 tab
     // （ConnCtl.join 收尾日志行；等价 linux hb_conn_ctl_dispose）。
     func applicationWillTerminate(_ n: Notification) {
+        ForwardMgr.shared.stopAll()   /* 摘掉转发会话；enabled 不动 */
         win.tabs.forEach { $0.kill() }
     }
 

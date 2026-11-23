@@ -42,12 +42,13 @@ final class Vault {
         // 变更回调（同 Linux hb-store "changed" 信号）：log/history/对象写入
         // → 通知各页 reload。回调可能发自会话线程，投递前切回主队列。
         if let v {
-            hb_vault_set_change_cb(v, { _, tp, _, _ in
+            hb_vault_set_change_cb(v, { _, tp, idp, _ in
                 let t = tp.map { String(cString: $0) } ?? ""
+                let i = idp.map { String(cString: $0) } ?? ""
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(
                         name: .hbVaultChanged, object: nil,
-                        userInfo: ["type": t])
+                        userInfo: ["type": t, "id": i])
                 }
             }, nil)
         }

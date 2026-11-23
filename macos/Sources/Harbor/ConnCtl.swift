@@ -19,12 +19,12 @@ protocol ConnDelegate: AnyObject {
 /// host_id 连接或 quick-connect（target 字符串）皆可。
 final class ConnCtl {
     let mode: ConnMode
-    private(set) var hostId: String?
+    var hostId: String?
     private(set) var quickTarget: String?     // "user@host:port"
     private var hname = "", huser = ""
     private(set) var sess: Session?
     weak var delegate: ConnDelegate?
-    private weak var window: NSWindow?
+    weak var window: NSWindow?
 
     private var wasConnected = false
     private(set) var reconnectPending = false
@@ -48,6 +48,10 @@ final class ConnCtl {
     private var allocs: [UnsafeMutableRawPointer] = []
     private var keepObjs: [OpaquePointer] = []
     private var missingJump: String?
+    // FORWARD 模式规则（linux c->rule；strdup 持有，跨会话复用）
+    private var fwdRule: hb_pf_rule?
+    private var fwdBind: UnsafeMutablePointer<CChar>?
+    private var fwdDest: UnsafeMutablePointer<CChar>?
 
     init(mode: ConnMode, hostId: String? = nil,
          quickTarget: String? = nil, window: NSWindow?) {
@@ -273,6 +277,32 @@ final class ConnCtl {
         o.reuse_vt = reuseVt
         o.mode = mode == .sftp ? HB_SSH_MODE_SFTP :
                  mode == .forward ? HB_SSH_MODE_FORWARD : HB_SSH_MODE_SHELL
+        if mode == .forward {
+            /* 断开检测靠 keepalive：host 显式关掉时也兜底 30s
+             *（linux hb-conn.c FORWARD 分支同）。 */
+            if o.keepalive_s <= 0 { o.keepalive_s = 30 }
+            guard var rule = fwdRule else {
+                logFinish("error", "no forward rule")
+                delegate?.connFailed(self, code: 0,
+                                     title: L("未设置转发规则"),
+                                     details: nil)
+                cleanupCtx(); return
+            }
+            let s = Session(forwardOpts: &o, rule: &rule)
+            if s.sess == nil {
+                /* 绑定冲突等（code=0：不可重试，由 owner 置 FAILED） */
+                let a = fwdBind.map { String(cString: $0) } ?? ""
+                let t = L("无法监听 %@:%d").fmt(
+                    a.isEmpty ? "127.0.0.1" : a, Int(rule.bind_port))
+                logFinish("error", s.forwardErr ?? "bind failed")
+                delegate?.connFailed(self, code: 0, title: t,
+                                     details: s.forwardErr)
+                cleanupCtx(); return
+            }
+            sess = s
+            delegate?.connSession(self, s)
+            cleanupCtx(); return
+        }
         let s = Session(sshOpts: &o, rows: rows, cols: cols,
                         scrollback: Int32(Vault.shared.setting("term_scrollback")
                             ?? "10000") ?? 10000)
@@ -280,6 +310,24 @@ final class ConnCtl {
         // onEvent 由 delegate（SSHTab）设置：先 handleEvent，再终端事件
         delegate?.connSession(self, s)
         cleanupCtx()
+    }
+
+    /// FORWARD 规则（linux hb_conn_ctl_set_forward）：strdup 持有
+    /// bind/dest，跨会话复用；rule 字段在会话创建时才消费。
+    func setForward(_ kind: hb_pf_kind, bindAddr: String?,
+                    bindPort: Int32, destAddr: String?,
+                    destPort: Int32) {
+        if let p = fwdBind { free(p) }
+        if let p = fwdDest { free(p) }
+        fwdBind = bindAddr.map { strdup($0) }
+        fwdDest = destAddr.map { strdup($0) }
+        var r = hb_pf_rule()
+        r.kind = kind
+        r.bind_port = bindPort
+        r.dest_port = destPort
+        r.bind_addr = UnsafePointer(fwdBind)
+        r.dest_addr = UnsafePointer(fwdDest)
+        fwdRule = r
     }
 
     private func cleanupCtx() {
@@ -458,6 +506,11 @@ final class ConnCtl {
             v.put(h); hb_obj_free(h)
         }
         delegate?.connConnected(self)
+        /* FR-06 联动：SHELL/SFTP 连上主机 X → 拉起 via==X 且
+         * autostart 的转发规则（FORWARD 自身不触发，避免互相牵扯）。 */
+        if mode != .forward, let hid = hostId {
+            ForwardMgr.shared.autostart(hid)
+        }
     }
 
     private func onError(_ ev: UnsafePointer<hb_sess_event>) {
@@ -476,8 +529,12 @@ final class ConnCtl {
             return
         }
         logFinish(hb_ssh_err_name(code).str, msg)
+        /* linux SIG_FAILED(code, ev->text, ev->text2)：title = 核心
+         * 面向用户的中文消息（远程拒绝含 AllowTcpForwarding/GatewayPorts
+         * 说明）；details = text2（libssh2 原始诊断）。 */
         delegate?.connFailed(self, code: Int(code),
-                             title: errTitle(code, msg),
+                             title: msg.isEmpty ? errTitle(code, msg)
+                                                : msg,
                              details: ev.pointee.text2.str)
     }
 

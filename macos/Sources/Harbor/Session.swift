@@ -42,6 +42,18 @@ final class Session {
         attachFd()
     }
 
+    /// FORWARD 会话：规则随会话创建（local/dynamic 的监听器在
+    /// 调用线程同步绑定；失败 sess==nil，forwardErr = 中文消息）。
+    private(set) var forwardErr: String?
+    init(forwardOpts o: UnsafeMutablePointer<hb_ssh_opts>,
+         rule: UnsafeMutablePointer<hb_pf_rule>) {
+        var err: UnsafeMutablePointer<CChar>?
+        sess = hb_session_new_forward(o, rule, nil, &err)
+        forwardErr = err.map { String(cString: $0) }
+        if let err { free(err) }
+        attachFd()
+    }
+
     private func attachFd() {
         guard sess != nil else { return }
         let fd = hb_session_event_fd(sess)

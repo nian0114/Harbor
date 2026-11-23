@@ -97,6 +97,10 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         select(0)
         vaultTab.showSection(0)
         applySettings()
+        /* FR-06：窗口就绪后恢复 enabled 规则（linux 启动拉起同）。
+         * 对话框（key-confirm/密码）以本窗为 parent。 */
+        ForwardMgr.shared.window = self
+        ForwardMgr.shared.startAll()
 
         // 主 runloop 卡顿计量（perf 验收用）
         stallTimer = Timer.scheduledTimer(withTimeInterval: 0.05,
