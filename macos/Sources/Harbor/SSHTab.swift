@@ -21,6 +21,11 @@ final class SSHTab: TermTab, ConnDelegate {
     private var ended = false
     private var failed = false
     private var hostColorIdx = 0
+    private var iconTile: NSView?
+    private var iconImg: NSImageView?
+    private var errDet: NSTextField?
+    private var errDetH: NSLayoutConstraint?
+    private var expBtn: NSButton?
 
     init(hostId: String?, quickTarget: String?, window: NSWindow?,
          title: String) {
@@ -61,12 +66,23 @@ final class SSHTab: TermTab, ConnDelegate {
             v.topAnchor.constraint(equalTo: view.topAnchor),
             v.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
-        // 头部：OS 图标 + 名称 + 地址
+        // 头部：OS 图标瓦片 + 名称 + 地址（对齐 Linux hb-connect-view）
+        let tile = osTile(conn.hostOS)
         let icon = NSView()
         icon.wantsLayer = true
         icon.layer?.cornerRadius = 10
-        icon.layer?.backgroundColor = Theme.dotPend.color.cgColor
+        icon.layer?.backgroundColor = tile.bg.color.cgColor
         icon.translatesAutoresizingMaskIntoConstraints = false
+        iconTile = icon
+        let img = NSImageView(image: hbIcon(tile.icon, size: 22,
+                                            tint: .white))
+        img.translatesAutoresizingMaskIntoConstraints = false
+        icon.addSubview(img)
+        iconImg = img
+        NSLayoutConstraint.activate([
+            img.centerXAnchor.constraint(equalTo: icon.centerXAnchor),
+            img.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
+        ])
         let nameL = NSTextField(labelWithString: title)
         nameL.font = .boldSystemFont(ofSize: 15)
         nameL.translatesAutoresizingMaskIntoConstraints = false
@@ -175,13 +191,18 @@ final class SSHTab: TermTab, ConnDelegate {
         stageView = v
     }
     @objc private func toggleLog() { logLabel?.isHidden.toggle() }
+    private func flipErrDetails() {
+        guard let det = errDet else { return }
+        det.isHidden.toggle()
+        errDetH?.isActive = det.isHidden
+    }
     @objc private func toggleErrDetails(_ b: NSButton) {
-        if let card = b.superview {
-            for s in card.subviews where
-                s.accessibilityIdentifier() == "conn-error-details" {
-                s.isHidden.toggle()
-            }
-        }
+        flipErrDetails()
+    }
+    // 点击整行（标签）：同步三角钮的开合状态再翻页
+    @objc private func toggleErrDetailsRow(_ g: NSClickGestureRecognizer) {
+        if let b = expBtn { b.state = b.state == .on ? .off : .on }
+        flipErrDetails()
     }
     @objc private func closeSelf() {
         // 关闭当前 tab（经窗口）
@@ -306,20 +327,43 @@ final class SSHTab: TermTab, ConnDelegate {
             ])
             anchor = hl
         }
-        // ▸ 技术详情：默认收起（对齐 Linux expander），libssh2 原文只在展开后
-        let expB = NSButton(title: L("▸ 技术详情"), target: self,
+        // ▸ 技术详情：三角 disclosure 钮 + 标签（对齐 Linux expander），
+        // libssh2 原文只在展开后显示；标题不进按钮，避免渲染出杂散字形。
+        let expB = NSButton(title: "", target: self,
                             action: #selector(toggleErrDetails))
         expB.bezelStyle = .disclosure
         expB.setButtonType(.pushOnPushOff)
-        expB.font = .systemFont(ofSize: 11)
         expB.translatesAutoresizingMaskIntoConstraints = false
+        expB.setAccessibilityIdentifier("conn-error-exp")
+        expBtn = expB
+        let expL = NSTextField(labelWithString: L("技术详情"))
+        expL.font = .systemFont(ofSize: 11)
+        expL.textColor = .secondaryLabelColor
+        expL.translatesAutoresizingMaskIntoConstraints = false
+        let expRow = NSView()
+        expRow.translatesAutoresizingMaskIntoConstraints = false
+        expRow.addSubview(expB); expRow.addSubview(expL)
+        expRow.addGestureRecognizer(NSClickGestureRecognizer(
+            target: self, action: #selector(toggleErrDetailsRow(_:))))
+        NSLayoutConstraint.activate([
+            expB.leadingAnchor.constraint(equalTo: expRow.leadingAnchor),
+            expB.topAnchor.constraint(equalTo: expRow.topAnchor),
+            expB.bottomAnchor.constraint(equalTo: expRow.bottomAnchor),
+            expL.leadingAnchor.constraint(equalTo: expB.trailingAnchor),
+            expL.centerYAnchor.constraint(equalTo: expRow.centerYAnchor),
+            expL.trailingAnchor.constraint(equalTo: expRow.trailingAnchor),
+        ])
+        card.addSubview(expRow)
         let det = NSTextField(wrappingLabelWithString: details ?? stageLines)
         det.font = .systemFont(ofSize: 11)
         det.textColor = .secondaryLabelColor
         det.isHidden = true
         det.translatesAutoresizingMaskIntoConstraints = false
         det.setAccessibilityIdentifier("conn-error-details")
-        card.addSubview(expB)
+        // 收起时 hidden 仍占布局空间 → 用高度约束压成 0，展开时放开。
+        let detH = det.heightAnchor.constraint(equalToConstant: 0)
+        detH.isActive = true
+        errDet = det; errDetH = detH
         let close = NSButton(title: L("关闭"), target: self,
                              action: #selector(closeSelf))
         let edit = NSButton(title: L("编辑主机"), target: self,
@@ -331,7 +375,16 @@ final class SSHTab: TermTab, ConnDelegate {
             $0.translatesAutoresizingMaskIntoConstraints = false
             card.addSubview($0)
         }
-        retry.bezelColor = .controlAccentColor   // 重试 = 蓝色主按钮
+        // 重试 = 蓝色主按钮（对齐 HostsPage primaryBtn 的画法：
+        // bezelColor 在这套 macOS 上不生效，必须自绘 layer）。
+        retry.isBordered = false
+        retry.wantsLayer = true
+        retry.layer?.cornerRadius = 6
+        retry.layer?.backgroundColor = Theme.blue.color.cgColor
+        retry.attributedTitle = NSAttributedString(
+            string: L("重试"), attributes: [
+                .foregroundColor: NSColor.white,
+                .font: NSFont.systemFont(ofSize: 12, weight: .medium)])
         retry.keyEquivalent = "\r"
         card.addSubview(det)
         close.setAccessibilityIdentifier("conn-close")
@@ -341,10 +394,10 @@ final class SSHTab: TermTab, ConnDelegate {
             tl.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
             tl.leadingAnchor.constraint(equalTo: card.leadingAnchor,
                                         constant: 16),
-            expB.topAnchor.constraint(equalTo: anchor.bottomAnchor,
-                                      constant: 6),
-            expB.leadingAnchor.constraint(equalTo: tl.leadingAnchor),
-            det.topAnchor.constraint(equalTo: expB.bottomAnchor,
+            expRow.topAnchor.constraint(equalTo: anchor.bottomAnchor,
+                                        constant: 6),
+            expRow.leadingAnchor.constraint(equalTo: tl.leadingAnchor),
+            det.topAnchor.constraint(equalTo: expRow.bottomAnchor,
                                      constant: 4),
             det.leadingAnchor.constraint(equalTo: tl.leadingAnchor),
             det.trailingAnchor.constraint(equalTo: card.trailingAnchor,
@@ -353,7 +406,7 @@ final class SSHTab: TermTab, ConnDelegate {
                                             constant: -16),
             retry.bottomAnchor.constraint(equalTo: card.bottomAnchor,
                                           constant: -14),
-            retry.topAnchor.constraint(equalTo: expB.bottomAnchor,
+            retry.topAnchor.constraint(equalTo: det.bottomAnchor,
                                        constant: 12),
             edit.trailingAnchor.constraint(equalTo: retry.leadingAnchor,
                                            constant: -8),
@@ -374,7 +427,13 @@ final class SSHTab: TermTab, ConnDelegate {
         showEnded(code: Int32(code))
     }
     func connOSInfo(_ c: ConnCtl, id: String, pretty: String) {
-        // 探测到的系统写回主机对象 → 主机页 OS 图标（与 Linux 一致）
+        // 探测到的系统写回主机对象 → 主机页 OS 图标（与 Linux 一致）；
+        // 头部瓦片同步换色（连接视图存活期间）。
+        if !id.isEmpty {
+            let t = osTile(id)
+            iconTile?.layer?.backgroundColor = t.bg.color.cgColor
+            iconImg?.image = hbIcon(t.icon, size: 22, tint: .white)
+        }
         guard !id.isEmpty, let hostId = conn.hostId,
               let o = Vault.shared.get(hostId) else { return }
         if hb_obj_get_str(o, "os").str != id {
@@ -463,6 +522,7 @@ final class SSHTab: TermTab, ConnDelegate {
         conn.join()
         super.kill()
     }
+
 }
 
 extension NSView {

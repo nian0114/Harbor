@@ -135,6 +135,13 @@ final class ConnCtl {
         return h
     }
 
+    /// 连接视图头部图标用的 host os 字段（quickTarget → "" → 通用瓦片）。
+    var hostOS: String {
+        guard let hid = hostId, let h = v.get(hid) else { return "" }
+        defer { hb_obj_free(h) }
+        return hb_obj_get_str(h, "os").str
+    }
+
     /// 连接视图头部副标题 "host:port"。
     var targetDesc: String {
         if let h = targetHostObj() {

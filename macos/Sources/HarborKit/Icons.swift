@@ -4,6 +4,7 @@ import Foundation
 public enum Icons {
     public static let table: [String: String] = [
         "server": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"7\" rx=\"2\"/><rect x=\"3\" y=\"13\" width=\"18\" height=\"7\" rx=\"2\"/><path d=\"M7 7.5h.01M7 16.5h.01\"/>",
+        "folder": "<path d=\"M3 7a2 2 0 0 1 2-2h4.2l2 2.5H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z\"/>",
         "key": "<circle cx=\"8\" cy=\"15.5\" r=\"4\"/><path d=\"M10.9 12.6 20 3.5M15 8.5l3 3M18 5.5l2 2\"/>",
         "fwd": "<path d=\"M4 7.5h13.5l-3.2-3.2M20 16.5H6.5l3.2 3.2\"/>",
         "fingerprint": "<path d=\"M6.5 11a5.5 5.5 0 0 1 11 0v3.5M9.2 11a2.8 2.8 0 0 1 5.6 0v4a7 7 0 0 1-1 3.6M12 11v5.2a10 10 0 0 1-1.4 4.6M6.5 14.5a13 13 0 0 1-.7 3.7M17.5 17a12 12 0 0 1-.6 2.6M4 8.5A8.5 8.5 0 0 1 12 4a8.4 8.4 0 0 1 6.6 3.2\"/>",
