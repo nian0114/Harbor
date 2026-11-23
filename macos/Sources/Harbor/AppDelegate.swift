@@ -21,10 +21,13 @@ final class App: NSObject, NSApplicationDelegate {
     }
     func applicationDidFinishLaunching(_ n: Notification) {
         buildMenus()
+        // MenuBar/SleepPolicy/applyLoginItem 都会经 Vault 取设置——
+        // 必须先建主窗口：全新数据目录下首次触 Vault 会弹 DEK
+        // runModal，不能发生在窗口存在之前（会阻塞 launch）。
+        win = MainWindow()
         MenuBar.shared.install()
         SleepPolicy.shared.install()
         applyLoginItem()
-        win = MainWindow()
         // --background：登录项/菜单栏后台启动 —— 不显示主窗口
         // （linux --background 同义；窗口照常创建，随时可唤回）。
         let bg = ProcessInfo.processInfo.arguments
