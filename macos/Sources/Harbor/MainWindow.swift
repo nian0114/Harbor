@@ -90,11 +90,12 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     }
 
     func newLocalTab() {
-        let t = TermTab.local(rows: 24, cols: 80)
+        let leaf = TermTab.local(rows: 24, cols: 80)
+        let t = WsTab(leaf: leaf)
         tabs.append(t)
         strip.tabs = tabs
         select(tabs.count - 1)
-        t.start()
+        leaf.start()
         applySettings()
         t.term?.window?.makeFirstResponder(t.term)
     }
@@ -148,14 +149,67 @@ final class MainWindow: NSWindow, NSWindowDelegate {
 
     /// 由主机页/快速连接起 SSH tab。
     func openSSH(hostId: String?, quickTarget: String?, title: String) {
-        let t = SSHTab(hostId: hostId, quickTarget: quickTarget,
-                       window: self, title: title)
+        let leaf = SSHTab(hostId: hostId, quickTarget: quickTarget,
+                          window: self, title: title)
+        let t = WsTab(leaf: leaf)
         tabs.append(t)
         strip.tabs = tabs
         select(tabs.count - 1)
         applySettings()
-        t.connect()
+        leaf.connect()
     }
+
+    /// Workspace 选择器：2–4 目标一次铺一行（对齐 hb_workspace_pick_targets）。
+    func openWorkspacePicker() {
+        WsPickSheet(window: self).present()
+    }
+    /// 创建多 pane Workspace tab（picker 回调 / 命令面板）。
+    func openWorkspace(leaves: [TermTab]) {
+        guard !leaves.isEmpty else { return }
+        let t = WsTab(leaves: leaves)
+        tabs.append(t)
+        strip.tabs = tabs
+        select(tabs.count - 1)
+        applySettings()
+        for l in leaves {
+            if let s = l as? SSHTab { s.connect() }
+            else { l.start() }
+        }
+    }
+
+    // ---- 工作区动作（菜单/快捷键/命令面板共用入口） ----
+    private var selWs: Workspace? { (tabs[selTab] as? WsTab)?.ws }
+    /// 普通会话 tab → 单叶 WsTab（对齐 linux 首次 split 自动包工作区）。
+    private func ensureWorkspace() {
+        guard selTab >= 0 && selTab < tabs.count else { return }
+        let t = tabs[selTab]
+        guard !(t is WsTab), t.closable, t.term != nil else { return }
+        let w = WsTab(leaf: t)
+        tabs[selTab] = w
+        strip.tabs = tabs
+        select(selTab)
+    }
+    func wsSplitRight() { wsSplit(true) }
+    func wsSplitDown() { wsSplit(false) }
+    private func wsSplit(_ h: Bool) {
+        if selWs == nil { ensureWorkspace() }
+        _ = selWs?.splitFocused(horizontal: h)
+        applySettings()
+        strip.needsDisplay = true
+    }
+    func wsClosePane() {
+        if let ws = selWs {
+            ws.closeFocused()
+            strip.needsDisplay = true
+        } else {
+            closeTab(selTab)   // 单 pane：关 pane = 关 tab（对齐 linux）
+        }
+    }
+    func wsBroadcast() {
+        selWs?.setBroadcast(!(selWs?.broadcast ?? false))
+    }
+    func wsFocusMode() { selWs?.toggleFocusMode() }
+    func wsMove(_ dir: Int) { selWs?.moveFocus(dir: dir) }
 
     /// 侧栏选区 → 切到 Vault tab 并展示分区（dev select-sidebar 同路）。
     func showSection(_ i: Int) {
@@ -167,24 +221,28 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     func applySettings() {
         let v = Vault.shared
         for t in tabs {
-            guard let term = t.term else { continue }
-            term.fontName = v.setting("term_font") ?? "Menlo"
-            term.fontSize = CGFloat(
-                Double(v.setting("term_font_size") ?? "14") ?? 14)
-            term.lineHeight = CGFloat(
-                Double(v.setting("term_line_height") ?? "1.15") ?? 1.15)
-            term.cursorStyle = (Int(v.setting("term_cursor") ?? "0") ?? 0) + 1
-            term.optionIsMeta = (v.setting("term_option_meta") ?? "0") == "1"
-            term.theme = TermTheme.for(v.setting("term_theme"))
-            term.onSizeChange = { [weak t] r, c in
-                t?.session.map {
-                    hb_session_resize($0.sess, Int32(r), Int32(c))
+            for term in t.allTerms {
+                term.fontName = v.setting("term_font") ?? "Menlo"
+                term.fontSize = CGFloat(
+                    Double(v.setting("term_font_size") ?? "14") ?? 14)
+                term.lineHeight = CGFloat(
+                    Double(v.setting("term_line_height") ?? "1.15") ?? 1.15)
+                term.cursorStyle =
+                    (Int(v.setting("term_cursor") ?? "0") ?? 0) + 1
+                term.optionIsMeta =
+                    (v.setting("term_option_meta") ?? "0") == "1"
+                term.theme = TermTheme.for(v.setting("term_theme"))
+                // 尺寸变化 resize 自己的 session（多 pane 各管各）
+                term.onSizeChange = { [weak term] r, c in
+                    term?.session.map {
+                        hb_session_resize($0.sess, Int32(r), Int32(c))
+                    }
                 }
             }
         }
     }
     func windowWillClose(_ n: Notification) {
-        for t in tabs { t.session?.free_() }
+        for t in tabs { t.kill() }
     }
     func windowShouldClose(_ s: NSWindow) -> Bool {
         let live = tabs.contains { $0.running }

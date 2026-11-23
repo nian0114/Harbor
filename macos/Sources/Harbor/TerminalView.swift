@@ -46,6 +46,11 @@ final class TerminalView: NSView, NSTextInputClient {
     var optionIsMeta = false
     var session: Session?
     var onSizeChange: ((Int, Int) -> Void)?
+    /// 广播输入镜像（Workspace）：用户输入在发给自己 session 之外，
+    /// 经此回调转发给其它 pane（对齐 hb_terminal_set_input_mirror）。
+    var inputMirror: ((MirrorEv) -> Void)?
+    /// 点击终端 → 工作区聚焦本 pane。
+    var onFocusRequest: (() -> Void)?
 
     private var geom = CellGeom(cellW: 8, cellH: 16, padX: 12, padY: 10,
                                 baseline: 13)
@@ -493,6 +498,7 @@ final class TerminalView: NSView, NSTextInputClient {
     }
 
     override func mouseDown(with e: NSEvent) {
+        onFocusRequest?()
         let p = convert(e.locationInWindow, from: nil)
         blockSel = e.modifierFlags.contains(.option)
         let c = cellAt(p)
@@ -589,6 +595,7 @@ final class TerminalView: NSView, NSTextInputClient {
                                optionIsMeta: optionIsMeta)
         if let k = KeyMap.specialKey(e.keyCode) {
             hb_session_key(s.sess, hb_key(rawValue: UInt32(k)), mods)
+            inputMirror?(.key(k, mods))
             return
         }
         if mods & KeyMap.HB_MOD_CTRL != 0,
@@ -599,6 +606,7 @@ final class TerminalView: NSView, NSTextInputClient {
                 hb_session_write(s.sess, $0.baseAddress!
                     .assumingMemoryBound(to: CChar.self), 1)
             }
+            inputMirror?(.raw(Data([b])))
             return
         }
         guard let str = e.characters, let uni = str.unicodeScalars.first
@@ -608,12 +616,14 @@ final class TerminalView: NSView, NSTextInputClient {
             m2 |= KeyMap.HB_MOD_ALT
         }
         hb_session_unichar(s.sess, uni.value, m2)
+        inputMirror?(.unichar(uni.value, m2))
     }
 
     func paste() {
         guard let str = NSPasteboard.general.string(forType: .string),
               let s = session else { return }
         str.withCString { hb_session_paste(s.sess, $0) }
+        inputMirror?(.paste(str))
     }
     override func selectAll(_ sender: Any?) {
         guard let vt = session?.vt else { return }
@@ -638,6 +648,7 @@ final class TerminalView: NSView, NSTextInputClient {
         guard let s = session else { return }
         for scalar in str.unicodeScalars {
             hb_session_unichar(s.sess, scalar.value, 0)
+            inputMirror?(.unichar(scalar.value, 0))
         }
     }
     func setMarkedText(_ string: Any, selectedRange: NSRange,
@@ -685,8 +696,10 @@ final class TerminalView: NSView, NSTextInputClient {
         guard let s = session else { return }
         if selector == #selector(cancelOperation(_:)) {
             hb_session_key(s.sess, hb_key(rawValue: 4), 0)
+            inputMirror?(.key(4, 0))
         } else if selector == #selector(deleteBackward(_:)) {
             hb_session_key(s.sess, hb_key(rawValue: 3), 0)
+            inputMirror?(.key(3, 0))
         }
     }
 }

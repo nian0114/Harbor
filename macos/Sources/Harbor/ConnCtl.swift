@@ -20,7 +20,7 @@ protocol ConnDelegate: AnyObject {
 final class ConnCtl {
     let mode: ConnMode
     private(set) var hostId: String?
-    private var quickTarget: String?     // "user@host:port"
+    private(set) var quickTarget: String?     // "user@host:port"
     private var hname = "", huser = ""
     private(set) var sess: Session?
     weak var delegate: ConnDelegate?

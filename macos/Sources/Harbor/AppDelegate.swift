@@ -80,7 +80,11 @@ final class App: NSObject, NSApplicationDelegate {
         main.addItem(file)
         let fm = NSMenu(title: L("文件"))
         fm.addItem(item(L("新建本地标签页"), #selector(newTab), "t", id: "new-local-tab"))
+        fm.addItem(item(L("新建 Workspace…"), #selector(openWorkspacePicker),
+                        "w", [.command, .option], id: "new-workspace"))
         fm.addItem(item(L("关闭标签页"), #selector(closeTab), "w", id: "close-tab"))
+        fm.addItem(item(L("关闭当前 Pane"), #selector(closePane), "w",
+                        [.command, .shift], id: "close-pane"))
         file.submenu = fm
 
         let edit = NSMenuItem()
@@ -92,6 +96,38 @@ final class App: NSObject, NSApplicationDelegate {
         em.addItem(.separator())
         em.addItem(item(L("查找…"), nil, "f", id: "find"))
         edit.submenu = em
+
+        let sess = NSMenuItem()
+        main.addItem(sess)
+        let sm = NSMenu(title: L("会话"))
+        sm.addItem(item(L("向右分屏"), #selector(splitRight), "d",
+                        [.command, .shift], id: "split-right"))
+        sm.addItem(item(L("向下分屏"), #selector(splitDown), "e",
+                        [.command, .shift], id: "split-down"))
+        sm.addItem(item(L("输入广播"), #selector(toggleBroadcast), "b",
+                        [.command, .shift], id: "broadcast"))
+        sm.addItem(item(L("Focus 模式"), #selector(toggleFocusMode), "m",
+                        [.command, .shift], id: "focus-mode"))
+        sm.addItem(.separator())
+        sm.addItem(item(L("焦点移到左侧 Pane"), #selector(moveLeft),
+                        "", [.command, .option], id: "pane-left"))
+        sm.addItem(item(L("焦点移到右侧 Pane"), #selector(moveRight),
+                        "", [.command, .option], id: "pane-right"))
+        sm.addItem(item(L("焦点移到上方 Pane"), #selector(moveUp),
+                        "", [.command, .option], id: "pane-up"))
+        sm.addItem(item(L("焦点移到下方 Pane"), #selector(moveDown),
+                        "", [.command, .option], id: "pane-down"))
+        sess.submenu = sm
+        // ⌘⌥←→↑↓：keyEquivalent 用 unicode arrow
+        let arrowKeys: [String: String] = [
+            "pane-left": "\u{f702}", "pane-right": "\u{f703}",
+            "pane-up": "\u{f700}", "pane-down": "\u{f701}",
+        ]
+        for m in sm.items {
+            if let id = m.identifier?.rawValue, let k = arrowKeys[id] {
+                m.keyEquivalent = k
+            }
+        }
 
         let view = NSMenuItem()
         main.addItem(view)
@@ -124,6 +160,16 @@ final class App: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = main
     }
     @objc func newTab() { win.newLocalTab() }
+    @objc func openWorkspacePicker() { win.openWorkspacePicker() }
+    @objc func closePane() { win.wsClosePane() }
+    @objc func splitRight() { win.wsSplitRight() }
+    @objc func splitDown() { win.wsSplitDown() }
+    @objc func toggleBroadcast() { win.wsBroadcast() }
+    @objc func toggleFocusMode() { win.wsFocusMode() }
+    @objc func moveLeft() { win.wsMove(0) }
+    @objc func moveRight() { win.wsMove(1) }
+    @objc func moveUp() { win.wsMove(2) }
+    @objc func moveDown() { win.wsMove(3) }
     @objc func closeTab() { win.closeTab(win.selTab) }
     @objc func copySel() { win.tabs[win.selTab].term?.copySelection() }
     @objc func paste() { win.tabs[win.selTab].term?.paste() }

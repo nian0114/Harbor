@@ -523,6 +523,20 @@ final class SSHTab: TermTab, ConnDelegate {
         super.kill()
     }
 
+    // ---- Workspace 叶钩子 ----
+    override var isSSHLeaf: Bool { true }
+    override var wsIconName: String { osTile(conn.hostOS).icon }
+    override var wsHostId: String? { conn.hostId }
+    override var wsDead: Bool {
+        ended || failed || (session != nil && !session!.alive)
+    }
+    /// 分屏克隆：同 host（或 quick target）新连接（对齐 clone_page）。
+    override func wsClone() -> TermTab? {
+        let t = SSHTab(hostId: conn.hostId, quickTarget: conn.quickTarget,
+                       window: view.window, title: title)
+        t.connect()
+        return t
+    }
 }
 
 extension NSView {
