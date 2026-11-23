@@ -12,32 +12,29 @@ final class FindBar: NSView, NSTextFieldDelegate {
 
     private let field = NSTextField()
     private let count = NSTextField(labelWithString: "0/0")
+    private var iconBtns: [NSButton] = []
 
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        layer?.backgroundColor = Theme.card.color.cgColor
-        layer?.borderColor = Theme.line.color.cgColor
-        layer?.borderWidth = 1
         field.placeholderString = L("在终端中查找…")
         field.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         field.focusRingType = .none
-        field.isBezeled = false
-        field.drawsBackground = false
+        field.isBezeled = true
+        field.bezelStyle = .roundedBezel
+        field.drawsBackground = true
         field.delegate = self
         field.setAccessibilityIdentifier("find-field")
         count.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        count.textColor = Theme.termDim.color
         count.setAccessibilityIdentifier("find-count")
         func iconBtn(_ icon: String, _ act: Selector, _ aid: String,
                      _ tip: String) -> NSButton {
             let b = NSButton()
             b.bezelStyle = .texturedRounded
             b.isBordered = false
-            b.image = hbIcon(icon, size: 11,
-                             tint: Theme.termDim.color)
             b.target = self; b.action = act
             b.toolTip = tip
+            b.identifier = NSUserInterfaceItemIdentifier("fb-\(icon)")
             b.setAccessibilityIdentifier(aid)
             return b
         }
@@ -47,6 +44,7 @@ final class FindBar: NSView, NSTextFieldDelegate {
                          "find-next", L("下一个 (Enter)"))
         let cl = iconBtn("x", #selector(onCloseBtn),
                          "find-close", L("关闭 (Esc)"))
+        iconBtns = [pv, nx, cl]
         [field, count, pv, nx, cl].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
@@ -76,8 +74,36 @@ final class FindBar: NSView, NSTextFieldDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// 按终端主题取色（对齐 linux .find-bar 的 --t-bar/--t-line/
+    /// --t-title/--t-fg/--t-muted 变量）。
+    private func applyTermTheme(_ t: TermTheme) {
+        layer?.backgroundColor = t.bar.color.cgColor
+        layer?.borderColor = t.line.color.cgColor
+        layer?.borderWidth = 1
+        field.textColor = t.fg.color
+        // bezeled 控件按系统外观取色 → 主题明暗决定 field 外观
+        field.appearance = NSAppearance(
+            named: t.id == "light" ? .aqua : .darkAqua)
+        field.placeholderAttributedString = NSAttributedString(
+            string: L("在终端中查找…"),
+            attributes: [.foregroundColor: t.muted.color])
+        count.textColor = t.title.color
+        for b in iconBtns {
+            let ic = b.identifier?.rawValue.dropFirst(3) ?? ""
+            b.image = hbIcon(String(ic), size: 11, tint: t.title.color)
+        }
+    }
+
     // ---- 生命周期 ----
-    func bind(_ t: TerminalView) { term = t }
+    func bind(_ t: TerminalView) {
+        term = t
+        applyTermTheme(t.theme)
+        // 主题切换时重取色（linux CSS var 自动跟随）
+        t.onThemeChange = { [weak self, weak t] in
+            guard let t else { return }
+            self?.applyTermTheme(t.theme)
+        }
+    }
     func open() {
         field.stringValue = ""
         updateCount(0, 0)

@@ -31,6 +31,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     private var boxes: [UUID: NSView] = [:]        // leafId → pane box
     private var margins: [UUID: NSView] = [:]      // leafId → 5px 容器
     private var heads: [UUID: NSView] = [:]
+    private var headH: [UUID: NSLayoutConstraint] = [:]
     private var headBtns: [UUID: (img: NSImageView, lbl: NSTextField,
                                   reconn: NSButton, watch: NSButton,
                                   badge: NSTextField)] = [:]
@@ -208,6 +209,14 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         tab?.syncFromWorkspace()
     }
 
+    /// 布局定稿：求解约束并应用 split frac —— 之后叶子 term
+    /// 持有真实 frame，startSession() 读到有效 rows/cols。
+    func layoutNow() {
+        view.layoutSubtreeIfNeeded()
+        applyFractions()
+        treeView?.layoutSubtreeIfNeeded()
+    }
+
     /// 分屏（对齐 hb_workspace_split_focused）：clone 焦点 pane 插入右侧/下侧。
     @discardableResult
     func splitFocused(horizontal: Bool) -> Bool {
@@ -224,6 +233,10 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         pages[clone.wsLeafId] = clone
         wireLeaf(clone)
         rebuild()
+        // 布局定稿（约束 + split frac）后再启 session：
+        // 先在 0×0/默认 80 列下 spawn 会让登录横幅按假宽度折行。
+        layoutNow()
+        clone.startSession()
         focus(newLeaf, grab: true)
         return true
     }
@@ -258,6 +271,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         boxes[id] = nil
         margins[id] = nil
         heads[id] = nil
+        headH[id] = nil
         headBtns[id] = nil
         _ = model.removeLeaf(n)
         rebuild()
@@ -414,17 +428,20 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         [head, content].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false }
         box.addSubview(head); box.addSubview(content)
+        let hh = head.heightAnchor.constraint(equalToConstant: 27)
         NSLayoutConstraint.activate([
             head.leadingAnchor.constraint(equalTo: box.leadingAnchor),
             head.trailingAnchor.constraint(equalTo: box.trailingAnchor),
             head.topAnchor.constraint(equalTo: box.topAnchor),
-            head.heightAnchor.constraint(equalToConstant: 27),
+            hh,
             content.leadingAnchor.constraint(equalTo: box.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: box.trailingAnchor),
             content.topAnchor.constraint(equalTo: head.bottomAnchor),
             content.bottomAnchor.constraint(equalTo: box.bottomAnchor),
         ])
         head.isHidden = paneCount == 1
+        hh.constant = paneCount == 1 ? 0 : 27
+        headH[id] = hh
         // margin 容器（splitView arranged 子级）
         let mv = NSView()
         mv.translatesAutoresizingMaskIntoConstraints = false
@@ -635,8 +652,13 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             ])
         }
         treeView = tv
-        // head 仅多 pane 时显示（对齐 Linux：单页无 pane-head）
-        for (_, h) in heads { h.isHidden = model.leafCount == 1 }
+        // head 仅多 pane 时显示（对齐 Linux：单页无 pane-head）；
+        // 高度一并归零 —— 隐藏视图仍占布局高度，会露出空白条。
+        for (id, h) in heads {
+            let single = model.leafCount == 1
+            h.isHidden = single
+            headH[id]?.constant = single ? 0 : 27
+        }
         applyBorders()
         updateTitle()
         // frac 要等 splitView 有 frame 后才能写

@@ -534,12 +534,12 @@ final class SSHTab: TermTab, ConnDelegate {
         ended || failed || (session != nil && !session!.alive)
     }
     /// 分屏克隆：同 host（或 quick target）新连接（对齐 clone_page）。
+    /// 未启动 —— Workspace 布局定稿后经 startSession() 连接。
     override func wsClone() -> TermTab? {
-        let t = SSHTab(hostId: conn.hostId, quickTarget: conn.quickTarget,
-                       window: view.window, title: title)
-        t.connect()
-        return t
+        SSHTab(hostId: conn.hostId, quickTarget: conn.quickTarget,
+               window: view.window, title: title)
     }
+    override func startSession() { connect() }
 }
 
 extension NSView {

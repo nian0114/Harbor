@@ -37,11 +37,15 @@ class TermTab: NSObject {
     /// pane-head 重连钮；Local = 重启 shell，SSH = 重连。
     func wsReconnect() { restart() }
     /// 分屏克隆：Local → 新本地终端；SSHTab 覆盖 → 同 host 新连接。
+    /// 返回未启动的叶 —— session 由 Workspace 在 pane 布局
+    /// 定稿后经 startSession() 按真实 frame 启动。
     func wsClone() -> TermTab? {
-        let t = TermTab.local(rows: 24, cols: 80)
-        t.start()
-        return t
+        return TermTab.local(rows: 24, cols: 80)
     }
+    /// pane/首启布局后按真实 frame 启 session（对齐 linux
+    /// realize-then-spawn；SSHTab 覆盖为 connect()）。
+    /// term 此时已有真实 bounds → rows()/cols() 有效。
+    func startSession() { start() }
     /// 监控设置对话框（对齐 hb_watch_ui_open）。
     func openWatch() { WatchDialog.present(leaf: self) }
 
@@ -267,7 +271,9 @@ final class WsTab: TermTab {
         session = f?.session
         statusDot = f?.statusDot ?? Theme.dotPend
         if ws.paneCount > 1 {
-            title = "Workspace"
+            // tab 题 = 焦点 pane 题 + pane 数（tooltip 仍有 "Workspace · N 分屏"）
+            let base = f?.wsTitle ?? L("Workspace")
+            title = "\(base) · \(ws.paneCount)\(L("分屏"))"
             iconName = "cols"
         } else {
             title = f?.title ?? title

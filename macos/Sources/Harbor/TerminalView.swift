@@ -41,7 +41,10 @@ final class TerminalView: NSView, NSTextInputClient {
     var fontSize: CGFloat = 14 { didSet { rebuildFont(); fitNotify() } }
     var lineHeight: CGFloat = 1.15 { didSet { rebuildFont(); fitNotify() } }
     var cursorStyle = 1 { didSet { needsDisplay = true } }
-    var theme = TermTheme.for("harbor") { didSet { invalidateLayout(); needsDisplay = true } }
+    var theme = TermTheme.for("harbor") { didSet {
+        invalidateLayout(); needsDisplay = true; onThemeChange?() } }
+    /// 主题变更回调（FindBar 重取色用；linux 走 CSS var 自动更新）。
+    var onThemeChange: (() -> Void)?
     var padX: CGFloat = 12, padY: CGFloat = 10
     var optionIsMeta = false
     var session: Session?
@@ -417,8 +420,9 @@ final class TerminalView: NSView, NSTextInputClient {
             let w = cell.width == 2 ? 2 : 1
             if selCovered(col, w, visRow) { bgc = theme.selection }
             let fs = findState(col: col, w: w, visRow: visRow)
-            if fs == 2 { bgc = theme.findCur }
-            else if fs == 1 { bgc = theme.find }
+            if fs == 2 {   // 当前命中：glyph 反色保证可读（对齐 linux）
+                bgc = theme.findCur; fg = theme.bg
+            } else if fs == 1 { bgc = theme.find }
             let key = (cell.attrs, fg, bgc)
             if inRun && (key != runKey) { flush() }
             if !inRun { runStart = col; runKey = key; inRun = true }

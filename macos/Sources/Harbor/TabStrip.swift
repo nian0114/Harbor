@@ -14,9 +14,20 @@ final class TabStrip: NSView {
 
     override var isFlipped: Bool { true }
 
+    /// pinned（Vault/SFTP，不可关）固定紧凑宽并相邻靠左；
+    /// 会话 tab 均分剩余宽（对齐 prototype/Linux tab 条）。
+    private static let pinnedW: CGFloat = 92
+    private var pinnedCount: Int { tabs.prefix { !$0.closable }.count }
+    private func tabWidth(_ i: Int) -> CGFloat {
+        if i < pinnedCount { return TabStrip.pinnedW }
+        let n = max(tabs.count - pinnedCount, 1)
+        let avail = bounds.width - 44 - TabStrip.pinnedW * CGFloat(pinnedCount)
+        return min(170, max(84, avail / CGFloat(n)))
+    }
     private func tabRect(_ i: Int) -> NSRect {
-        let w = min(160, max(80, (bounds.width - 40) / CGFloat(max(tabs.count,1))))
-        return NSRect(x: CGFloat(i)*w + 4, y: 4, width: w - 2,
+        var x: CGFloat = 4
+        for j in 0..<i { x += tabWidth(j) }
+        return NSRect(x: x, y: 4, width: tabWidth(i) - 2,
                       height: bounds.height - 8)
     }
     private func plusRect() -> NSRect {

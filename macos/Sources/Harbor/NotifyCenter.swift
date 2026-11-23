@@ -46,19 +46,24 @@ final class NotifyCenter {
 
     var unread: Int { items.filter { $0.unread }.count }
 
+    private func changed() {
+        onChange?()
+        NotificationCenter.default.post(
+            name: .init("hb-notif-changed"), object: nil)
+    }
     func post(kind: String, title: String, body: String,
               tabIndex: Int?) {
         let f = DateFormatter(); f.dateFormat = "HH:mm"
         items.insert(NotifItem(kind: kind, title: title, body: body,
                                tabIndex: tabIndex,
                                time: f.string(from: Date())), at: 0)
-        onChange?()
+        changed()
     }
     func markAllRead() {
         for i in items.indices { items[i].unread = false }
-        onChange?()
+        changed()
     }
-    func clear() { items.removeAll(); onChange?() }
+    func clear() { items.removeAll(); changed() }
     /// dev hook：JSON 摘要
     var json: String {
         let arr: [[String: Any]] = items.map {
@@ -140,6 +145,8 @@ final class NotifyPanel: NSView {
             rowsCol.leadingAnchor.constraint(equalTo: doc.leadingAnchor),
             rowsCol.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
             rowsCol.topAnchor.constraint(equalTo: doc.topAnchor),
+            // 缺此约束 doc 高度塌成 0 → 列表永远空白
+            rowsCol.bottomAnchor.constraint(equalTo: doc.bottomAnchor),
             doc.widthAnchor.constraint(equalTo: listHost.widthAnchor),
         ])
         rebuild()

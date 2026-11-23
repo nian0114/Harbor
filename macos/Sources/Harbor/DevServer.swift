@@ -166,6 +166,7 @@ final class DevServer {
         case "set":    return cmdSet(arg)
         case "state":  return cmdState()
         case "gridinfo": return cmdGridInfo()
+        case "hier":    return cmdHier(arg)
         case "dialogs": return DialogRegistry.shared.json
         case "dialog-fill":
             let kv = arg.split(separator: " ", maxSplits: 1)
@@ -438,6 +439,28 @@ final class DevServer {
     private func cmdGridInfo() -> String {
         guard let term = win?.tabs[win?.selTab ?? 0].term else { return "ERR" }
         return "OK " + term.gridInfo()
+    }
+    /// 视图树诊断：class + 窗口坐标 frame + hidden（布局回归排查）。
+    private func cmdHier(_ arg: String) -> String {
+        guard let root = win?.contentView?.superview ?? win?.contentView
+        else { return "ERR" }
+        let maxDepth = Int(arg) ?? 6
+        var lines: [String] = []
+        func walk(_ v: NSView, _ depth: Int) {
+            guard depth <= maxDepth else { return }
+            let f = v.superview.map {
+                v.convert(v.bounds, to: $0) } ?? v.frame
+            let wf = v.window.map { _ in
+                v.convert(v.bounds, to: nil) } ?? f
+            lines.append(
+                "\(String(repeating: " ", count: depth * 2))" +
+                "\(type(of: v)) f=\(NSStringFromRect(f))" +
+                " w=\(NSStringFromRect(wf))" +
+                (v.isHidden ? " H" : ""))
+            v.subviews.forEach { walk($0, depth + 1) }
+        }
+        walk(root, 0)
+        return "OK\n" + lines.joined(separator: "\n")
     }
     private func cmdState() -> String {
         guard let win else { return "{}" }

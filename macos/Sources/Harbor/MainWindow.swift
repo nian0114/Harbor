@@ -58,7 +58,8 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         bell.action = #selector(toggleNotifs)
         bell.setAccessibilityIdentifier("bell")
         bar.addSubview(bell)
-        bellBadge.frame = NSRect(x: 1074, y: 22, width: 16, height: 12)
+        // 角标钉在铃铛右上内缘（不贴窗口圆角边缘，避免被裁）
+        bellBadge.frame = NSRect(x: 1068, y: 17, width: 16, height: 13)
         bellBadge.autoresizingMask = [.minXMargin]
         bellBadge.wantsLayer = true
         bellBadge.layer?.cornerRadius = 6
@@ -111,10 +112,12 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         let leaf = TermTab.local(rows: 24, cols: 80)
         let t = WsTab(leaf: leaf)
         tabs.append(t)
+        t.onChange = { [weak self] in self?.strip.needsDisplay = true }
         strip.tabs = tabs
         select(tabs.count - 1)
-        leaf.start()
         applySettings()
+        t.ws.layoutNow()          // term 真实 frame → 正确 rows/cols
+        leaf.startSession()
         t.term?.window?.makeFirstResponder(t.term)
     }
     func select(_ i: Int) {
@@ -229,10 +232,12 @@ final class MainWindow: NSWindow, NSWindowDelegate {
                           window: self, title: title)
         let t = WsTab(leaf: leaf)
         tabs.append(t)
+        t.onChange = { [weak self] in self?.strip.needsDisplay = true }
         strip.tabs = tabs
         select(tabs.count - 1)
         applySettings()
-        leaf.connect()
+        t.ws.layoutNow()
+        leaf.startSession()
     }
 
     /// Workspace 选择器：2–4 目标一次铺一行（对齐 hb_workspace_pick_targets）。
@@ -244,13 +249,12 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         guard !leaves.isEmpty else { return }
         let t = WsTab(leaves: leaves)
         tabs.append(t)
+        t.onChange = { [weak self] in self?.strip.needsDisplay = true }
         strip.tabs = tabs
         select(tabs.count - 1)
         applySettings()
-        for l in leaves {
-            if let s = l as? SSHTab { s.connect() }
-            else { l.start() }
-        }
+        t.ws.layoutNow()
+        for l in leaves { l.startSession() }
     }
 
     // ---- 工作区动作（菜单/快捷键/命令面板共用入口） ----
