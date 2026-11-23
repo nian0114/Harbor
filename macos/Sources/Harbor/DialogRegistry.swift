@@ -7,6 +7,7 @@ final class DialogRegistry {
     static let shared = DialogRegistry()
     private var tracked: [(win: NSWindow, kind: String)] = []
     private var fields: [String: NSControl] = [:]
+    private var textViews: [String: NSTextView] = [:]
     /// 待决的 .terminateLater；sheet 完成回调/手动应答后清位，防二次 reply。
     var pendingTerminate = false
 
@@ -30,14 +31,22 @@ final class DialogRegistry {
 
     private func registerFields(_ v: NSView) {
         for s in v.subviews { registerFields(s) }
+        if let sv = v as? NSScrollView, let d = sv.documentView {
+            registerFields(d)
+        }
         if let c = v as? NSControl {
             let id = c.accessibilityIdentifier()
             if !id.isEmpty { fields[id] = c }
+        }
+        if let tv = v as? NSTextView {
+            let id = tv.accessibilityIdentifier()
+            if !id.isEmpty { textViews[id] = tv }
         }
     }
     private func untrack(_ w: NSWindow) {
         tracked.removeAll { $0.win === w }
         fields.removeAll()
+        textViews.removeAll()
     }
 
     /// dev `dialogs`：JSON
@@ -66,6 +75,9 @@ final class DialogRegistry {
                 out.append(id.isEmpty ? b.title : id)
                 titles.append(b.title)
             }
+            if let sv = s as? NSScrollView, let d = sv.documentView {
+                findButtons(d, &out, &titles)
+            }
             findButtons(s, &out, &titles)
         }
     }
@@ -76,16 +88,29 @@ final class DialogRegistry {
                 let id = t.accessibilityIdentifier()
                 if !id.isEmpty { out.append(id) }
             }
+            if let tv = s as? NSTextView {
+                let id = tv.accessibilityIdentifier()
+                if !id.isEmpty { out.append(id) }
+            }
+            if let sv = s as? NSScrollView, let d = sv.documentView {
+                findFields(d, &out)
+            }
             findFields(s, &out)
         }
     }
     /// dev `dialog-fill <field> <base64>`
     func fill(field id: String, text: String) -> Bool {
+        if let tv = textViews[id] {
+            tv.string = text
+            return true
+        }
         guard let c = fields[id] else { return false }
         if let b = c as? NSButton {
             b.state = (text == "1" || text == "true") ? .on : .off
         } else {
             c.stringValue = text
+            NotificationCenter.default.post(
+                name: NSControl.textDidChangeNotification, object: c)
         }
         return true
     }
@@ -103,6 +128,8 @@ final class DialogRegistry {
                (b.title == label || b.accessibilityIdentifier() == label) {
                 b.performClick(nil); return true
             }
+            if let sv = s as? NSScrollView, let d = sv.documentView,
+               pressIn(d, label) { return true }
             if pressIn(s, label) { return true }
         }
         return false

@@ -270,6 +270,66 @@ final class DevServer {
             default:    WatchRoute.devForceFocused = nil
             }
             return "OK focus=\(WatchRoute.devForceFocused.map { $0 ? "on" : "off" } ?? "auto")"
+        // ---- M2b: Snippets/History/Known/Logs 页面 + 助手栏 ----
+        case "snip-mode":
+            guard let p = win?.vaultTab.snippetsRef
+            else { return "ERR no-page" }
+            p.devMode(arg); return "OK"
+        case "snip-state":
+            return win?.vaultTab.snippetsRef?.devState ?? "ERR no-page"
+        case "snip-send":
+            guard let w = win else { return "ERR" }
+            w.sendSnippet(id: arg); return "OK"
+        case "snip-editor":
+            win?.vaultTab.snippetsRef?.devOpenEditor()
+            return "OK"
+        case "snip-imp":
+            win?.vaultTab.snippetsRef?.importJSON(path: arg)
+            return "OK"
+        case "assist":
+            guard let w = selWs else { return "ERR no-ws" }
+            w.setAssist(arg == "on"); return "OK \(arg)"
+        case "assist-state":
+            guard let w = selWs
+            else { return "ERR no-ws" }
+            return w.assistOn ? "on" : "off"
+        case "known-import": return cmdKnownImport(arg)
+        case "known-export":
+            guard let p = win?.vaultTab.knownRef
+            else { return "ERR no-page" }
+            p.exportFile(path: arg); return "OK"
+        case "known-state":
+            return win?.vaultTab.knownRef?.devState ?? "ERR no-page"
+        case "known-del":
+            guard let v = Vault.shared.vault else { return "ERR" }
+            _ = arg.withCString { hb_vault_delete(v, $0) }
+            win?.vaultTab.knownRef?.reload()
+            return "OK"
+        case "logs-state":
+            return win?.vaultTab.logsRef?.devState ?? "ERR no-page"
+        case "logs-export":
+            let kv = arg.split(separator: " ")
+            guard kv.count == 2, let p = win?.vaultTab.logsRef
+            else { return "ERR usage" }
+            p.export(json: kv[0] == "json", path: String(kv[1]))
+            return "OK"
+        case "logs-saved":
+            guard let v = Vault.shared.vault,
+                  let id = Int64(arg) else { return "ERR usage" }
+            _ = hb_vault_log_set_saved(v, id, true)
+            win?.vaultTab.logsRef?.reload()
+            return "OK"
+        case "hist-count":
+            guard let v = Vault.shared.vault else { return "ERR" }
+            let cb: hb_history_cb = { _, ud in
+                ud!.assumingMemoryBound(to: Int.self).pointee += 1
+                return true }
+            var c = 0
+            _ = hb_vault_history_foreach(v, nil, nil, cb, &c)
+            return "OK \(c)"
+        case "hist-clear":
+            guard let v = Vault.shared.vault else { return "ERR" }
+            _ = hb_vault_history_clear(v); return "OK"
         case "quit":     NSApp.terminate(nil); return "OK"
         default: return "ERR unknown"
         }
@@ -834,6 +894,13 @@ final class DevServer {
                "cmd=\(hit.command?.str ?? "")"
     }
     /// `snippet-new <title-b64> <body-b64> [scope]` — 建 snippet 对象。
+    private func cmdKnownImport(_ arg: String) -> String {
+        guard let p = win?.vaultTab.knownRef
+        else { return "ERR no-page" }
+        p.importFile(path: arg)
+        return "OK"
+    }
+
     private func cmdSnippetNew(_ arg: String) -> String {
         let kv = arg.split(separator: " ")
         guard kv.count >= 2,
