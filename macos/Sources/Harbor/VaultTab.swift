@@ -16,6 +16,7 @@ final class VaultTab: TermTab {
     private var knownPage: KnownPage?
     private var logsPage: LogsPage?
     private var forwardPage: ForwardPage?
+    private var accountPage: AccountPage?
 
     init() {
         super.init(title: L("Vault"), view: NSView())
@@ -67,6 +68,7 @@ final class VaultTab: TermTab {
         knownPage?.removeFromSuperview(); knownPage = nil
         logsPage?.removeFromSuperview(); logsPage = nil
         forwardPage?.removeFromSuperview(); forwardPage = nil
+        accountPage?.removeFromSuperview(); accountPage = nil
         if sec == "hosts" {
             let p = HostsPage(frame: area.bounds)
             p.autoresizingMask = [.width, .height]
@@ -132,6 +134,13 @@ final class VaultTab: TermTab {
             forwardPage = p
             return
         }
+        if sec == "account" {
+            let p = AccountPage(frame: area.bounds)
+            p.autoresizingMask = [.width, .height]
+            area.addSubview(p)
+            accountPage = p
+            return
+        }
         if sec == "appearance" {
             let p = AppearancePanel()
             p.onChange = { [weak self] in
@@ -148,6 +157,7 @@ final class VaultTab: TermTab {
     var snippetsRef: SnippetsPage? { snippetsPage }
     var knownRef: KnownPage? { knownPage }
     var forwardRef: ForwardPage? { forwardPage }
+    var accountRef: AccountPage? { accountPage }
     var logsRef: LogsPage? { logsPage }
     /// dev hook 找页面（page(HostsPage.self) 走 contentCard 子树）
     /// SFTP 连接失败卡“编辑主机”入口：临时 HostStore 取 rec → 同

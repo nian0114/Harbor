@@ -21,12 +21,14 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scroll)
-        // 账户页脚：未登录 / 点击登录（同步登录在 M4）
+        // 账户页脚：未登录 / 点击登录 → 登录后显示邮箱与同步状态（M6）
         let foot = NSButton()
         foot.title = ""
         foot.isBordered = false
         foot.translatesAutoresizingMaskIntoConstraints = false
         foot.setAccessibilityIdentifier("sidebar-account")
+        foot.target = self
+        foot.action = #selector(accountTap)
         let f1 = NSTextField(labelWithString: L("未登录"))
         f1.font = .boldSystemFont(ofSize: 12)
         f1.translatesAutoresizingMaskIntoConstraints = false
@@ -34,6 +36,12 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         f2.font = .systemFont(ofSize: 10)
         f2.textColor = .secondaryLabelColor
         f2.translatesAutoresizingMaskIntoConstraints = false
+        acctL1 = f1; acctL2 = f2
+        acctObs = NotificationCenter.default.addObserver(
+            forName: .hbSyncChanged, object: nil, queue: .main) {
+            [weak self] _ in self?.refreshAccount()
+        }
+        refreshAccount()
         foot.addSubview(f1); foot.addSubview(f2)
         let sep = NSView()
         sep.wantsLayer = true
@@ -63,6 +71,28 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         ])
     }
     required init?(coder: NSCoder) { nil }
+    private weak var acctL1: NSTextField?
+    private weak var acctL2: NSTextField?
+    private var acctObs: NSObjectProtocol?
+    deinit {
+        if let o = acctObs {
+            NotificationCenter.default.removeObserver(o)
+        }
+    }
+    @objc private func accountTap() {
+        // 账户是侧栏最后一个分区
+        onSelect?(kSections.count - 1)
+    }
+    private func refreshAccount() {
+        let s = SyncService.shared
+        if s.state == .signedOut {
+            acctL1?.stringValue = L("未登录")
+            acctL2?.stringValue = L("点击登录")
+        } else {
+            acctL1?.stringValue = s.email ?? L("账号")
+            acctL2?.stringValue = s.statusText
+        }
+    }
     func numberOfRows(in t: NSTableView) -> Int { kSections.count }
     func tableView(_ tv: NSTableView, viewFor c: NSTableColumn?,
                    row: Int) -> NSView? {
