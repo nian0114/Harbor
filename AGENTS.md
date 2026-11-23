@@ -10,3 +10,6 @@
 - Release: `-Dbuildtype=release` requires `-Db_ndebug=true` (meson errors otherwise); packages via `scripts/package-deb.sh`, `scripts/package-appimage.sh`.
 - i18n: Chinese source strings wrapped in `_()`/`N_()` (linux) or `HB_TR()` (core); English in `po/en.po`; `meson test` runs `check-i18n` which fails on unwrapped CJK literals.
 - macOS: core-only build `scripts/bootstrap-macos.sh` once + `source scripts/env-macos.sh`; `meson setup b -Dlinux=false -Dserver=false` (deps are static .a under `~/.local/harbor-macos`); port shims live in `core/src/sockutil.h`.
+- macOS app: `scripts/build-macos-app.sh [--test|--release]` + `scripts/package-macos.sh` (runs on the Mac).
+- macOS dev hooks: unix socket `$HARBOR_DATA_DIR/dev.sock` (DEBUG + `HARBOR_DEV_ACTIONS=1` only), client `scripts/dev-mac.sh`; release builds must contain no dev strings (package script enforces).
+- Swift i18n: `L()` arguments must be plain literals (no interpolation) — use `String(format: L("…"), …)`; English catalog is shared `po/en.po`, extracted by `scripts/extract-swift-i18n.py`.
