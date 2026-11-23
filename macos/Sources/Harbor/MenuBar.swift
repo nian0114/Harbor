@@ -54,13 +54,18 @@ final class MenuBar: NSObject, NSMenuDelegate {
     }
     func menuWillOpen(_ m: NSMenu) { refresh() }
 
-    /// 模板状态图标：Harbor 应用图标（蓝色方块 + >_）的单色简化版。
+    /// 模板状态图标：应用图标的单色版（IconGen 生成的 statusIcon
+    /// 资源；缺失时退回手绘 >_ 轮廓）。
     static func statusImage() -> NSImage {
+        if let img = Bundle.main
+            .imageForResource(NSImage.Name("statusIcon")) {
+            img.isTemplate = true
+            return img
+        }
         let s: CGFloat = 18
         let img = NSImage(size: NSSize(width: s, height: s))
         img.lockFocus()
         NSColor.black.set()
-        // >_ 提示符（与应用图标同形，手绘于 18×18）
         let ch = NSBezierPath()
         ch.move(to: NSPoint(x: 3, y: 14))
         ch.line(to: NSPoint(x: 8.5, y: 9))

@@ -41,6 +41,18 @@ fi
 # 3. 组装 .app
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Harbor"
+
+# 3.1 图标：同一 linux SVG → icns + 菜单栏模板 PNG（IconGen 纯 AppKit
+# 工具，debug/native 构建即可，不进包体链接）。
+ICONBIN=$(swift build --product IconGen --show-bin-path 2>/dev/null)/IconGen
+if [ ! -x "$ICONBIN" ]; then
+    swift build --product IconGen >/dev/null
+    ICONBIN=$(swift build --product IconGen --show-bin-path)/IconGen
+fi
+"$ICONBIN" \
+    "$SRC/linux/data/icons/hicolor/scalable/apps/dev.harbor.Harbor.svg" \
+    "$APP/Contents/Resources"
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -53,7 +65,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>0.1.0</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Harbor contributors</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
 </dict>

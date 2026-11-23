@@ -15,6 +15,10 @@ let package = Package(
         .executableTarget(name: "Harbor",
                           dependencies: ["HarborKit"],
                           path: "Sources/Harbor"),
+        // 构建期工具：linux SVG → AppIcon.icns + 菜单栏模板 PNG
+        // （scripts/build-macos-app.sh 调用；纯 AppKit，不链 core）。
+        .executableTarget(name: "IconGen",
+                          path: "Sources/IconGen"),
         .testTarget(name: "HarborTests",
                     dependencies: ["HarborKit", "CHarbor"],
                     path: "Tests/HarborTests"),
