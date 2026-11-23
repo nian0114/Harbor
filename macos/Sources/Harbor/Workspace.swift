@@ -32,7 +32,8 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     private var margins: [UUID: NSView] = [:]      // leafId → 5px 容器
     private var heads: [UUID: NSView] = [:]
     private var headBtns: [UUID: (img: NSImageView, lbl: NSTextField,
-                                  reconn: NSButton)] = [:]
+                                  reconn: NSButton, watch: NSButton,
+                                  badge: NSTextField)] = [:]
     /// 内节点 → 渲染出的 splitView（focus 还原 / frac 回收用）
     private var splitOf: [ObjectIdentifier: (sv: NSSplitView,
                                              node: WsModel.Node)] = [:]
@@ -172,6 +173,17 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             hb.reconn.isHidden = !leaf.wsDead
             hb.img.image = hbIcon(leaf.wsIconName, size: 12,
                                   tint: Theme.termDim.color)
+            hb.watch.image = hbIcon("eye", size: 11,
+                tint: leaf.watchOn ? Theme.blue.color
+                                   : Theme.termDim.color)
+            let bg = leaf.watchBadge
+            hb.badge.stringValue =
+                bg == "err" ? "×" : bg == "pending" ? "●"
+                : bg == "ok" ? "✓" : ""
+            hb.badge.textColor =
+                bg == "err" ? Theme.red.color
+                : bg == "pending" ? Theme.amber.color
+                : Theme.green.color
         }
         updateTitle()
         tab?.syncFromWorkspace()
@@ -449,12 +461,17 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             b.widthAnchor.constraint(equalToConstant: 22).isActive = true
             return b
         }
+        let eye = headBtn("eye", #selector(onHeadWatch(_:)),
+                          "pane-watch", L("监控设置"))
         let reconn = headBtn("refresh", #selector(onHeadReconn(_:)),
                              "pane-reconn", L("重新连接"))
         reconn.isHidden = !leaf.wsDead
         let x = headBtn("x", #selector(onHeadClose(_:)),
                         "pane-close", L("关闭分屏"))
-        [ic, lbl, reconn, x].forEach {
+        // watch 命中角标（对齐 hb_window_set_watch_dot）
+        let badge = NSTextField(labelWithString: "")
+        badge.font = .systemFont(ofSize: 11, weight: .bold)
+        [ic, lbl, badge, eye, reconn, x].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             h.addSubview($0)
         }
@@ -466,20 +483,26 @@ final class Workspace: NSObject, NSSplitViewDelegate {
                                          constant: 6),
             lbl.centerYAnchor.constraint(equalTo: h.centerYAnchor),
             lbl.trailingAnchor.constraint(lessThanOrEqualTo:
-                x.leadingAnchor, constant: -4),
+                badge.leadingAnchor, constant: -4),
+            badge.trailingAnchor.constraint(equalTo: eye.leadingAnchor,
+                                            constant: -4),
+            badge.centerYAnchor.constraint(equalTo: h.centerYAnchor),
             x.trailingAnchor.constraint(equalTo: h.trailingAnchor,
                                         constant: -6),
             x.centerYAnchor.constraint(equalTo: h.centerYAnchor),
             reconn.trailingAnchor.constraint(equalTo: x.leadingAnchor,
                                              constant: -2),
             reconn.centerYAnchor.constraint(equalTo: h.centerYAnchor),
+            eye.trailingAnchor.constraint(
+                equalTo: reconn.leadingAnchor, constant: -2),
+            eye.centerYAnchor.constraint(equalTo: h.centerYAnchor),
         ])
         // 点击 head 区聚焦该 pane
         h.identifier = NSUserInterfaceItemIdentifier(
             "panehead-\(id.uuidString.prefix(8))")
         h.addGestureRecognizer(NSClickGestureRecognizer(
             target: self, action: #selector(onPaneClick(_:))))
-        headBtns[id] = (ic, lbl, reconn)
+        headBtns[id] = (ic, lbl, reconn, eye, badge)
         return h
     }
 
@@ -498,6 +521,9 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         let hex = String(s[s.index(after: dash)...])
         return model.leaves.first(where: {
             $0.leafId?.uuidString.hasPrefix(hex) == true })?.leafId
+    }
+    @objc private func onHeadWatch(_ b: NSButton) {
+        leafOfBtn(b).flatMap { pages[$0] }?.openWatch()
     }
     @objc private func onHeadReconn(_ b: NSButton) {
         leafOfBtn(b).flatMap { pages[$0] }?.wsReconnect()

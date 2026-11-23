@@ -42,6 +42,8 @@ class TermTab: NSObject {
         t.start()
         return t
     }
+    /// 监控设置对话框（对齐 hb_watch_ui_open）。
+    func openWatch() { WatchDialog.present(leaf: self) }
 
     // ---- 终端内查找 ⌘F（单 pane tab；WsTab 覆盖 → Workspace.findHost） ----
     /// 浮在终端顶部的查找条（对齐 linux find bar 覆盖层）。
@@ -95,6 +97,22 @@ class TermTab: NSObject {
         singleFindTerm == nil ? "" : (singleFindBar?.countText ?? "")
     }
 
+    // ---- 完成监控状态（对齐 hb-term-page/hb-ssh-page watch_*） ----
+    /// 开关：SSH 默认 settings.watch_default_ssh(true)，
+    /// Local → watch_default_local(false)。SSH leaf 由 SSHTab 覆盖。
+    lazy var watchOn: Bool = WatchCtl.defaultOn(isSSH: isSSHLeaf)
+    lazy var watchSignals: UInt32 = WatchCtl.leafSignals()
+    /// 角标："ok"✓绿 / "err"×红 / "pending"●琥珀（对齐 watch dot）。
+    var watchBadge: String? { didSet { onChange?() } }
+    /// 挂/摘引擎（session 建立后调用）。
+    func applyWatch() {
+        WatchCtl.apply(session?.sess, on: watchOn,
+                       hostId: wsHostId, signals: watchSignals)
+    }
+    /// HB_SESS_EV_WATCH → 路由（通知中心 + 角标 + 系统通知接缝）。
+    func handleWatchHit(_ hit: hb_watch_hit) {
+        WatchRoute.route(leaf: self, hit: hit)
+    }
     /// WsTab 覆盖：焦点叶变化 → tab 外观同步。普通叶为空实现。
     func syncFromWorkspace() {}
 
@@ -132,6 +150,8 @@ class TermTab: NSObject {
                     if !t.isEmpty { self.title = t }
                 }
             case HB_SESS_EV_BELL: term?.bell()
+            case HB_SESS_EV_WATCH:
+                if let h = ev.watch { self.handleWatchHit(h.pointee) }
             case HB_SESS_EV_EXIT:
                 let code = ev.code
                 self.statusDot = Theme.dotErr
@@ -141,6 +161,7 @@ class TermTab: NSObject {
         }
         term.session = s
         session = s
+        applyWatch()
         s.drain()
     }
 
@@ -222,6 +243,22 @@ final class WsTab: TermTab {
     override func devFindSet(_ s: String) { ws.devFindSet(s) }
     override func devFindStep(_ dir: Int) { ws.devFindStep(dir) }
     override var findCountText: String { ws.findCountText }
+
+    /// tab 角标：任一叶有 badge → 最严重者优先（err>pending>ok）。
+    var badgeGlyph: (String, NSColor)? {
+        var best: String?
+        for l in ws.leavesList {
+            guard let b = l.watchBadge else { continue }
+            if b == "err" { best = "err"; break }
+            if best != "pending" { best = b }
+        }
+        switch best {
+        case "err":     return ("×", Theme.red.color)
+        case "pending": return ("●", Theme.amber.color)
+        case "ok":      return ("✓", Theme.green.color)
+        default:        return nil
+        }
+    }
 
     /// 焦点叶外观 → tab 外观（strip 重绘由 MainWindow 触发）。
     override func syncFromWorkspace() {

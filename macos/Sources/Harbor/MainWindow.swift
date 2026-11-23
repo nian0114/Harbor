@@ -14,6 +14,11 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     var maxRunloopStall: TimeInterval = 0
     private var stallTimer: Timer?
     private var lastBeat = Date()
+    // 通知中心：铃铛 + 未读角标 + 弹层
+    private let bell = NSButton()
+    private let bellBadge = NSTextField(labelWithString: "")
+    private var notifPanel: NotifyPanel?
+    private var notifMonitor: Any?
 
     init() {
         super.init(contentRect: NSRect(x: 200, y: 200, width: 1100, height: 700),
@@ -44,13 +49,26 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         side.autoresizingMask = [.minXMargin]
         side.target = self; side.action = #selector(toggleSidebar)
         bar.addSubview(side)
-        let bell = NSButton()
         bell.bezelStyle = .texturedRounded
         bell.image = hbIcon("bell", size: 16, tint: .white)
         bell.isBordered = false
         bell.frame = NSRect(x: 1056, y: 8, width: 28, height: 22)
         bell.autoresizingMask = [.minXMargin]
+        bell.target = self
+        bell.action = #selector(toggleNotifs)
+        bell.setAccessibilityIdentifier("bell")
         bar.addSubview(bell)
+        bellBadge.frame = NSRect(x: 1074, y: 22, width: 16, height: 12)
+        bellBadge.autoresizingMask = [.minXMargin]
+        bellBadge.wantsLayer = true
+        bellBadge.layer?.cornerRadius = 6
+        bellBadge.layer?.backgroundColor = Theme.red.color.cgColor
+        bellBadge.isHidden = true
+        bar.addSubview(bellBadge)
+        NotifyCenter.shared.onChange = { [weak self] in
+            self?.refreshBellBadge()
+        }
+        refreshBellBadge()
 
         // body：Vault/SFTP pinned + 会话 tab 全宽；侧栏属 Vault tab 内部
         content.frame = NSRect(x: 0, y: 0, width: 1100, height: 662)
@@ -113,6 +131,13 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         content.addSubview(card)
         contentCard = card
         makeFirstResponder(tabs[i].term)
+        // 切到该 tab → 清 watch 角标（对齐 linux refresh_active 清 dot）
+        if let w = tabs[i] as? WsTab {
+            for l in w.ws.leavesList where l.watchBadge != nil {
+                l.watchBadge = nil
+                l.onChange?()
+            }
+        }
         strip.needsDisplay = true
     }
     func closeTab(_ i: Int) {
@@ -145,6 +170,57 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     @objc func toggleSidebar() {
         // prototype：仅 Vault tab 激活时切换侧栏；会话 tab 上无操作
         if selTab == 0 { vaultTab.toggleSidebar() }
+    }
+
+    // ---- 通知中心（FR-13，对齐 hb-window.c build_bell） ----
+    @objc private func toggleNotifs() {
+        if let p = notifPanel {
+            closeNotifs(p)
+            return
+        }
+        let p = NotifyPanel()
+        p.onJump = { [weak self] ti in
+            guard let self else { return }
+            self.select(min(ti, self.tabs.count - 1))
+            self.closeNotifs(self.notifPanel)
+        }
+        p.onClose = { [weak self] in self?.closeNotifs(self?.notifPanel) }
+        // 锚在铃铛下缘
+        let pt = bell.convert(NSPoint(x: bell.bounds.maxX, y: 0),
+                              to: contentView)
+        p.frame = NSRect(x: pt.x - p.frame.width - 2,
+                         y: pt.y - p.frame.height - 4,
+                         width: p.frame.width, height: p.frame.height)
+        p.autoresizingMask = [.minXMargin, .minYMargin]
+        contentView?.addSubview(p)
+        notifPanel = p
+        // 面板外点击 → 关闭
+        notifMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]) { [weak self] e in
+                guard let self, let p = self.notifPanel else { return e }
+                let loc = p.convert(e.locationInWindow, from: nil)
+                if !p.bounds.contains(loc) && e.window === self {
+                    self.closeNotifs(p)
+                }
+                return e
+            }
+    }
+    private func closeNotifs(_ p: NotifyPanel?) {
+        p?.removeFromSuperview()
+        if let m = notifMonitor {
+            NSEvent.removeMonitor(m)
+            notifMonitor = nil
+        }
+        if p === notifPanel { notifPanel = nil }
+    }
+    private func refreshBellBadge() {
+        let n = NotifyCenter.shared.unread
+        bellBadge.isHidden = n == 0
+        bellBadge.stringValue = n > 99 ? "99" : "\(n)"
+        bellBadge.font = .systemFont(ofSize: 8, weight: .bold)
+        bellBadge.textColor = .white
+        bellBadge.alignment = .center
+        notifPanel?.rebuild()
     }
 
     /// 由主机页/快速连接起 SSH tab。

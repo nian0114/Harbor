@@ -53,6 +53,17 @@ final class TabStrip: NSView {
                     .foregroundColor: NSColor.white.withAlphaComponent(
                         sel ? 1 : 0.65),
                     .paragraphStyle: para])
+            // watch 角标（FR-13）：✓绿 ×红 ●琥珀 —— 标题右侧、× 左侧
+            if let tab = t as? WsTab, let badge = tab.badgeGlyph {
+                let (ch, col) = badge
+                (ch as NSString).draw(
+                    at: NSPoint(x: rc.maxX - (t.closable ? 30 : 14),
+                                y: rc.minY + 5),
+                    withAttributes: [
+                        .font: NSFont.systemFont(ofSize: 10,
+                                                 weight: .bold),
+                        .foregroundColor: col])
+            }
             // 关闭 ×（pinned 页不画）
             if t.closable {
                 ("×" as NSString).draw(
