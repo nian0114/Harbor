@@ -10,6 +10,12 @@ set -euo pipefail
 SRC="${1:-$HOME/harbor}"
 BUILD="${2:-$HOME/harbor-build}"
 SYSROOT="${HARBOR_MACOS_SYSROOT:-$HOME/.local/harbor-macos}"
+# 第三参 release：release 目录 + -Db_ndebug（产物 NDEBUG，测试钩子
+# 与 [sftpdbg] 不进发布二进制）；否则沿用既有 debug 目录。
+SUF=""
+if [ "${3:-}" = "release" ]; then
+    SUF="-rel"
+fi
 
 source "$SRC/scripts/env-macos.sh"
 
@@ -22,28 +28,30 @@ mkdir -p "$UNILIB"
 
 # ---------------------------------------------------------------- x86_64
 
-if [ ! -f "$BUILD/x86_64/build.ninja" ]; then
-    meson setup "$BUILD/x86_64" "$SRC" \
+if [ ! -f "$BUILD/x86_64$SUF/build.ninja" ]; then
+    meson setup "$BUILD/x86_64$SUF" "$SRC" \
         -Dlinux=false -Dserver=false -Dtests=true \
-        --pkg-config-path "$SYSROOT/x86_64/lib/pkgconfig"
+        --pkg-config-path "$SYSROOT/x86_64/lib/pkgconfig" \
+        ${SUF:+-Dbuildtype=release -Db_ndebug=true}
 fi
-ninja -C "$BUILD/x86_64"
+ninja -C "$BUILD/x86_64$SUF"
 
 # ------------------------------------------------------------------ arm64
 
 sed -e "s|@HARBOR_MACOS_SYSROOT@|$SYSROOT|g" \
     "$SRC/macos/meson/darwin-arm64.ini.in" > "$BUILD/darwin-arm64.ini"
-if [ ! -f "$BUILD/arm64/build.ninja" ]; then
-    meson setup "$BUILD/arm64" "$SRC" \
+if [ ! -f "$BUILD/arm64$SUF/build.ninja" ]; then
+    meson setup "$BUILD/arm64$SUF" "$SRC" \
         --cross-file "$BUILD/darwin-arm64.ini" \
-        -Dlinux=false -Dserver=false -Dtests=true
+        -Dlinux=false -Dserver=false -Dtests=true \
+        ${SUF:+-Dbuildtype=release -Db_ndebug=true}
 fi
-ninja -C "$BUILD/arm64"
+ninja -C "$BUILD/arm64$SUF"
 
 # -------------------------------------------------------------- universal
 
-lipo -create "$BUILD/x86_64/core/libharbor-core.a" \
-             "$BUILD/arm64/core/libharbor-core.a" \
+lipo -create "$BUILD/x86_64$SUF/core/libharbor-core.a" \
+             "$BUILD/arm64$SUF/core/libharbor-core.a" \
      -output "$UNILIB/libharbor-core.a"
 lipo -info "$UNILIB/libharbor-core.a"
 

@@ -14,7 +14,7 @@ APP="$BUILD/Harbor.app"
 source "$SRC/scripts/env-macos.sh"
 
 # 1. universal core 保持最新
-bash "$SRC/scripts/build-macos-core.sh" "$SRC" "$BUILD" >/dev/null
+bash "$SRC/scripts/build-macos-core.sh" "$SRC" "$BUILD" "${2:-${1#--}}" >/dev/null
 
 LINKTXT="$BUILD/link-line.txt"
 LINK=$(tr '\n' ' ' < "$LINKTXT" | tr -d '\\' | tr ' ' '\n' | grep -v '^-pthread$' | tr '\n' ' ')
