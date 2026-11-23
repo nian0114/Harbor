@@ -16,6 +16,7 @@ final class VaultTab: TermTab {
     private var knownPage: KnownPage?
     private var logsPage: LogsPage?
     private var forwardPage: ForwardPage?
+    private var sharePage: SharePage?
     private var accountPage: AccountPage?
 
     init() {
@@ -68,6 +69,7 @@ final class VaultTab: TermTab {
         knownPage?.removeFromSuperview(); knownPage = nil
         logsPage?.removeFromSuperview(); logsPage = nil
         forwardPage?.removeFromSuperview(); forwardPage = nil
+        sharePage?.removeFromSuperview(); sharePage = nil
         accountPage?.removeFromSuperview(); accountPage = nil
         if sec == "hosts" {
             let p = HostsPage(frame: area.bounds)
@@ -132,6 +134,13 @@ final class VaultTab: TermTab {
             p.autoresizingMask = [.width, .height]
             area.addSubview(p)
             forwardPage = p
+            return
+        }
+        if sec == "shared" {
+            let p = SharePage(frame: area.bounds)
+            p.autoresizingMask = [.width, .height]
+            area.addSubview(p)
+            sharePage = p
             return
         }
         if sec == "account" {

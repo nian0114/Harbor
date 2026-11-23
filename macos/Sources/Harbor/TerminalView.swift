@@ -48,6 +48,14 @@ final class TerminalView: NSView, NSTextInputClient {
     var padX: CGFloat = 12, padY: CGFloat = 10
     var optionIsMeta = false
     var session: Session?
+    /// FR-12 viewer：外部 vt（与 session 模式互斥，对齐 ext_vt）。
+    /// vt 由 ShareService.PeerCtx 拥有 —— 释放前必须 setExternal(nil)
+    /// （对齐 hb_share_page_dispose 先摘 vt 再 release_peer）。
+    var extVt: OpaquePointer?
+    /// ext 模式下 false=只读：可打印输入走 onDeadInput，其余丢弃
+    /// （对齐 ext_writable + dead-input）。
+    var extWritable = false
+    var onDeadInput: ((String) -> Void)?
     var onSizeChange: ((Int, Int) -> Void)?
     /// 广播输入镜像（Workspace）：用户输入在发给自己 session 之外，
     /// 经此回调转发给其它 pane（对齐 hb_terminal_set_input_mirror）。
@@ -68,6 +76,15 @@ final class TerminalView: NSView, NSTextInputClient {
     private var findGen: UInt64 = 0
     private var totalPushed: Int64 = 0
     private var findHash = 0
+
+    /// 渲染/输入统一入口：ext_vt 优先，否则 session vt
+    /// （对齐 hb-terminal term_vt()）。
+    var vt: OpaquePointer? { extVt ?? session?.vt }
+    /// ext 只读（对齐 ext_dead()）。
+    private var extDead: Bool { extVt != nil && !extWritable }
+    /// 单元格像素（share viewer letterbox 用）。
+    func cellSizePx() -> NSSize { NSSize(width: geom.cellW,
+                                         height: geom.cellH) }
 
     private var geom = CellGeom(cellW: 8, cellH: 16, padX: 12, padY: 10,
                                 baseline: 13)
@@ -200,7 +217,7 @@ final class TerminalView: NSView, NSTextInputClient {
 
     // ---- vt 快照（锁内只做 memcpy）----
     private func snapshot() {
-        guard let vt = session?.vt else { return }
+        guard let vt = self.vt else { return }
         let t0 = ProcessInfo.processInfo.systemUptime
         hb_vt_lock(vt)
         var vr: Int32 = 0, vc: Int32 = 0
@@ -280,7 +297,7 @@ final class TerminalView: NSView, NSTextInputClient {
         findActive = true
         findNeedle = needle
         findMs = []; findCur = -1
-        if !needle.isEmpty, let vt = session?.vt {
+        if !needle.isEmpty, let vt = self.vt {
             hb_vt_lock(vt)
             findGen = hb_vt_generation(vt)
             totalPushed = Int64(hb_vt_total_pushed(vt))
@@ -610,7 +627,7 @@ final class TerminalView: NSView, NSTextInputClient {
 
     func copySelection() {
         guard hasSel, let a = selAnchor, let c = selCaret,
-              let vt = session?.vt else { return }
+              let vt = self.vt else { return }
         hb_vt_lock(vt); defer { hb_vt_unlock(vt) }
         let p0 = (a.row, a.col) <= (c.row, c.col) ? a : c
         let p1 = (a.row, a.col) <= (c.row, c.col) ? c : a
@@ -634,7 +651,7 @@ final class TerminalView: NSView, NSTextInputClient {
         let p = convert(e.locationInWindow, from: nil)
         blockSel = e.modifierFlags.contains(.option)
         let c = cellAt(p)
-        if e.clickCount == 2, let vt = session?.vt {
+        if e.clickCount == 2, let vt = self.vt {
             hb_vt_lock(vt)
             var l = c.col, r = c.col
             while l > 0 && cellNonSpace(vt, srow: c.row, col: l-1) { l -= 1 }
@@ -680,7 +697,7 @@ final class TerminalView: NSView, NSTextInputClient {
 
     private func sendMouse(_ p: NSPoint, button: Int32, pressed: Bool,
                            mods: NSEvent.ModifierFlags) {
-        guard let s = session, let vt = s.vt else { return }
+        guard !extDead, let vt = self.vt else { return }
         guard hb_vt_mouse_mode(vt) != 0 else { return }
         var (row, col) = geom.cellAt(p)
         row = min(max(row, 0), gridRows - 1)
@@ -690,10 +707,12 @@ final class TerminalView: NSView, NSTextInputClient {
     }
 
     override func scrollWheel(with e: NSEvent) {
-        guard let s = session, let vt = s.vt else { return }
+        guard let vt = self.vt else { return }
+        let roScroll = extDead
         let delta = e.hasPreciseScrollingDeltas
             ? e.scrollingDeltaY : e.scrollingDeltaY * geom.cellH
         if hb_vt_altscreen(vt) {
+            if roScroll { return }   // 只读 viewer：不给 session 发按键
             if hb_vt_mouse_mode(vt) != 0 {
                 let (row, col) = geom.cellAt(
                     convert(e.locationInWindow, from: nil))
@@ -727,23 +746,19 @@ final class TerminalView: NSView, NSTextInputClient {
             onFindClose?()
             return
         }
-        guard let s = session else { return }
+        guard session != nil || extVt != nil else { return }
         let mods = KeyMap.mods(e.modifierFlags.rawValue,
                                optionIsMeta: optionIsMeta)
         if let k = KeyMap.specialKey(e.keyCode) {
-            hb_session_key(s.sess, hb_key(rawValue: UInt32(k)), mods)
+            sendSpecial(k, mods)
             inputMirror?(.key(k, mods))
             return
         }
         if mods & KeyMap.HB_MOD_CTRL != 0,
            let ch = e.charactersIgnoringModifiers?.lowercased().first,
            ch >= "a" && ch <= "z" {
-            var b = UInt8(ch.asciiValue! - 96)
-            withUnsafeBytes(of: &b) {
-                hb_session_write(s.sess, $0.baseAddress!
-                    .assumingMemoryBound(to: CChar.self), 1)
-            }
-            inputMirror?(.raw(Data([b])))
+            sendCtrlByte(ch.asciiValue!)
+            inputMirror?(.raw(Data([ch.asciiValue! - 96])))
             return
         }
         guard let str = e.characters, let uni = str.unicodeScalars.first
@@ -752,18 +767,70 @@ final class TerminalView: NSView, NSTextInputClient {
         if optionIsMeta && e.modifierFlags.contains(.option) {
             m2 |= KeyMap.HB_MOD_ALT
         }
-        hb_session_unichar(s.sess, uni.value, m2)
+        sendUnichar(uni.value, m2)
         inputMirror?(.unichar(uni.value, m2))
+    }
+
+    /// ext 模式输入统一走 vt out_fn（服务层接 hb_share_peer_input）；
+    /// extWritable=false → dead-input 提示（对齐 ext_dead 路径）。
+    private func sendSpecial(_ k: Int32, _ mods: Int32) {
+        if let v = extVt {
+            if extWritable {
+                hb_vt_key(v, hb_key(rawValue: UInt32(k)), mods)
+            }
+            return
+        }
+        guard let s = session else { return }
+        hb_session_key(s.sess, hb_key(rawValue: UInt32(k)), mods)
+    }
+    private func sendCtrlByte(_ letter: UInt8) {
+        if let v = extVt {
+            // vterm 的 ctrl+字母编码即控制字节（对齐 hb_vt_unichar mods）
+            if extWritable {
+                hb_vt_unichar(v, UInt32(letter), KeyMap.HB_MOD_CTRL)
+            }
+            return
+        }
+        guard let s = session else { return }
+        var b = letter - 96
+        withUnsafeBytes(of: &b) {
+            hb_session_write(s.sess, $0.baseAddress!
+                .assumingMemoryBound(to: CChar.self), 1)
+        }
+    }
+    private func sendUnichar(_ u: UInt32, _ mods: Int32) {
+        if let v = extVt {
+            if extWritable {
+                hb_vt_unichar(v, u, mods)
+            } else {
+                onDeadInput?(UnicodeScalar(u).map { String($0) } ?? "")
+            }
+            return
+        }
+        guard let s = session else { return }
+        hb_session_unichar(s.sess, u, mods)
+    }
+    private func sendPasteText(_ str: String) {
+        if let v = extVt {
+            if extWritable {
+                str.withCString { hb_vt_paste(v, $0) }
+            } else {
+                onDeadInput?(str)
+            }
+            return
+        }
+        guard let s = session else { return }
+        str.withCString { hb_session_paste(s.sess, $0) }
     }
 
     func paste() {
         guard let str = NSPasteboard.general.string(forType: .string),
-              let s = session else { return }
-        str.withCString { hb_session_paste(s.sess, $0) }
+              session != nil || extVt != nil else { return }
+        sendPasteText(str)
         inputMirror?(.paste(str))
     }
     override func selectAll(_ sender: Any?) {
-        guard let vt = session?.vt else { return }
+        guard let vt = self.vt else { return }
         hb_vt_lock(vt)
         var r: Int32 = 0, c: Int32 = 0
         hb_vt_size(vt, &r, &c)
@@ -782,9 +849,9 @@ final class TerminalView: NSView, NSTextInputClient {
         let str = (string as? NSAttributedString)?.string
             ?? (string as? String) ?? ""
         unmarkText()
-        guard let s = session else { return }
+        guard session != nil || extVt != nil else { return }
         for scalar in str.unicodeScalars {
-            hb_session_unichar(s.sess, scalar.value, 0)
+            sendUnichar(scalar.value, 0)
             inputMirror?(.unichar(scalar.value, 0))
         }
     }
@@ -830,12 +897,12 @@ final class TerminalView: NSView, NSTextInputClient {
         return window?.convertToScreen(wr) ?? wr
     }
     override func doCommand(by selector: Selector) {
-        guard let s = session else { return }
+        guard session != nil || extVt != nil else { return }
         if selector == #selector(cancelOperation(_:)) {
-            hb_session_key(s.sess, hb_key(rawValue: 4), 0)
+            sendSpecial(4, 0)
             inputMirror?(.key(4, 0))
         } else if selector == #selector(deleteBackward(_:)) {
-            hb_session_key(s.sess, hb_key(rawValue: 3), 0)
+            sendSpecial(3, 0)
             inputMirror?(.key(3, 0))
         }
     }

@@ -149,9 +149,50 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         }
         strip.needsDisplay = true
     }
+    // ---------------- FR-12 viewer tab ----------------
+
+    /// 对齐 hb_share_open_viewer：同 share 的 viewer 已存在时，
+    /// 旧页 ended → 换新，否则释放多余 ctx 并切换。
+    func openViewer(_ ctx: ShareService.PeerCtx, title: String) {
+        if let old = tabs.firstIndex(where: {
+            ($0 as? ShareTab)?.ctx?.shareId == ctx.shareId }) {
+            if let st = tabs[old] as? ShareTab, st.ended {
+                closeTabNow(old)
+            } else {
+                ShareService.shared.releasePeer(ctx)
+                select(old)
+                return
+            }
+        }
+        let t = ShareTab(ctx: ctx, title: title)
+        tabs.append(t)
+        strip.tabs = tabs
+        select(tabs.count - 1)
+    }
+
+    /// ShareTab "离开/关闭"（对齐 on_leave → hb_window_close_tab）。
+    func closeShareTab(_ t: ShareTab) {
+        if let i = tabs.firstIndex(where: { $0 === t }) {
+            closeTabNow(i)
+        }
+    }
+
+    /// 供共享卡片点击切换（对齐 hb_window_switch_tab）。
+    func selectTab(_ t: TermTab) {
+        if let i = tabs.firstIndex(where: { $0 === t }) { select(i) }
+    }
+
+    /// 侧栏分区名 → 切 Vault tab + 分区（share/account 入口用）。
+    func showSectionByName(_ name: String) {
+        if let i = kSections.firstIndex(where: { $0.id == name }) {
+            showSection(i)
+        }
+    }
+
     func closeTab(_ i: Int) {
         guard i < tabs.count, tabs[i].closable else { return }   // pinned 不可关
         let t = tabs[i]
+        if t is ShareTab { closeTabNow(i); return }  // viewer 无确认
         if t.running {
             let a = NSAlert()
             a.messageText = L("会话仍在运行")
