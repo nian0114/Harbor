@@ -8,6 +8,7 @@ final class VaultTab: TermTab {
     let sidebar = SidebarView()
     let sectionArea = NSView()
     private(set) var sidebarVisible = true
+    private var lastSection = -1
     private var hostsPage: HostsPage?
     private var keychainPage: KeychainPage?
     private var appearancePanel: AppearancePanel?
@@ -41,11 +42,23 @@ final class VaultTab: TermTab {
 
     func showSection(_ i: Int) {
         guard i >= 0 && i < kSections.count else { return }
+        lastSection = i
+        // 分区页按 area.bounds 一次性排固定帧：视图树未排布时
+        // bounds 为空 → 子帧全算错（搜索框出界、滚动区负高）。
+        // 先求解约束；仍为空（首启先于 select）→ 下次 runloop 再建。
+        view.layoutSubtreeIfNeeded()
+        let area = sectionArea
+        guard !area.bounds.isEmpty else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.lastSection == i else { return }
+                self.showSection(i)
+            }
+            return
+        }
         let sec = kSections[i].id
         appearancePanel?.removeFromSuperview(); appearancePanel = nil
         hostsPage?.removeFromSuperview(); hostsPage = nil
         keychainPage?.removeFromSuperview(); keychainPage = nil
-        let area = sectionArea
         if sec == "hosts" {
             let p = HostsPage(frame: area.bounds)
             p.autoresizingMask = [.width, .height]
