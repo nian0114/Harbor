@@ -100,12 +100,9 @@ final class RdCanvasView: NSView {
         guard let buf else { return }
         memset(buf, 0, bufSize)
         needFull = true
-        let info = CGBitmapInfo(rawValue:
-            CGImageAlphaInfo.noneSkipLast.rawValue
-            | CGBitmapInfo.byteOrder32Little.rawValue)
         ctx = CGContext(data: buf, width: w, height: h, bitsPerComponent: 8,
                         bytesPerRow: w * 4, space: CGColorSpace(name:
-                            CGColorSpace.sRGB)!, bitmapInfo: info.rawValue)
+                            CGColorSpace.sRGB)!, bitmapInfo: RdKit.fbBitmapInfo)
     }
 
     override func draw(_ dirty: NSRect) {

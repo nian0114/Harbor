@@ -150,6 +150,34 @@ final class RdKitTests: XCTestCase {
         XCTAssertEqual(RdKit.hwheelMask(dx: 1), 1 << 5)  // 左
     }
 
+    // ---------- 帧缓冲像素格式（BGRX → CGBitmapInfo） ----------
+    /// core fb 内存字节 B,G,R,X（rd.h）：fbBitmapInfo 必须按
+    /// BGRX 解释——红/绿/蓝各归各通道，X 丢弃。用真实 CGContext
+    /// 往返一个已知像素验证（此前 noneSkipLast 把 X 当 R：白窗变青）。
+    func testFbPixelFormat() throws {
+        // B=10,G=20,R=30,X=0 的一个像素。
+        var px: [UInt8] = [10, 20, 30, 0]
+        guard let ctx = CGContext(data: &px, width: 1, height: 1,
+                                  bitsPerComponent: 8, bytesPerRow: 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: RdKit.fbBitmapInfo),
+              let img = ctx.makeImage()
+        else { return XCTFail("ctx/img") }
+        // 画进一个确定的 RGBA 读出缓冲。
+        var out = [UInt8](repeating: 0, count: 4)
+        let outInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+            | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let octx = CGContext(data: &out, width: 1, height: 1,
+                                   bitsPerComponent: 8, bytesPerRow: 4,
+                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                   bitmapInfo: outInfo)
+        else { return XCTFail("out ctx") }
+        octx.draw(img, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        XCTAssertEqual(Int(out[0]), 30, "R")   // 红不能丢（旧 bug: 0）
+        XCTAssertEqual(Int(out[1]), 20, "G")
+        XCTAssertEqual(Int(out[2]), 10, "B")
+    }
+
     // ---------- 回环判定（隧道 dest 语义） ----------
     func testIsLoopback() {
         XCTAssertTrue(RdKit.isLoopback(""))

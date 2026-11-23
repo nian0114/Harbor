@@ -1,8 +1,17 @@
+import CoreGraphics
 import Foundation
 
 /// 远程桌面纯逻辑（对齐 linux hb-desktop-page.c 的 helper）——
 /// 无 UI 依赖，供页面与测试复用。
 public enum RdKit {
+
+    // ---------- 帧缓冲像素格式 ----------
+    /// core fb 是 32 位 BGRX（内存字节 B,G,R,X = LE 字 0xXXRRGGBB，
+    /// core/include/harbor/rd.h）：X 在最高字节，跳过第一个分量。
+    /// 注意 noneSkipLast 会把字节3（X=0）读作 R——红通道全丢、白窗变青。
+    public static let fbBitmapInfo: UInt32 =
+        CGImageAlphaInfo.noneSkipFirst.rawValue
+        | CGBitmapInfo.byteOrder32Little.rawValue
 
     // ---------- 画质档位（hb_rd_quality：0 fast 1 balanced 2 high） ----------
     public static func qualityOf(_ s: String) -> Int {
