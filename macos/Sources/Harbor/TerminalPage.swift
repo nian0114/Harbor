@@ -217,7 +217,7 @@ class TermTab: NSObject {
 
     func start(reuse: OpaquePointer? = nil) {
         guard let term else { return }
-        let sb = Int32(Vault.shared.setting("term_scrollback") ?? "10000")
+        let sb = Int32(Vault.shared.setting("scrollback") ?? "10000")
             ?? 10000
         let s = Session(rows: Int32(term.rows()), cols: Int32(term.cols()),
                         scrollback: sb, reuse: reuse)

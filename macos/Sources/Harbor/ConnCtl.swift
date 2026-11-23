@@ -321,7 +321,7 @@ final class ConnCtl {
             cleanupCtx(); return
         }
         let s = Session(sshOpts: &o, rows: rows, cols: cols,
-                        scrollback: Int32(Vault.shared.setting("term_scrollback")
+                        scrollback: Int32(Vault.shared.setting("scrollback")
                             ?? "10000") ?? 10000)
         sess = s
         // onEvent 由 delegate（SSHTab）设置：先 handleEvent，再终端事件

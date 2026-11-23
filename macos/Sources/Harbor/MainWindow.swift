@@ -591,16 +591,16 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         let v = Vault.shared
         for t in tabs {
             for term in t.allTerms {
-                term.fontName = v.setting("term_font") ?? "Menlo"
+                term.fontName = v.setting("font_family") ?? "Menlo"
                 term.fontSize = CGFloat(
-                    Double(v.setting("term_font_size") ?? "14") ?? 14)
+                    Double(v.setting("font_size") ?? "14") ?? 14)
                 term.lineHeight = CGFloat(
-                    Double(v.setting("term_line_height") ?? "1.15") ?? 1.15)
+                    Double(v.setting("line_height") ?? "1.15") ?? 1.15)
                 term.cursorStyle =
-                    (Int(v.setting("term_cursor") ?? "0") ?? 0) + 1
+                    (Int(v.setting("cursor_style") ?? "0") ?? 0) + 1
                 term.optionIsMeta =
-                    (v.setting("term_option_meta") ?? "0") == "1"
-                term.theme = TermTheme.for(v.setting("term_theme"))
+                    (v.setting("option_meta") ?? "0") == "1"
+                term.theme = TermTheme.for(v.setting("theme"))
                 // 尺寸变化 resize 自己的 session（多 pane 各管各）
                 term.onSizeChange = { [weak term] r, c in
                     term?.session.map {

@@ -37,6 +37,7 @@ final class Vault {
             NSLog("hb_vault_open failed: %d", r.rawValue)
         }
         vault = v
+        if let v { migrateTermKeys(v) }
         // 上次运行被 kill/崩溃留下的“进行中”日志行 → 标记为中断（同 linux startup）
         if let v { _ = hb_vault_log_sweep(v) }
         // 变更回调（同 Linux hb-store "changed" 信号）：log/history/对象写入
@@ -171,6 +172,22 @@ final class Vault {
     }
 
     // ---- 设置（vault settings 单例对象）----
+    /// M1a term_* 旧键 → 共享键一次性迁移（表见 SettingsMigration）。
+    private func migrateTermKeys(_ v: OpaquePointer) {
+        var o: OpaquePointer?
+        guard hb_vault_settings(v, &o) == HB_OK, let o else { return }
+        var dirty = false
+        for (old, new) in SettingsMigration.termKeys {
+            guard let ov = hb_obj_get_str(o, old) else { continue }
+            hb_obj_set_str(o, old, nil)
+            dirty = true
+            if hb_obj_get_str(o, new) == nil {
+                hb_obj_set_str(o, new, ov)
+            }
+        }
+        if dirty { _ = hb_vault_put(v, o) }
+        hb_obj_free(o)
+    }
     func setting(_ k: String) -> String? {
         guard let v = vault else { return nil }
         var o: OpaquePointer?

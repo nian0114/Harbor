@@ -38,37 +38,37 @@ final class AppearancePanel: NSView {
 
         let fonts = NSPopUpButton()
         fonts.addItems(withTitles: ["Menlo", "Monaco", "SF Mono", "Courier New"])
-        fonts.selectItem(withTitle: v.setting("term_font") ?? "Menlo")
+        fonts.selectItem(withTitle: v.setting("font_family") ?? "Menlo")
         fonts.target = self; fonts.action = #selector(changed)
         row(L("终端字体"), fonts)
         let size = NSTextField()
-        size.stringValue = v.setting("term_font_size") ?? "14"
+        size.stringValue = v.setting("font_size") ?? "14"
         size.target = self; size.action = #selector(changed)
         row(L("字号"), size)
         let lh = NSTextField()
-        lh.stringValue = v.setting("term_line_height") ?? "1.15"
+        lh.stringValue = v.setting("line_height") ?? "1.15"
         lh.target = self; lh.action = #selector(changed)
         row(L("行高"), lh)
         let theme = NSPopUpButton()
         theme.addItems(withTitles: TermTheme.all.map { $0.name })
-        let selTheme = TermTheme.for(v.setting("term_theme")).name
+        let selTheme = TermTheme.for(v.setting("theme")).name
         theme.selectItem(withTitle: selTheme)
         theme.tag = 1
         theme.target = self; theme.action = #selector(changed)
         row(L("终端配色"), theme)
         let sb = NSTextField()
-        sb.stringValue = v.setting("term_scrollback") ?? "10000"
+        sb.stringValue = v.setting("scrollback") ?? "10000"
         sb.target = self; sb.action = #selector(changed)
         row(L("回滚行数"), sb)
         let cursor = NSPopUpButton()
         cursor.tag = 2
         cursor.addItems(withTitles: [L("块"), L("下划线"), L("竖线")])
-        cursor.selectItem(at: Int(v.setting("term_cursor") ?? "0") ?? 0)
+        cursor.selectItem(at: Int(v.setting("cursor_style") ?? "0") ?? 0)
         cursor.target = self; cursor.action = #selector(changed)
         row(L("光标样式"), cursor)
         let meta = NSButton(checkboxWithTitle: L("⌥ 键作为 Meta"),
                             target: self, action: #selector(changed))
-        meta.state = (v.setting("term_option_meta") ?? "0") == "1"
+        meta.state = (v.setting("option_meta") ?? "0") == "1"
             ? .on : .off
         meta.frame = NSRect(x: 24, y: y, width: 220, height: 22)
         addSubview(meta)
@@ -229,9 +229,9 @@ final class AppearancePanel: NSView {
             switch p.tag {
             case 1:
                 let t = TermTheme.all[max(0, p.indexOfSelectedItem)]
-                v.setSetting("term_theme", t.id)
+                v.setSetting("theme", t.id)
             case 2:
-                v.setSetting("term_cursor",
+                v.setSetting("cursor_style",
                              String(p.indexOfSelectedItem))
             case 3:
                 let th = ["light","dark","system"][max(0,
@@ -250,11 +250,11 @@ final class AppearancePanel: NSView {
                 }
             default:
                 if let t = p.titleOfSelectedItem {
-                    v.setSetting("term_font", t)
+                    v.setSetting("font_family", t)
                 }
             }
         } else if let b = s as? NSButton {
-            v.setSetting("term_option_meta", b.state == .on ? "1" : "0")
+            v.setSetting("option_meta", b.state == .on ? "1" : "0")
         } else if let t = s as? NSTextField {
             if t.tag == 5 {
                 if let n = Int(t.stringValue), (1...8).contains(n) {
@@ -262,11 +262,11 @@ final class AppearancePanel: NSView {
                 }
             } else if Double(t.stringValue) != nil {
                 if t.stringValue.contains(".") {
-                    v.setSetting("term_line_height", t.stringValue)
+                    v.setSetting("line_height", t.stringValue)
                 } else if let n = Int(t.stringValue), n > 1000 {
-                    v.setSetting("term_scrollback", t.stringValue)
+                    v.setSetting("scrollback", t.stringValue)
                 } else {
-                    v.setSetting("term_font_size", t.stringValue)
+                    v.setSetting("font_size", t.stringValue)
                 }
             }
         }
