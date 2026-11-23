@@ -54,6 +54,11 @@ fi
     "$APP/Contents/Resources"
 rm -rf "$APP/Contents/Resources/AppIcon.iconset"
 
+# 3.2 en 语言表：po/en.po → Resources/en.strings（OpenStep plist，
+# HarborKit.Lang.loadEn 直接 NSDictionary 解析；msgfmt 不存在于 Mac）。
+python3 "$SRC/scripts/po2strings.py" "$SRC/po/en.po" \
+    "$APP/Contents/Resources/en.strings"
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
