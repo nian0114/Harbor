@@ -428,6 +428,55 @@ final class DevServer {
             if !arg.isEmpty && id == nil { return "ERR no-rule" }
             win?.vaultTab.forwardRef?.devOpenForm(id)
             return "OK"
+        /* ---- M6 账号同步 dev 钩子（对齐 linux app.sync-auth/
+         *      sync-state/resolve/dev-words/objcount） ---- */
+        case "sync-state":
+            return (win?.vaultTab.accountRef?.devState
+                    ?? "ERR no-page")
+        case "sync-auth":                        // op|srv|em|pw|totp|words|newpw|extra
+            return cmdSyncAuth(arg)
+        case "sync-auth-result":                 // 最近一次异步结果
+            return lastSyncAuthResult
+        case "sync-kick":
+            SyncService.shared.syncNow(); return "OK"
+        case "sync-scope":                       // <scope> on|off
+            let kv = arg.split(separator: " ")
+            guard kv.count == 2 else { return "ERR usage" }
+            SyncService.shared.setScope(String(kv[0]),
+                                        kv[1] == "on")
+            return "OK"
+        case "resolve":                          // <id> other|keep
+            let kv = arg.split(separator: " ")
+            guard kv.count == 2,
+                  let s = SyncService.shared.sync
+            else { return "ERR usage" }
+            if kv[1] == "other" {
+                kv[0].withCString {
+                    _ = hb_sync_conflict_take_other(s, $0) }
+                SyncService.shared.syncNow()
+            } else {
+                kv[0].withCString {
+                    _ = hb_sync_conflict_keep_local(s, $0) }
+            }
+            return "RESOLVE-RESULT id=\(kv[0]) mode=\(kv[1])"
+        case "dev-words":                        // <24 words> → 恢复码网格
+            win?.vaultTab.accountRef?.devWords(arg)
+            return "OK"
+        case "objcount":                         // <type> → 范围内对象数
+            return "OK \(Vault.shared.list(arg).count)"
+        case "mkobj":                            // type|k=v|k=v…（#i=int）
+            return cmdMkobj(arg)
+        case "setfield":                         // id|k=v（#i=int）
+            return cmdSetfield(arg)
+        case "setsecret":                        // id|field|text（@file）
+            return cmdSetsecret(arg)
+        case "chksecret":                        // id|field → len
+            let kv = arg.components(separatedBy: "|")
+            guard kv.count == 2,
+                  let sec = Vault.shared.secret(kv[0], kv[1])
+            else { return "CHKSECRET len=0" }
+            return "CHKSECRET id=\(kv[0]) field=\(kv[1]) " +
+                   "len=\(sec.count)"
         case "rd":                               // 桌面页状态 JSON
             return "OK " + (selDesktop()?.devState ?? "{}")
         case "rd-type":                          // <text>：逐字符 keysym
@@ -900,6 +949,121 @@ final class DevServer {
         hb_obj_free(o)
         if start { ForwardMgr.shared.start(id) }
         return "OK \(id)"
+    }
+    // ---- M6 sync dev ----
+    private var lastSyncAuthResult = "(none)"
+    /// `sync-auth op|server|email|pw|totp|words|newpw|extra` —
+    /// 对齐 linux app.sync-auth；结果异步落 lastSyncAuthResult。
+    private func cmdSyncAuth(_ arg: String) -> String {
+        let f = arg.components(separatedBy: "|")
+        guard !f.isEmpty else { return "ERR bad-op" }
+        let s = SyncService.shared
+        func fld(_ i: Int) -> String? { i < f.count ? f[i] : nil }
+        func devCb(_ r: SyncService.OpResult) {
+            var t = "SYNC-AUTH-RESULT ok=\(r.ok ? 1 : 0) " +
+                    "need_merge=\(r.needMerge ? 1 : 0) " +
+                    "code=\(r.code ?? "-") msg=\(r.message ?? "-")"
+            if let w = r.words { t += "\nSYNC-AUTH-WORDS \(w)" }
+            if let sec = r.totpSecret {
+                t += "\nSYNC-AUTH-TOTP secret=\(sec) " +
+                     "uri=\(r.totpUri ?? "-")"
+            }
+            if let ds = r.devices {
+                for d in ds {
+                    t += "\nDEVICE id=\(d.id) name=\(d.name) " +
+                         "platform=\(d.platform) current=\(d.current)"
+                }
+            }
+            lastSyncAuthResult = t
+            // dev 驱动：need_merge 自动确认合并（同 linux dev_auth_cb）
+            if r.needMerge { s.confirmMerge(true) }
+        }
+        switch f[0] {
+        case "login" where fld(3) != nil:
+            s.login(server: f[1], email: f[2], password: f[3],
+                    totp: fld(4), cb: devCb)
+        case "register" where fld(3) != nil:
+            s.register(server: f[1], email: f[2], password: f[3],
+                       cb: devCb)
+        case "recover" where fld(5) != nil && fld(6) != nil:
+            s.recover(server: f[1], email: f[2], words: f[5],
+                      newPassword: f[6], cb: devCb)
+        case "rotate" where fld(3) != nil:
+            s.rotateRecovery(password: f[3], cb: devCb)
+        case "password" where fld(3) != nil && fld(6) != nil:
+            s.changePassword(old: f[3], new: f[6], cb: devCb)
+        case "logout":
+            s.logout(fld(7) == "wipe")
+            lastSyncAuthResult = "SYNC-AUTH-RESULT ok=1 logout"
+        case "totp-setup":
+            s.totpSetup(cb: devCb)
+        case "totp-enable" where fld(7) != nil:
+            s.totpEnable(f[7], cb: devCb)
+        case "totp-disable" where fld(7) != nil:
+            s.totpDisable(f[7], cb: devCb)
+        case "revoke" where fld(7) != nil:
+            s.revoke(f[7], wipe: fld(4) == "wipe", cb: devCb)
+        case "devices":
+            s.devices(cb: devCb)
+        case "kick":
+            s.syncNow()
+        default:
+            return "ERR bad-op"
+        }
+        return "OK pending"
+    }
+    /// `mkobj type|k=v|k=v…` → 建 vault 对象返回 id（对齐 linux mkobj）。
+    private func cmdMkobj(_ arg: String) -> String {
+        let f = arg.components(separatedBy: "|")
+        guard let type = f.first, !type.isEmpty,
+              let o = Vault.shared.newObj(type)
+        else { return "ERR usage" }
+        defer { hb_obj_free(o) }
+        for kv in f.dropFirst() {
+            guard let eq = kv.firstIndex(of: "=") else { continue }
+            let k = String(kv[kv.startIndex..<eq])
+            var v = String(kv[kv.index(after: eq)...])
+            if v.hasSuffix("#i") {
+                v.removeLast(2)
+                hb_obj_set_int(o, k, Int64(v) ?? 0)
+            } else {
+                hb_obj_set_str(o, k, v)
+            }
+        }
+        Vault.shared.put(o)
+        return "MKOBJ-RESULT id=\(hb_obj_id(o).str) type=\(type)"
+    }
+    /// `setfield id|k=v`（#i=int，对齐 linux setfield）。
+    private func cmdSetfield(_ arg: String) -> String {
+        let f = arg.components(separatedBy: "|")
+        guard f.count == 2, let eq = f[1].firstIndex(of: "="),
+              let o = Vault.shared.get(f[0])
+        else { return "ERR" }
+        defer { hb_obj_free(o) }
+        let k = String(f[1][f[1].startIndex..<eq])
+        var v = String(f[1][f[1].index(after: eq)...])
+        if v.hasSuffix("#i") {
+            v.removeLast(2)
+            hb_obj_set_int(o, k, Int64(v) ?? 0)
+        } else {
+            hb_obj_set_str(o, k, v)
+        }
+        Vault.shared.put(o)
+        return "SETFIELD-RESULT id=\(f[0]) ok=1"
+    }
+    /// `setsecret id|field|text`（text 以 @ 开头=读文件，对齐 linux）。
+    private func cmdSetsecret(_ arg: String) -> String {
+        let f = arg.components(separatedBy: "|")
+        guard f.count == 3 else { return "ERR usage" }
+        var text = f[2]
+        if text.hasPrefix("@"),
+           let d = FileManager.default.contents(
+               atPath: String(text.dropFirst())),
+           let s = String(data: d, encoding: .utf8) {
+            text = s
+        }
+        Vault.shared.setSecret(f[0], f[1], text)
+        return "SETSECRET-RESULT id=\(f[0]) field=\(f[1]) ok=1"
     }
     /// <id|显示行号> → 规则 id（行号按列表顺序）。
     private func fwdRuleId(_ s: String) -> String? {
