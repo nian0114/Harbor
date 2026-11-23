@@ -1719,6 +1719,22 @@ hb_err hb_vault_log_export_json(hb_vault *v, char **out)
     return *out ? HB_OK : HB_ERR_NOMEM;
 }
 
+hb_err hb_vault_log_sweep(hb_vault *v)
+{
+    int rc;
+    if (!v) return HB_ERR_INVALID;
+    rc = sqlite3_exec(v->db,
+        "UPDATE logs SET result='interrupted',"
+        " reason='process exited',"
+        " duration_s=MAX(0,"
+        "   CAST(strftime('%s','now') AS INTEGER) - ts/1000)"
+        " WHERE duration_s < 0",
+        NULL, NULL, NULL);
+    if (rc == SQLITE_OK && sqlite3_changes(v->db))
+        notify(v, "log", NULL);
+    return rc == SQLITE_OK ? HB_OK : HB_ERR_DB;
+}
+
 hb_err hb_vault_log_purge(hb_vault *v, int retention_days)
 {
     sqlite3_stmt *st;

@@ -126,6 +126,9 @@ hb_err hb_vault_log_export_csv(hb_vault *v, char **out);
 hb_err hb_vault_log_export_json(hb_vault *v, char **out);
 /* retention_days <= 0 表示不清理。 */
 hb_err hb_vault_log_purge(hb_vault *v, int retention_days);
+/* 进程崩溃/被杀留下的未收尾行（duration_s<0）→ result="interrupted"，
+ * duration 记为 ts 到当前的上限。启动时调用一次。 */
+hb_err hb_vault_log_sweep(hb_vault *v);
 /* 全量删除日志（“清空日志”）；与 purge 不同不受保留期影响。 */
 hb_err hb_vault_log_clear(hb_vault *v);
 
