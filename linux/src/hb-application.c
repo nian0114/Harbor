@@ -6,6 +6,7 @@
 #include "hb-term-page.h"
 #include "hb-ssh-page.h"
 #include "hb-sftp-view.h"
+#include "hb-snippets-view.h"
 #include "hb-term-theme.h"
 #include "hb-notify.h"
 #include "hb-icons.h"
@@ -1033,6 +1034,21 @@ static void on_dev_ui(GSimpleAction *a, GVariant *param, gpointer ud)
     if (!strcmp(f[0], "section") && f[1]) {
         GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
         if (vp) hb_vault_page_set_section(HB_VAULT_PAGE(vp), f[1]);
+    } else if (!strcmp(f[0], "hist")) {
+        /* dev-ui hist|1 → 打开 Snippets 页的 Shell History 子页 */
+        GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
+        GtkWidget *c, *sv = NULL;
+        if (vp) hb_vault_page_set_section(HB_VAULT_PAGE(vp), "snippets");
+        for (c = vp ? gtk_widget_get_first_child(vp) : NULL; c;
+             c = gtk_widget_get_next_sibling(c))
+            if (GTK_IS_STACK(c)) {
+                sv = gtk_stack_get_child_by_name(GTK_STACK(c),
+                                                 "snippets");
+                break;
+            }
+        if (HB_IS_SNIPPETS_VIEW(sv))
+            hb_snippets_view_show_hist(HB_SNIPPETS_VIEW(sv),
+                                       f[1] && !strcmp(f[1], "1"));
     } else if (!strcmp(f[0], "drawer") && f[1]) {
         GtkWidget *vp = hb_window_vault_page(HB_WINDOW(win));
         GtkWidget *hv = vp ? hb_vault_page_hosts_view(HB_VAULT_PAGE(vp))

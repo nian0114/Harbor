@@ -892,6 +892,17 @@ static void on_show_hist(GtkButton *b, gpointer ud)
     }
 }
 
+/* dev 钩子：等同点击 “Shell History”/返回按钮。 */
+void hb_snippets_view_show_hist(HbSnippetsView *v, gboolean hist)
+{
+    gboolean cur;
+    g_return_if_fail(HB_IS_SNIPPETS_VIEW(v));
+    cur = !strcmp(gtk_stack_get_visible_child_name(GTK_STACK(v->stack)),
+                  "hist");
+    if (cur != hist)
+        on_show_hist(NULL, v);
+}
+
 /* ============================ 构建 ============================ */
 
 static GtkWidget *build_snips_page(HbSnippetsView *v)
