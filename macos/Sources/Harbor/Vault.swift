@@ -37,6 +37,8 @@ final class Vault {
             NSLog("hb_vault_open failed: %d", r.rawValue)
         }
         vault = v
+        // 上次运行被 kill/崩溃留下的“进行中”日志行 → 标记为中断（同 linux startup）
+        if let v { _ = hb_vault_log_sweep(v) }
         // 变更回调（同 Linux hb-store "changed" 信号）：log/history/对象写入
         // → 通知各页 reload。回调可能发自会话线程，投递前切回主队列。
         if let v {

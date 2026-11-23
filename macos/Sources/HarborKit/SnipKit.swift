@@ -59,6 +59,7 @@ public enum LogFormat {
         if durationS < 0 || r == "connecting" { return (L("进行中"), "run") }
         if r == "ok" { return (L("成功"), "on") }
         if r == "cancelled" { return (L("已取消"), "off") }
+        if r == "interrupted" { return (L("中断"), "wait") }
         return (L("失败"), "err")
     }
     private static let reasonMap: [(String, String)] = [
@@ -70,6 +71,8 @@ public enum LogFormat {
         ("hostkey_rejected", L("主机密钥被拒绝")),
         ("timeout", L("超时")),
         ("cancelled", L("已取消")),
+        ("interrupted", L("中断")),
+        ("process exited", L("进程已退出")),
         ("key confirm denied", L("已取消")),
         ("ok", ""),
         ("connecting", L("进行中")),

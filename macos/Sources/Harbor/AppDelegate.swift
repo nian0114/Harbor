@@ -56,6 +56,12 @@ final class App: NSObject, NSApplicationDelegate {
         return .terminateNow
     }
 
+    // terminateNow 不保证 windowWillClose —— 显式 kill 全部 tab
+    // （ConnCtl.join 收尾日志行；等价 linux hb_conn_ctl_dispose）。
+    func applicationWillTerminate(_ n: Notification) {
+        win.tabs.forEach { $0.kill() }
+    }
+
     private func item(_ t: String, _ a: Selector?, _ k: String,
                       _ m: NSEvent.ModifierFlags = .command,
                       id: String? = nil) -> NSMenuItem {

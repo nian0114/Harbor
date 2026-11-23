@@ -162,6 +162,10 @@ final class ConnCtl {
             huser = hb_obj_get_str(h, "user").str
             hb_obj_free(h)
         }
+        /* 重连/重试替换旧 session：被 free 的会话其 EXIT 事件随队列
+         * 排空而丢失 —— 先收尾旧日志行（linux 靠 orphan sweep 兜
+         * 底，mac 在替换点直接收尾）。 */
+        logFinish(wasConnected ? "ok" : "cancelled", nil)
         logStart()
         let confirm = collectConfirmKeys()
         if confirm.isEmpty { continueConnect(rows: rows, cols: cols) }
@@ -478,8 +482,10 @@ final class ConnCtl {
     }
 
     private func onExit(_ ev: UnsafePointer<hb_sess_event>) {
-        guard wasConnected else { return }
-        logFinish("ok", ev.pointee.text.str)
+        // 对齐 linux：未连接即退出 → cancelled；已连接 → ok。
+        if !wasConnected { pendKeyId = nil }
+        logFinish(wasConnected ? "ok" : "cancelled",
+                  ev.pointee.text.str)
         delegate?.connExited(self, code: Int(ev.pointee.code),
                              reason: ev.pointee.text.str)
     }
@@ -515,8 +521,12 @@ final class ConnCtl {
     }
     func join() {
         reconnectTimer?.invalidate()
+        // dispose 对齐：销毁时仍开着的日志行收尾（tab 关闭/退出）
+        logFinish(wasConnected ? "ok" : "cancelled", nil)
         sess?.free_(); sess = nil
     }
+
+    deinit { join() }
 
     // ---------- vault 日志 ----------
     private func logStart() {
