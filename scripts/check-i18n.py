@@ -22,6 +22,8 @@ ALLOWLIST = [
      'kbi password-prompt detection keyword, matched against server text'),
     ('macos/Sources/HarborKit/PaletteRank.swift', '"全局"',
      'snippet scope value written by the vault, matched as data not UI'),
+    ('macos/Tests/HarborTests/PaletteRankTests.swift', '"全局"',
+     'test data mirroring the vault snippet scope value'),
 ]
 
 def scan(src):
