@@ -9,7 +9,7 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     init() {
         super.init(frame: .zero)
         let col = NSTableColumn(identifier: .init("s"))
-        col.width = 168
+        col.width = 208
         table.addTableColumn(col)
         table.headerView = nil
         table.rowHeight = 30
@@ -45,11 +45,11 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         foot.addSubview(f1); foot.addSubview(f2)
         let sep = NSView()
         sep.wantsLayer = true
-        sep.layer?.backgroundColor = Theme.line.color.cgColor
+        sep.layer?.hbBg = "line"
         sep.translatesAutoresizingMaskIntoConstraints = false
         addSubview(sep); addSubview(foot)
         wantsLayer = true
-        layer?.backgroundColor = Theme.sidebar.color.cgColor
+        layer?.hbBg = "sidebar"
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -99,8 +99,11 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let s = kSections[row]
         let v = NSTableCellView()
         let iv = NSImageView(image: hbIcon(s.icon, size: 15,
-                                           tint: Theme.text.color))
+                                           tint: Theme.dyn("text")))
         iv.translatesAutoresizingMaskIntoConstraints = false
+        // kSections 全局表在 Lang.apply 前可能已求值，渲染处再查
+        // 一次（幂等：已译串查表不中原样返回）。
+        // i18n-dynamic
         let tf = NSTextField(labelWithString: L(s.title))
         tf.font = .systemFont(ofSize: 12.5)
         tf.translatesAutoresizingMaskIntoConstraints = false

@@ -18,7 +18,7 @@ final class SharePage: NSView {
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        layer?.backgroundColor = Theme.page.color.cgColor
+        layer?.hbBg = "page"
 
         // 顶部工具行：右端"通过配对码加入"
         let bar = NSView()
@@ -71,7 +71,7 @@ final class SharePage: NSView {
             secTitle(L("来自其它设备的共享（同账号自动发现）")))
         remoteEmpty = NSTextField(labelWithString: L("暂无可用共享"))
         remoteEmpty.font = .systemFont(ofSize: 11)
-        remoteEmpty.textColor = Theme.termDim.color
+        remoteEmpty.hbText = "termDim"
         content.addArrangedSubview(remoteEmpty)
         remoteBox = box(); content.addArrangedSubview(remoteBox)
 
@@ -132,7 +132,7 @@ final class SharePage: NSView {
     private func secTitle(_ t: String) -> NSTextField {
         let l = NSTextField(labelWithString: t)
         l.font = .systemFont(ofSize: 12, weight: .semibold)
-        l.textColor = Theme.termDim.color
+        l.hbText = "termDim"
         return l
     }
 
@@ -144,19 +144,19 @@ final class SharePage: NSView {
         let b = CardButton()
         b.onClick = cb
         b.wantsLayer = true
-        b.layer?.backgroundColor = Theme.card.color.cgColor
+        b.layer?.hbBg = "card"
         b.layer?.cornerRadius = 8
         b.translatesAutoresizingMaskIntoConstraints = false
         b.setAccessibilityIdentifier(aid)
         let t = NSTextField(labelWithString: title)
         t.font = .systemFont(ofSize: 13, weight: .semibold)
-        t.textColor = Theme.text.color
+        t.hbText = "text"
         let s = NSTextField(labelWithString: sub)
         s.font = .systemFont(ofSize: 11)
-        s.textColor = Theme.termDim.color
+        s.hbText = "termDim"
         let p = NSTextField(labelWithString: pill)
         p.font = .systemFont(ofSize: 11)
-        p.textColor = Theme.bluePillFg.color
+        p.hbText = "bluePillFg"
         [t, s, p].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             b.addSubview($0)
@@ -242,7 +242,7 @@ final class SharePage: NSView {
                 ? (Int64(Date().timeIntervalSince1970 * 1000)
                    - it.created) / 60000 : 0
             let when = it.created > 0
-                ? L("\(mins) 分钟前") : ""
+                ? String(format: L("%d 分钟前"), mins) : ""
             let sub = "\(it.ownerDevice)@\(host.isEmpty ? "?" : host) · " +
                 (mode == HB_SHARE_COLLAB
                  ? L("可协作输入") : L("仅观看")) +

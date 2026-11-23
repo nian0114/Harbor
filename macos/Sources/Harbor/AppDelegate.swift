@@ -23,8 +23,16 @@ final class App: NSObject, NSApplicationDelegate {
         // MenuBar/SleepPolicy/applyLoginItem 都会经 Vault 取设置——
         // 必须先建主窗口：全新数据目录下首次触 Vault 会弹 DEK
         // runModal，不能发生在窗口存在之前（会阻塞 launch）。
-        buildMenus()
+        // FR-15 语言：装 en 表 + 给 core 装翻译钩子（会话线程也会
+        // 调 HB_TR；表不可变、无锁查询）。必须在任何 UI 构建之前，
+        // 否则视图创建期已固化的文案会与新语言混杂。language 是设备
+        // 本地设置，镜像存 UserDefaults —— 此处不能碰 Vault（首次
+        // 触库会弹 DEK runModal，阻塞 launch）。重启后生效。
+        Lang.apply(UserDefaults.standard
+            .string(forKey: "harbor.language"))
+        hb_set_translator { Lang.cTranslate($0) }
         win = MainWindow()
+        buildMenus()
         MenuBar.shared.install()
         SleepPolicy.shared.install()
         applyLoginItem()
@@ -242,7 +250,7 @@ final class App: NSObject, NSApplicationDelegate {
         vm.addItem(item(L("下一个标签页"), #selector(nextTab), "]",
                         [.command, .shift], id: "next-tab"))
         for i in 1...9 {
-            vm.addItem(item(L("标签页 \(i)"), #selector(gotoTab(_:)),
+            vm.addItem(item(String(format: L("标签页 %d"), i), #selector(gotoTab(_:)),
                             "\(i)", id: "tab-\(i)"))
         }
         view.submenu = vm

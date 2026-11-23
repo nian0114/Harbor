@@ -43,21 +43,21 @@ final class ShareTab: TermTab {
         // banner：broadcast + 正在观看 <title> + pill + 端到端加密 + 离开
         let banner = NSView()
         banner.wantsLayer = true
-        banner.layer?.backgroundColor = Theme.subtle.color.cgColor
+        banner.layer?.hbBg = "subtle"
         let ic = NSImageView(image: hbIcon("broadcast", size: 14,
-                                           tint: Theme.termDim.color))
+                                           tint: Theme.dyn("termDim")))
         let watch = NSTextField(labelWithString:
             L("正在观看 ") +
             (ctx.peerTitle?.isEmpty == false
              ? ctx.peerTitle! : L("共享会话")))
         watch.font = .systemFont(ofSize: 12, weight: .semibold)
-        watch.textColor = Theme.text.color
+        watch.hbText = "text"
         permLbl = NSTextField(labelWithString: L("只读"))
         permLbl.font = .systemFont(ofSize: 11)
-        permLbl.textColor = Theme.termDim.color
+        permLbl.hbText = "termDim"
         let e2e = NSTextField(labelWithString: L("端到端加密"))
         e2e.font = .systemFont(ofSize: 11)
-        e2e.textColor = Theme.termDim.color
+        e2e.hbText = "termDim"
         let leave = NSButton(title: L("离开"), target: self,
                              action: #selector(onLeave))
         leave.bezelStyle = .texturedRounded
@@ -73,7 +73,7 @@ final class ShareTab: TermTab {
         // 只读提示（banner 下小条，rate-limited）
         noticeLbl = NSTextField(labelWithString: "")
         noticeLbl.font = .systemFont(ofSize: 11)
-        noticeLbl.textColor = Theme.amber.color
+        noticeLbl.hbText = "amber"
         noticeLbl.isHidden = true
         noticeLbl.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(noticeLbl)
@@ -137,10 +137,10 @@ final class ShareTab: TermTab {
         endBox.isHidden = true
         endBox.translatesAutoresizingMaskIntoConstraints = false
         let eic = NSImageView(image: hbIcon("broadcast", size: 28,
-                                            tint: Theme.termDim.color))
+                                            tint: Theme.dyn("termDim")))
         endReasonLbl = NSTextField(labelWithString: L("共享已结束"))
         endReasonLbl.font = .systemFont(ofSize: 13)
-        endReasonLbl.textColor = Theme.text.color
+        endReasonLbl.hbText = "text"
         let closeB = NSButton(title: L("关闭"), target: self,
                               action: #selector(onLeave))
         closeB.bezelStyle = .rounded

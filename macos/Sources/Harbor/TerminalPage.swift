@@ -70,12 +70,12 @@ class TermTab: NSObject {
             let collab = ShareService.shared.mode(sid)
                 == HB_SHARE_COLLAB
             NotifyCenter.shared.post(
-                kind: "share", title: L("\(who) 加入共享"),
+                kind: "share", title: String(format: L("%@ 加入共享"), who),
                 body: collab ? L("正在协作") : L("正在观看"),
                 tabIndex: nil)
         case HB_SH_EV_LEFT:
             NotifyCenter.shared.post(
-                kind: "share", title: L("\(who) 离开"),
+                kind: "share", title: String(format: L("%@ 离开"), who),
                 body: "", tabIndex: nil)
         default: break
         }
@@ -253,7 +253,7 @@ class TermTab: NSObject {
         guard let term, exitBar == nil else { return }
         let bar = NSView()
         bar.wantsLayer = true
-        bar.layer?.backgroundColor = Theme.subtle.color.cgColor
+        bar.layer?.hbBg = "subtle"
         let lbl = NSTextField(labelWithString:
             L("已结束") + " (\(code))")
         lbl.font = .systemFont(ofSize: 12)

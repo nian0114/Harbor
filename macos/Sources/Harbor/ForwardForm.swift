@@ -109,10 +109,10 @@ final class ForwardForm: NSView, NSTextFieldDelegate {
         viaDD.action = #selector(onVia)
         // 提示（黄）/ 冲突错误（红）
         hintL.font = .systemFont(ofSize: 11)
-        hintL.textColor = Theme.amber.color
+        hintL.hbText = "amber"
         col.addArrangedSubview(hintL)
         errL.font = .systemFont(ofSize: 11)
-        errL.textColor = Theme.pillErrFg.color
+        errL.hbText = "pillErrFg"
         errL.setAccessibilityIdentifier("fwdf-err")
         col.addArrangedSubview(errL)
         // 命令预览

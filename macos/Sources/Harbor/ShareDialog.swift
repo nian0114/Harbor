@@ -52,7 +52,7 @@ final class ShareDialog: NSObject {
         let l = NSTextField(labelWithString: t)
         l.font = .systemFont(ofSize: size,
                              weight: bold ? .semibold : .regular)
-        l.textColor = Theme.text.color
+        l.hbText = "text"
         return l
     }
 
@@ -124,11 +124,11 @@ final class ShareDialog: NSObject {
         let llbl = rowLabel(L("共享链接"))
         linkLbl = NSTextField(labelWithString: "")
         linkLbl.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        linkLbl.textColor = Theme.termDim.color
+        linkLbl.hbText = "termDim"
         linkLbl.lineBreakMode = .byTruncatingMiddle
         linkLbl.setAccessibilityIdentifier("share-link")
         let cp = NSButton(image: hbIcon("copy", size: 13,
-                                        tint: Theme.termDim.color),
+                                        tint: Theme.dyn("termDim")),
                           target: self, action: #selector(onCopy))
         cp.isBordered = false
         cp.toolTip = L("复制")
@@ -155,10 +155,10 @@ final class ShareDialog: NSObject {
         let clbl = rowLabel(L("配对码"))
         codeLbl = NSTextField(labelWithString: "")
         codeLbl.font = .monospacedSystemFont(ofSize: 14, weight: .semibold)
-        codeLbl.textColor = Theme.blue.color
+        codeLbl.hbText = "blue"
         codeLbl.setAccessibilityIdentifier("share-code")
         let ttl = rowLabel(L("30 分钟内有效"), size: 11)
-        ttl.textColor = Theme.termDim.color
+        ttl.hbText = "termDim"
         let rg = NSButton(title: L("重新生成"), target: self,
                           action: #selector(onRegen))
         rg.bezelStyle = .texturedRounded
@@ -186,7 +186,7 @@ final class ShareDialog: NSObject {
 
         bodyBox.addArrangedSubview(rowLabel(L("参与者"), bold: true))
         emptyLbl = rowLabel(L("还没有人加入"), size: 11)
-        emptyLbl.textColor = Theme.termDim.color
+        emptyLbl.hbText = "termDim"
         bodyBox.addArrangedSubview(emptyLbl)
         plist = NSStackView()
         plist.orientation = .vertical
@@ -196,7 +196,7 @@ final class ShareDialog: NSObject {
 
         let hint = rowLabel(L("共享期间对方可以看到终端内容；可随时停止。"
                               + "端到端加密。"), size: 11)
-        hint.textColor = Theme.termDim.color
+        hint.hbText = "termDim"
         hint.lineBreakMode = .byWordWrapping
         hint.maximumNumberOfLines = 2
         bodyBox.addArrangedSubview(hint)

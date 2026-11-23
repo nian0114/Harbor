@@ -88,9 +88,9 @@ final class NotifyPanel: NSView {
     init() {
         super.init(frame: NSRect(x: 0, y: 0, width: 380, height: 460))
         wantsLayer = true
-        layer?.backgroundColor = Theme.card.color.cgColor
+        layer?.hbBg = "card"
         layer?.cornerRadius = 10
-        layer?.borderColor = Theme.line.color.cgColor
+        layer?.hbBorder = "line"
         layer?.borderWidth = 1
         layer?.shadowOpacity = 0.18
         layer?.shadowRadius = 8
@@ -169,7 +169,7 @@ final class NotifyPanel: NSView {
         let items = NotifyCenter.shared.items
         if items.isEmpty {
             let e = NSTextField(labelWithString: L("暂无通知"))
-            e.textColor = Theme.termDim.color
+            e.hbText = "termDim"
             e.alignment = .center
             rowsCol.addArrangedSubview(e)
             e.heightAnchor.constraint(equalToConstant: 90).isActive = true
@@ -194,7 +194,7 @@ private final class NotifRow: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         if n.unread {
-            layer?.backgroundColor = Theme.sel.color.cgColor
+            layer?.hbBg = "sel"
         }
         let iconName: String
         let tint: NSColor
@@ -211,10 +211,10 @@ private final class NotifRow: NSView {
         t.lineBreakMode = .byTruncatingTail
         let b = NSTextField(wrappingLabelWithString: n.body)
         b.font = .systemFont(ofSize: 11)
-        b.textColor = Theme.termDim.color
+        b.hbText = "termDim"
         let tm = NSTextField(labelWithString: n.time)
         tm.font = .systemFont(ofSize: 10)
-        tm.textColor = Theme.termDim.color
+        tm.hbText = "termDim"
         [iv, t, b, tm].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)

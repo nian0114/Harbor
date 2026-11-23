@@ -58,7 +58,7 @@ final class WatchDialog: NSObject, NSTextViewDelegate {
         let gl = NSTextField(labelWithString:
             L("完成信号（任一命中即提醒）"))
         gl.font = .systemFont(ofSize: 11, weight: .semibold)
-        gl.textColor = Theme.termDim.color
+        gl.hbText = "termDim"
         col.addArrangedSubview(gl)
 
         // -- 信号开关组（对齐 rows[]） --
@@ -86,7 +86,7 @@ final class WatchDialog: NSObject, NSTextViewDelegate {
         let rl = NSTextField(labelWithString:
             L("自定义规则（正则，命中后需安静片刻确认）"))
         rl.font = .systemFont(ofSize: 11, weight: .semibold)
-        rl.textColor = Theme.termDim.color
+        rl.hbText = "termDim"
         col.addArrangedSubview(rl)
         rulesText = NSTextView()
         rulesText.font = .monospacedSystemFont(ofSize: 11,
@@ -110,11 +110,11 @@ final class WatchDialog: NSObject, NSTextViewDelegate {
             L("每行一条：name: 正则 = 成功 · !name: 正则 = 失败 · " +
               "# 开头为注释"))
         hint.font = .systemFont(ofSize: 10)
-        hint.textColor = Theme.termDim.color
+        hint.hbText = "termDim"
         col.addArrangedSubview(hint)
         rulesErr = NSTextField(wrappingLabelWithString: "")
         rulesErr.font = .systemFont(ofSize: 10)
-        rulesErr.textColor = Theme.red.color
+        rulesErr.hbText = "red"
         rulesErr.isHidden = true
         col.addArrangedSubview(rulesErr)
 
@@ -147,7 +147,7 @@ final class WatchDialog: NSObject, NSTextViewDelegate {
         let dh = NSTextField(labelWithString:
             L("HH:MM-HH:MM · 空=关"))
         dh.font = .systemFont(ofSize: 10)
-        dh.textColor = Theme.termDim.color
+        dh.hbText = "termDim"
         [dl, df, dh].forEach { dndRow.addArrangedSubview($0) }
         df.widthAnchor.constraint(equalToConstant: 96).isActive = true
         col.addArrangedSubview(dndRow)
@@ -233,7 +233,7 @@ final class WatchDialog: NSObject, NSTextViewDelegate {
         if !sub.isEmpty {
             let sl = NSTextField(wrappingLabelWithString: sub)
             sl.font = .systemFont(ofSize: 10)
-            sl.textColor = Theme.termDim.color
+            sl.hbText = "termDim"
             sl.maximumNumberOfLines = 2
             v.addArrangedSubview(sl)
         }
@@ -500,7 +500,7 @@ final class WatchInstaller: NSObject {
         preview = NSTextField(wrappingLabelWithString: "")
         preview.font = .monospacedSystemFont(ofSize: 10,
                                              weight: .regular)
-        preview.textColor = Theme.termDim.color
+        preview.hbText = "termDim"
         preview.isSelectable = true
         preview.setAccessibilityIdentifier("watch-inst-preview")
         acc.addSubview(popup); acc.addSubview(preview)

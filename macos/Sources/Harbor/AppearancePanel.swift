@@ -28,6 +28,13 @@ final class AppearancePanel: NSView {
             .firstIndex(of: v.setting("ui_theme") ?? "light") ?? 0)
         uiTheme.target = self; uiTheme.action = #selector(changed)
         row(L("界面主题"), uiTheme)
+        let lang = NSPopUpButton()
+        lang.tag = 4
+        lang.addItems(withTitles: [L("跟随系统"), "简体中文", "English"])
+        lang.selectItem(at: ["","zh","en"]
+            .firstIndex(of: v.setting("language") ?? "") ?? 0)
+        lang.target = self; lang.action = #selector(changed)
+        row(L("语言"), lang)
 
         let fonts = NSPopUpButton()
         fonts.addItems(withTitles: ["Menlo", "Monaco", "SF Mono", "Courier New"])
@@ -226,6 +233,16 @@ final class AppearancePanel: NSView {
                     p.indexOfSelectedItem)]
                 v.setSetting("ui_theme", th)
                 (NSApp.delegate as? App)?.applyTheme()
+            case 4:
+                let lg = ["","zh","en"][max(0, p.indexOfSelectedItem)]
+                if lg != (v.setting("language") ?? "") {
+                    v.setSetting("language", lg)
+                    // 镜像到 UserDefaults：下次启动在主窗口创建前
+                    // 装表（启动期不能碰 Vault）。
+                    UserDefaults.standard.set(lg,
+                        forKey: "harbor.language")
+                    offerRestart()
+                }
             default:
                 if let t = p.titleOfSelectedItem {
                     v.setSetting("term_font", t)
@@ -247,6 +264,22 @@ final class AppearancePanel: NSView {
         onChange?()
     }
 
+    /// 语言变更：重启后生效（翻译表在启动时装配，同 linux 的
+    /// LANGUAGE 环境装配时机），同 linux 提供一键重启。
+    private func offerRestart() {
+        let a = NSAlert()
+        a.messageText = L("重启 Harbor 后生效")
+        a.addButton(withTitle: L("重启"))
+        a.addButton(withTitle: L("取消"))
+        DialogRegistry.shared.present(alert: a, kind: "restart",
+                                      in: window) { ok in
+            guard ok else { return }
+            let cfg = NSWorkspace.OpenConfiguration()
+            NSWorkspace.shared.openApplication(
+                at: Bundle.main.bundleURL,
+                configuration: cfg) { _, _ in NSApp.terminate(nil) }
+        }
+    }
 }
 
 // ---------- 快捷键捕获按钮 ----------

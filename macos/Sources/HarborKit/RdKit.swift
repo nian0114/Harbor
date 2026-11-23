@@ -21,7 +21,7 @@ public enum RdKit {
         q == 0 ? "fast" : q == 2 ? "high" : "balanced"
     }
     public static func qualityLabel(_ q: Int) -> String {
-        L(q == 0 ? "流畅" : q == 2 ? "高清" : "均衡")
+        q == 0 ? L("流畅") : q == 2 ? L("高清") : L("均衡")
     }
 
     // ---------- 画布几何（linux canvas_draw_rect / rd_canvas_map） ----------

@@ -35,7 +35,7 @@ final class LogsPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        layer?.backgroundColor = Theme.page.color.cgColor
+        layer?.hbBg = "page"
         let titles = [L("Date"), L("User"), L("Host"), L("协议"),
                       L("结果"), L("原因"), L("时长"), "Saved"]
         let widths: [CGFloat] = [130, 90, 150, 56, 70, 130, 70, 56]
@@ -92,8 +92,8 @@ final class LogsPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         retPop.setAccessibilityIdentifier("logs-retention")
         addSubview(retPop)
         x += 102
-        _ = btn(L("CSV"), #selector(exportCSV), "logs-csv", w: 52)
-        _ = btn(L("JSON"), #selector(exportJSON), "logs-json", w: 56)
+        _ = btn(L("导出 CSV"), #selector(exportCSV), "logs-csv", w: 72)
+        _ = btn(L("导出 JSON"), #selector(exportJSON), "logs-json", w: 80)
         _ = btn(L("清空"), #selector(clearAll), "logs-clear", w: 56)
         search = NSSearchField(frame: NSRect(
             x: bounds.width - 234, y: bounds.height - 39,

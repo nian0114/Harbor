@@ -27,7 +27,7 @@ final class VaultTab: TermTab {
         iconName = "server"
         let v = view
         v.wantsLayer = true
-        v.layer?.backgroundColor = Theme.page.color.cgColor
+        v.layer?.hbBg = "page"
         sidebar.translatesAutoresizingMaskIntoConstraints = false
         sectionArea.translatesAutoresizingMaskIntoConstraints = false
         v.addSubview(sidebar); v.addSubview(sectionArea)
@@ -35,7 +35,7 @@ final class VaultTab: TermTab {
             sidebar.leadingAnchor.constraint(equalTo: v.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: v.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: v.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: 172),
+            sidebar.widthAnchor.constraint(equalToConstant: 208),
             sectionArea.leadingAnchor.constraint(
                 equalTo: sidebar.trailingAnchor),
             sectionArea.trailingAnchor.constraint(equalTo: v.trailingAnchor),

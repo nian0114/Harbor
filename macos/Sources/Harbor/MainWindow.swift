@@ -35,7 +35,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         // titlebar row: strip + sidebar toggle + bell
         let bar = NSView(frame: NSRect(x: 0, y: 662, width: 1100, height: 38))
         bar.wantsLayer = true
-        bar.layer?.backgroundColor = Theme.titlebar.color.cgColor
+        bar.layer?.hbBg = "titlebar"
         contentView?.addSubview(bar)
         bar.autoresizingMask = [.width, .minYMargin]
         strip.frame = NSRect(x: 78, y: 0, width: 902, height: 38)
@@ -63,7 +63,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         bellBadge.autoresizingMask = [.minXMargin]
         bellBadge.wantsLayer = true
         bellBadge.layer?.cornerRadius = 6
-        bellBadge.layer?.backgroundColor = Theme.red.color.cgColor
+        bellBadge.layer?.hbBg = "red"
         bellBadge.isHidden = true
         bar.addSubview(bellBadge)
         NotifyCenter.shared.onChange = { [weak self] in
@@ -75,7 +75,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         content.frame = NSRect(x: 0, y: 0, width: 1100, height: 662)
         content.autoresizingMask = [.width, .height]
         content.wantsLayer = true
-        content.layer?.backgroundColor = Theme.page.color.cgColor
+        content.layer?.hbBg = "page"
         contentView?.addSubview(content)
 
         strip.onSelect = { [weak self] i in self?.select(i) }
@@ -136,7 +136,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         card.autoresizingMask = [.width, .height]
         card.wantsLayer = true
         card.layer?.cornerRadius = 8
-        card.layer?.backgroundColor = Theme.card.color.cgColor
+        card.layer?.hbBg = "card"
         content.addSubview(card)
         contentCard = card
         makeFirstResponder(tabs[i].term)

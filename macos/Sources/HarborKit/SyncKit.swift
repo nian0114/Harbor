@@ -88,14 +88,14 @@ public enum SyncKit {
         case 404: return L("账号不存在")
         case 409: return L("该邮箱已注册")
         case 429: return L("尝试过于频繁，请稍后再试")
-        case 400...499: return L("请求被拒绝 (\(status))")
-        default: return L("服务器错误 (\(status))")
+        case 400...499: return String(format: L("请求被拒绝 (%d)"), status)
+        default: return String(format: L("服务器错误 (%d)"), status)
         }
     }
 
     /// 限流提示（对齐 ngettext 分支）。
     public static func retryMsg(_ retryAfter: Int) -> String {
-        L("尝试次数过多，请 \(retryAfter) 秒后再试")
+        String(format: L("尝试次数过多，请 %d 秒后再试"), retryAfter)
     }
 
     /// 冲突字段是否敏感（对齐 conflict_card 的 secret 判定：

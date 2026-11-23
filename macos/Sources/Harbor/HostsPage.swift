@@ -150,7 +150,7 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
         b.isBordered = false
         b.wantsLayer = true
         b.layer?.cornerRadius = 6
-        b.layer?.backgroundColor = Theme.blue.color.cgColor
+        b.layer?.hbBg = "blue"
         b.attributedTitle = NSAttributedString(
             string: t, attributes: [.foregroundColor: NSColor.white,
                                     .font: NSFont.systemFont(
@@ -161,7 +161,7 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     private func build() {
         wantsLayer = true
-        layer?.backgroundColor = Theme.page.color.cgColor
+        layer?.hbBg = "page"
         let W = frame.width
 
         // ── 行1：搜索 + ⌘K + 连接 ──
@@ -169,7 +169,7 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
                                         width: W, height: 44))
         bar1.autoresizingMask = [.width, .minYMargin]
         addSubview(bar1)
-        search.placeholderString = L("查找主机或 ssh user@hostname…")
+        search.placeholderString = "Find a host or ssh user@hostname…"
         search.frame = NSRect(x: 12, y: 9, width: W - 160, height: 26)
         search.autoresizingMask = [.width]
         search.target = self; search.action = #selector(searchChanged)
@@ -182,7 +182,7 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
         kk.frame = NSRect(x: W - 184, y: 14, width: 30, height: 16)
         kk.autoresizingMask = [.minXMargin]
         bar1.addSubview(kk)
-        let cb = primaryBtn(L("连接"), #selector(connectSel), "hosts-connect")
+        let cb = primaryBtn("Connect", #selector(connectSel), "hosts-connect")
         cb.frame = NSRect(x: W - 108, y: 8, width: 96, height: 28)
         cb.autoresizingMask = [.minXMargin]
         bar1.addSubview(cb)
@@ -192,30 +192,30 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
                                         width: W, height: 36))
         bar2.autoresizingMask = [.width, .minYMargin]
         addSubview(bar2)
-        let nb = primaryBtn(L("新建主机"), #selector(newHost), "hosts-new")
+        let nb = primaryBtn("New host", #selector(newHost), "hosts-new")
         nb.frame = NSRect(x: 12, y: 6, width: 92, height: 26)
         bar2.addSubview(nb)
         let imp = NSPopUpButton(frame: NSRect(x: 108, y: 6, width: 32, height: 26),
                                 pullsDown: true)
         imp.bezelStyle = .rounded
         imp.addItem(withTitle: "▾")
-        imp.addItem(withTitle: L("导入 SSH 配置"))
-        imp.addItem(withTitle: L("导入 JSON"))
-        imp.addItem(withTitle: L("导出 JSON"))
+        imp.addItem(withTitle: L("从 ~/.ssh/config 导入…"))
+        imp.addItem(withTitle: L("导入 JSON…"))
+        imp.addItem(withTitle: L("导出 JSON…"))
         imp.target = self; imp.action = #selector(importExport(_:))
         imp.setAccessibilityIdentifier("hosts-import")
         bar2.addSubview(imp)
         let sort = NSPopUpButton(frame: NSRect(x: W - 176, y: 6,
                                              width: 100, height: 26),
                                  pullsDown: false)
-        sort.addItems(withTitles: [L("按名称"), L("按分组"), L("最近连接")])
+        sort.addItems(withTitles: [L("按名称"), L("按分组"), L("按最近连接")])
         sort.target = self; sort.action = #selector(sortChanged(_:))
         sort.autoresizingMask = [.minXMargin]
         sort.setAccessibilityIdentifier("hosts-sort")
         bar2.addSubview(sort)
         let seg = NSSegmentedControl(
-            images: [hbIcon("grid", size: 13, tint: Theme.text.color),
-                     hbIcon("list", size: 13, tint: Theme.text.color)],
+            images: [hbIcon("grid", size: 13, tint: Theme.dyn("text")),
+                     hbIcon("list", size: 13, tint: Theme.dyn("text"))],
             trackingMode: .selectOne, target: self,
             action: #selector(toggleMode(_:)))
         seg.selectedSegment = 0
@@ -443,7 +443,7 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
     // MARK: 上下文菜单
     private func ctxMenu() -> NSMenu {
         let m = NSMenu()
-        m.addItem(withTitle: L("连接"), action: #selector(ctxConnect), keyEquivalent: "")
+        m.addItem(withTitle: "Connect", action: #selector(ctxConnect), keyEquivalent: "")
         m.addItem(withTitle: "SFTP", action: #selector(ctxSftp),
                   keyEquivalent: "")
         m.addItem(withTitle: L("编辑"), action: #selector(ctxEdit), keyEquivalent: "")
@@ -636,7 +636,7 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
         let d = NSView(frame: NSRect(x: bounds.width - w, y: 0,
                                      width: w, height: bounds.height - 148))
         d.autoresizingMask = [.minXMargin, .height]
-        d.wantsLayer = true; d.layer?.backgroundColor = Theme.card.color.cgColor
+        d.wantsLayer = true; d.layer?.hbBg = "card"
         addSubview(d)
         drawer = d; drawerHost = h
         var y = d.bounds.height - 30
@@ -665,7 +665,7 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
         eb.frame = NSRect(x: 12, y: y - 28, width: 80, height: 24)
         eb.setAccessibilityIdentifier("drawer-edit")
         d.addSubview(eb)
-        let cb = NSButton(title: L("连接"), target: self,
+        let cb = NSButton(title: "Connect", target: self,
                           action: #selector(ctxConnect))
         cb.bezelStyle = .rounded
         cb.frame = NSRect(x: 100, y: y - 28, width: 60, height: 24)
@@ -684,7 +684,7 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
         guard let w = window else { return }
         let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 640),
                              styleMask: [.titled], backing: .buffered, defer: false)
-        sheet.title = h == nil ? L("新建主机") : L("编辑主机")
+        sheet.title = h == nil ? "New host" : L("编辑主机")
         sheet.isReleasedWhenClosed = false
         let form = HostForm(frame: sheet.contentView!.bounds)
         if let h { form.fill(h) }
@@ -732,7 +732,7 @@ final class HostCard: NSView {
         wantsLayer = true
         layer?.cornerRadius = 8
         layer?.borderWidth = 1
-        layer?.borderColor = Theme.line.color.cgColor
+        layer?.hbBorder = "line"
         updateBg()
         tile.wantsLayer = true
         tile.layer?.cornerRadius = 8
@@ -762,10 +762,15 @@ final class HostCard: NSView {
     override func mouseEntered(with e: NSEvent) { hovered = true; updateBg() }
     override func mouseExited(with e: NSEvent) { hovered = false; updateBg() }
     private func updateBg() {
-        layer?.backgroundColor = (selected ? Theme.sel
-            : (hovered ? Theme.hover : Theme.card)).color.cgColor
-        layer?.borderColor = (selected ? Theme.blue : Theme.line)
-            .color.cgColor
+        layer?.hbBgResolver = { [weak self] in
+            (self?.selected == true ? Theme.sel
+                : (self?.hovered == true ? Theme.hover : Theme.card))
+                .color.cgColor
+        }
+        layer?.hbBorderResolver = { [weak self] in
+            (self?.selected == true ? Theme.blue : Theme.line)
+                .color.cgColor
+        }
     }
     private func fill() {
         guard let h = host else { return }
@@ -780,10 +785,10 @@ final class HostCard: NSView {
         for tg in h.tags.prefix(3) {
             let c = NSTextField(labelWithString: tg)
             c.font = .systemFont(ofSize: 9)
-            c.textColor = Theme.blue.color
+            c.hbText = "blue"
             c.wantsLayer = true
             c.layer?.cornerRadius = 4
-            c.layer?.backgroundColor = Theme.chip.color.cgColor
+            c.layer?.hbBg = "chip"
             tagRow.addArrangedSubview(c)
         }
     }

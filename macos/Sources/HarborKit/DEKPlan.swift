@@ -45,7 +45,7 @@ public enum DEKPlan {
         case -128:   return L("用户取消了 Keychain 授权（errSecUserCanceled）")
         case -25303: return L("Keychain 条目属性不可读（errSecDecode）")
         case -34018: return L("缺少 Keychain 访问权限（errSecMissingEntitlement）")
-        default:     return L("Keychain 返回错误 OSStatus \(status)")
+        default:     return String(format: L("Keychain 返回错误 OSStatus %d"), status)
         }
     }
 }

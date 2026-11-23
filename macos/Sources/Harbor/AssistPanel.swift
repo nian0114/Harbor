@@ -13,12 +13,12 @@ final class AssistPanel: NSView {
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        layer?.backgroundColor = Theme.subtle.color.cgColor
+        layer?.hbBg = "subtle"
         layer?.borderWidth = 1
-        layer?.borderColor = Theme.line.color.cgColor
+        layer?.hbBorder = "line"
         let head = NSTextField(labelWithString: L("Snippets 快捷发送"))
         head.font = .systemFont(ofSize: 11.5)
-        head.textColor = Theme.termDim.color
+        head.hbText = "termDim"
         head.translatesAutoresizingMaskIntoConstraints = false
         addSubview(head)
         stack.orientation = .vertical
@@ -78,7 +78,7 @@ final class AssistPanel: NSView {
         if items.isEmpty {
             let l = NSTextField(labelWithString: L("暂无 Snippet"))
             l.font = .systemFont(ofSize: 11)
-            l.textColor = Theme.termDim.color
+            l.hbText = "termDim"
             stack.addArrangedSubview(l)
         }
     }

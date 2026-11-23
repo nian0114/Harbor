@@ -51,20 +51,20 @@ final class Palette: NSView, NSTextFieldDelegate {
         // 顶部面板：宽 560，上缘 ~90（对齐 .pal-box）
         let panel = NSView()
         panel.wantsLayer = true
-        panel.layer?.backgroundColor = Theme.card.color.cgColor
+        panel.layer?.hbBg = "card"
         panel.layer?.cornerRadius = 12
-        panel.layer?.borderColor = Theme.line.color.cgColor
+        panel.layer?.hbBorder = "line"
         panel.layer?.borderWidth = 1
         panel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(panel)
         // 输入行：search icon + field + esc badge
         let row = NSView()
         row.wantsLayer = true
-        row.layer?.backgroundColor = Theme.subtle.color.cgColor
+        row.layer?.hbBg = "subtle"
         row.layer?.cornerRadius = 8
         row.translatesAutoresizingMaskIntoConstraints = false
         let ic = NSImageView(image: hbIcon("search", size: 15,
-                                           tint: Theme.termDim.color))
+                                           tint: Theme.dyn("termDim")))
         ic.translatesAutoresizingMaskIntoConstraints = false
         field.placeholderString =
             L("搜索主机、页面、Snippet 或命令…")
@@ -77,7 +77,7 @@ final class Palette: NSView, NSTextFieldDelegate {
         field.setAccessibilityIdentifier("pal-field")
         let esc = NSTextField(labelWithString: "esc")
         esc.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        esc.textColor = Theme.termDim.color
+        esc.hbText = "termDim"
         esc.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(ic); row.addSubview(field); row.addSubview(esc)
         listHost.translatesAutoresizingMaskIntoConstraints = false
@@ -143,7 +143,7 @@ final class Palette: NSView, NSTextFieldDelegate {
             }
             out.append(PalItem(kind: .host, avatar: av,
                 title: name.isEmpty ? (addr.isEmpty ? "host" : addr) : name,
-                sub: L("连接 · \(pup)\(user.isEmpty ? "" : " \(user)")"),
+                sub: String(format: L("连接 · %@%@"), pup, user.isEmpty ? "" : " \(user)"),
                 kw: "\(name) \(addr) \(user) \(group) \(tags)",
                 id: id, ord: ord))
             ord += 1
@@ -225,7 +225,7 @@ final class Palette: NSView, NSTextFieldDelegate {
             .isActive = true
         if items.isEmpty {
             let e = NSTextField(labelWithString: L("没有匹配项"))
-            e.textColor = Theme.termDim.color
+            e.hbText = "termDim"
             e.alignment = .center
             e.translatesAutoresizingMaskIntoConstraints = false
             listHost.addSubview(e)
@@ -321,7 +321,7 @@ private final class PalRow: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         if on {
-            layer?.backgroundColor = Theme.sel.color.cgColor
+            layer?.hbBg = "sel"
             layer?.cornerRadius = 7
         }
         let ico: NSView
@@ -330,7 +330,7 @@ private final class PalRow: NSView {
         } else {
             let iv = NSImageView(image: hbIcon(
                 item.icon.isEmpty ? "terminal" : item.icon,
-                size: 15, tint: Theme.termDim.color))
+                size: 15, tint: Theme.dyn("termDim")))
             ico = iv
         }
         ico.translatesAutoresizingMaskIntoConstraints = false
@@ -340,7 +340,7 @@ private final class PalRow: NSView {
         t.translatesAutoresizingMaskIntoConstraints = false
         let s = NSTextField(labelWithString: item.sub)
         s.font = .systemFont(ofSize: 11)
-        s.textColor = Theme.termDim.color
+        s.hbText = "termDim"
         s.alignment = .right
         s.lineBreakMode = .byTruncatingTail
         s.translatesAutoresizingMaskIntoConstraints = false

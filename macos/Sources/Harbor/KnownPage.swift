@@ -16,7 +16,7 @@ final class KnownPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        layer?.backgroundColor = Theme.page.color.cgColor
+        layer?.hbBg = "page"
         let titles = [L("主机"), L("端口"), L("密钥类型"),
                       L("指纹 (SHA256)"), L("添加时间"), ""]
         let widths: [CGFloat] = [210, 50, 100, 230, 100, 50]
@@ -117,7 +117,7 @@ final class KnownPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         if cid == "del" {
             let b = NSButton()
             b.isBordered = false
-            b.image = hbIcon("trash", size: 13, tint: Theme.termDim.color)
+            b.image = hbIcon("trash", size: 13, tint: Theme.dyn("termDim"))
             b.target = self
             b.action = #selector(delRow(_:))
             b.tag = row

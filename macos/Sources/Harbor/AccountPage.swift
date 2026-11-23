@@ -75,10 +75,10 @@ final class AccountPage: NSView {
         v.spacing = 10
         v.edgeInsets = .init(top: 14, left: 16, bottom: 14, right: 16)
         v.wantsLayer = true
-        v.layer?.backgroundColor = Theme.card.color.cgColor
+        v.layer?.hbBg = "card"
         v.layer?.cornerRadius = 8
         v.layer?.borderWidth = 1
-        v.layer?.borderColor = Theme.line.color.cgColor
+        v.layer?.hbBorder = "line"
         return v
     }
 

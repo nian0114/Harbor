@@ -25,7 +25,7 @@ final class ForwardPage: NSView {
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        layer?.backgroundColor = Theme.page.color.cgColor
+        layer?.hbBg = "page"
         buildBar()
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
@@ -99,7 +99,7 @@ final class ForwardPage: NSView {
         dd.autoresizingMask = [.minYMargin]
         let menu = NSMenu()
         for (t, a) in [
-            (L("新建"), #selector(onNew)),
+            (L("New forwarding"), #selector(onNew)),
             (L("全部启动"), #selector(onStartAll)),
             (L("全部停止"), #selector(onStopAll)),
             (L("导出规则 JSON"), #selector(onExport)),
@@ -150,7 +150,7 @@ final class ForwardPage: NSView {
         }
         let line = NSView()
         line.wantsLayer = true
-        line.layer?.backgroundColor = Theme.line.color.cgColor
+        line.layer?.hbBg = "line"
         let wrap = NSStackView(views: [row, line])
         wrap.orientation = .vertical
         wrap.spacing = 0
@@ -486,7 +486,7 @@ final class ForwardPage: NSView {
         let sheet = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 460, height: 470),
             styleMask: [.titled], backing: .buffered, defer: false)
-        sheet.title = obj == nil ? L("新建转发") : L("编辑转发")
+        sheet.title = obj == nil ? L("New forwarding") : L("Edit forwarding")
         sheet.isReleasedWhenClosed = false
         let form = ForwardForm(frame: sheet.contentView!.bounds)
         if let obj { form.fill(obj) }

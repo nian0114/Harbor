@@ -109,11 +109,11 @@ final class HostForm: NSView, NSTextFieldDelegate {
                                         width: frame.width, height: 48))
         foot.autoresizingMask = [.width]
         foot.wantsLayer = true
-        foot.layer?.backgroundColor = Theme.card.color.cgColor
+        foot.layer?.hbBg = "card"
         let sep = NSView(frame: NSRect(x: 0, y: 47,
                                        width: frame.width, height: 1))
         sep.wantsLayer = true
-        sep.layer?.backgroundColor = Theme.line.color.cgColor
+        sep.layer?.hbBg = "line"
         foot.addSubview(sep)
         addSubview(foot)
         saveBtn = NSButton(title: L("保存"), target: self,

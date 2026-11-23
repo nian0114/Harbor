@@ -998,7 +998,7 @@ final class DesktopTab: TermTab, ConnDelegate {
     private func buildStageView() {
         let v = NSView()
         v.wantsLayer = true
-        v.layer?.backgroundColor = Theme.page.color.cgColor
+        v.layer?.hbBg = "page"
         v.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(v)
         NSLayoutConstraint.activate([
@@ -1043,7 +1043,7 @@ final class DesktopTab: TermTab, ConnDelegate {
         let card = NSView()
         card.wantsLayer = true
         card.layer?.cornerRadius = 8
-        card.layer?.backgroundColor = Theme.card.color.cgColor
+        card.layer?.hbBg = "card"
         card.translatesAutoresizingMaskIntoConstraints = false
         let l = NSTextField(wrappingLabelWithString: "")
         l.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
@@ -1054,7 +1054,7 @@ final class DesktopTab: TermTab, ConnDelegate {
         let err = NSView()
         err.wantsLayer = true
         err.layer?.cornerRadius = 8
-        err.layer?.backgroundColor = Theme.card.color.cgColor
+        err.layer?.hbBg = "card"
         err.translatesAutoresizingMaskIntoConstraints = false
         err.isHidden = true
         let et = NSTextField(wrappingLabelWithString: "")
@@ -1171,7 +1171,7 @@ final class DesktopTab: TermTab, ConnDelegate {
         // 横幅
         let bar = NSView()
         bar.wantsLayer = true
-        bar.layer?.backgroundColor = Theme.card.color.cgColor
+        bar.layer?.hbBg = "card"
         bar.translatesAutoresizingMaskIntoConstraints = false
         dv.addSubview(bar)
         let lockI = NSImageView(image: hbIcon("key", size: 12,

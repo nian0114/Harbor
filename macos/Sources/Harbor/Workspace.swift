@@ -77,18 +77,18 @@ final class Workspace: NSObject, NSSplitViewDelegate {
 
     private func buildChrome() {
         view.wantsLayer = true
-        view.layer?.backgroundColor = Theme.card.color.cgColor
+        view.layer?.hbBg = "card"
         let bar = NSView()
         bar.wantsLayer = true
-        bar.layer?.backgroundColor = Theme.subtle.color.cgColor
+        bar.layer?.hbBg = "subtle"
         let ic = NSImageView(image: hbIcon("cols", size: 15,
-                                           tint: Theme.termDim.color))
+                                           tint: Theme.dyn("termDim")))
         ttLabel.font = .systemFont(ofSize: 12.5)
-        ttLabel.textColor = Theme.termDim.color
+        ttLabel.hbText = "termDim"
         let search = NSButton()
         search.bezelStyle = .texturedRounded
         search.isBordered = false
-        search.image = hbIcon("search", size: 13, tint: Theme.termDim.color)
+        search.image = hbIcon("search", size: 13, tint: Theme.dyn("termDim"))
         search.target = self
         search.action = #selector(onSearchBtn)
         search.setAccessibilityIdentifier("ws-find")
@@ -209,7 +209,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             hb.lbl.stringValue = leaf.wsTitle
             hb.reconn.isHidden = !leaf.wsDead
             hb.img.image = hbIcon(leaf.wsIconName, size: 12,
-                                  tint: Theme.termDim.color)
+                                  tint: Theme.dyn("termDim"))
             hb.watch.image = hbIcon("eye", size: 11,
                 tint: leaf.watchOn ? Theme.blue.color
                                    : Theme.termDim.color)
@@ -523,19 +523,19 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     private func buildHead(id: UUID, leaf: TermTab) -> NSView {
         let h = NSView()
         h.wantsLayer = true
-        h.layer?.backgroundColor = Theme.subtle.color.cgColor
+        h.layer?.hbBg = "subtle"
         let ic = NSImageView(image: hbIcon(leaf.wsIconName, size: 12,
-                                           tint: Theme.termDim.color))
+                                           tint: Theme.dyn("termDim")))
         let lbl = NSTextField(labelWithString: leaf.wsTitle)
         lbl.font = .systemFont(ofSize: 11.5)
-        lbl.textColor = Theme.termDim.color
+        lbl.hbText = "termDim"
         lbl.lineBreakMode = .byTruncatingTail
         func headBtn(_ icon: String, _ act: Selector, _ aid: String,
                      _ tip: String) -> NSButton {
             let b = NSButton()
             b.bezelStyle = .texturedRounded
             b.isBordered = false
-            b.image = hbIcon(icon, size: 11, tint: Theme.termDim.color)
+            b.image = hbIcon(icon, size: 11, tint: Theme.dyn("termDim"))
             b.target = self; b.action = act
             b.toolTip = tip
             b.identifier = NSUserInterfaceItemIdentifier(
@@ -788,21 +788,21 @@ final class Workspace: NSObject, NSSplitViewDelegate {
 
     private func applyBorders() {
         for (id, b) in boxes {
-            let focused = model.focused.leafId == id
-            if broadcast {
-                b.layer?.borderColor =
-                    Theme.green.color.cgColor            // 广播：全 pane 绿框
-            } else {
-                b.layer?.borderColor = focused
+            b.layer?.hbBorderResolver = { [weak self] in
+                guard let self else { return nil }
+                if self.broadcast {
+                    return Theme.green.color.cgColor     // 广播：全 pane 绿框
+                }
+                return (self.model.focused.leafId == id
                     ? Theme.blue.color.cgColor           // 焦点：蓝框
-                    : NSColor.clear.cgColor
+                    : NSColor.clear.cgColor)
             }
         }
     }
 
     private func updateTitle() {
         if model.leafCount > 1 {
-            ttLabel.stringValue = L("Workspace · \(model.leafCount) 分屏")
+            ttLabel.stringValue = String(format: L("Workspace · %d 分屏"), model.leafCount)
         } else {
             ttLabel.stringValue = focusedLeaf?.wsTitle ?? L("Workspace")
         }

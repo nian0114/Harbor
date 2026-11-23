@@ -34,7 +34,7 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        layer?.backgroundColor = Theme.page.color.cgColor
+        layer?.hbBg = "page"
         let col = NSTableColumn()
         table.addTableColumn(col)
         table.headerView = nil
@@ -138,7 +138,7 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
             // 同步开关（M6 之前禁用，对齐 Linux 的 disabled 行）
             let synl = NSTextField(labelWithString: L("同步"))
             synl.font = .systemFont(ofSize: 12)
-            synl.textColor = Theme.termDim.color
+            synl.hbText = "termDim"
             synl.frame = NSRect(x: x, y: bounds.height - 35,
                                 width: 30, height: 18)
             synl.autoresizingMask = [.minYMargin]
@@ -281,10 +281,10 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
         let tag = NSTextField(labelWithString:
             " " + SnipKit.scopeLabel(scope) { hostLabel($0) } + " ")
         tag.font = .systemFont(ofSize: 10)
-        tag.textColor = Theme.termDim.color
+        tag.hbText = "termDim"
         tag.wantsLayer = true
         tag.layer?.borderWidth = 1
-        tag.layer?.borderColor = Theme.line.color.cgColor
+        tag.layer?.hbBorder = "line"
         tag.layer?.cornerRadius = 4
         tag.frame = NSRect(x: 10 + min(tl.intrinsicContentSize.width, 320) + 6,
                            y: 34, width: tag.intrinsicContentSize.width,
@@ -292,7 +292,7 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
         row.addSubview(tag)
         let bl = NSTextField(labelWithString: body)
         bl.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
-        bl.textColor = Theme.termDim.color
+        bl.hbText = "termDim"
         bl.lineBreakMode = .byTruncatingTail
         bl.frame = NSRect(x: 10, y: 8, width: bounds.width - 120, height: 20)
         bl.autoresizingMask = [.width]
@@ -301,7 +301,7 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
                   _ act: Selector, dx: CGFloat) -> NSButton {
             let b = NSButton()
             b.isBordered = false
-            b.image = hbIcon(icon, size: 13, tint: Theme.termDim.color)
+            b.image = hbIcon(icon, size: 13, tint: Theme.dyn("termDim"))
             b.target = self
             b.action = act
             b.setAccessibilityIdentifier(aid + "-" + id)
@@ -330,7 +330,7 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
         let hl = NSTextField(labelWithString:
             "\(LogFormat.date(e.ts)) · \(host)")
         hl.font = .systemFont(ofSize: 10.5)
-        hl.textColor = Theme.termDim.color
+        hl.hbText = "termDim"
         hl.lineBreakMode = .byTruncatingTail
         hl.alignment = .right
         hl.frame = NSRect(x: bounds.width - 320, y: 6,
@@ -341,7 +341,7 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
                   _ act: Selector, dx: CGFloat) {
             let b = NSButton()
             b.isBordered = false
-            b.image = hbIcon(icon, size: 12, tint: Theme.termDim.color)
+            b.image = hbIcon(icon, size: 12, tint: Theme.dyn("termDim"))
             b.target = self
             b.action = act
             b.tag = r
@@ -487,7 +487,7 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
         let scopeHelp = NSTextField(labelWithString:
             L("变量形如 {{name}} 或 {{name=默认}}"))
         scopeHelp.font = .systemFont(ofSize: 10.5)
-        scopeHelp.textColor = Theme.termDim.color
+        scopeHelp.hbText = "termDim"
 
         if let o {
             title.stringValue = hb_obj_get_str(o, "title").str

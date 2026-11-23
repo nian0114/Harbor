@@ -376,20 +376,20 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
     // ---------- select ----------
     private func buildSelect() {
         let head = NSTextField(labelWithString:
-            L("选择主机") + " · " + L(side == 0 ? "左栏" : "右栏"))
+            L("选择主机") + " · " + (side == 0 ? L("左栏") : L("右栏")))
         head.font = .systemFont(ofSize: 13.5, weight: .bold)
         head.translatesAutoresizingMaskIntoConstraints = false
         selectView.addSubview(head)
         let lb = NSButton(title: "  " + L("Local"), target: self,
                           action: #selector(pickLocal))
         lb.bezelStyle = .rounded
-        lb.image = hbIcon("monitor", size: 12, tint: Theme.text.color)
+        lb.image = hbIcon("monitor", size: 12, tint: Theme.dyn("text"))
         lb.imagePosition = .imageLeading
         lb.translatesAutoresizingMaskIntoConstraints = false
         lb.setAccessibilityIdentifier("sftp-local-\(side)")
         lb.contentTintColor = .white
         lb.wantsLayer = true
-        lb.layer?.backgroundColor = Theme.blue.color.cgColor
+        lb.layer?.hbBg = "blue"
         lb.layer?.cornerRadius = 5
         selectView.addSubview(lb)
         selFilter.placeholderString = L("过滤…")
@@ -514,7 +514,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
     // ---------- conn（对齐 hb_connect_view 精简版） ----------
     private func buildConn() {
         connView.wantsLayer = true
-        connView.layer?.backgroundColor = Theme.page.color.cgColor
+        connView.layer?.hbBg = "page"
         // head：os tile + name + "SFTP · SSH addr:port" + 隐藏日志
         let head = NSView()
         head.translatesAutoresizingMaskIntoConstraints = false
@@ -545,7 +545,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
             if i < 2 {
                 let bar = NSView()
                 bar.wantsLayer = true
-                bar.layer?.backgroundColor = Theme.line.color.cgColor
+                bar.layer?.hbBg = "line"
                 bar.translatesAutoresizingMaskIntoConstraints = false
                 bar.heightAnchor.constraint(equalToConstant: 2).isActive = true
                 bar.widthAnchor.constraint(greaterThanOrEqualToConstant: 20)
@@ -565,10 +565,10 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         scr.translatesAutoresizingMaskIntoConstraints = false
         scr.hasVerticalScroller = true
         scr.wantsLayer = true
-        scr.layer?.backgroundColor = Theme.card.color.cgColor
+        scr.layer?.hbBg = "card"
         scr.layer?.cornerRadius = 7
         scr.layer?.borderWidth = 1
-        scr.layer?.borderColor = Theme.line.color.cgColor
+        scr.layer?.hbBorder = "line"
         connView.addSubview(scr)
         logScroll = scr
         let lb = FlippedStack()
@@ -655,15 +655,17 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         for i in 0..<3 {
             if i < cur {
                 nodes[i].stringValue = "● " + String(nodes[i].stringValue.dropFirst(2))
-                nodes[i].textColor = Theme.green.color
+                nodes[i].hbText = "green"
             } else if i == cur {
                 nodes[i].stringValue = "◐ " + String(nodes[i].stringValue.dropFirst(2))
-                nodes[i].textColor = Theme.blue.color
+                nodes[i].hbText = "blue"
             }
         }
         for i in 0..<2 {
-            bars[i].layer?.backgroundColor =
-                (i < cur ? Theme.green : Theme.line).color.cgColor
+            let ii = i
+            bars[i].layer?.hbBgResolver = {
+                (ii < cur ? Theme.green : Theme.line).color.cgColor
+            }
         }
     }
     @objc private func toggleLog() {
@@ -683,8 +685,8 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         errCard?.removeFromSuperview()
         let card = NSView()
         card.wantsLayer = true
-        card.layer?.backgroundColor = Theme.errBg.color.cgColor
-        card.layer?.borderColor = Theme.errLine.color.cgColor
+        card.layer?.hbBg = "errBg"
+        card.layer?.hbBorder = "errLine"
         card.layer?.borderWidth = 1
         card.layer?.cornerRadius = 9
         card.translatesAutoresizingMaskIntoConstraints = false
@@ -724,7 +726,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
                           action: #selector(connRetry))
         rb.bezelStyle = .rounded
         rb.wantsLayer = true
-        rb.layer?.backgroundColor = Theme.blue.color.cgColor
+        rb.layer?.hbBg = "blue"
         rb.contentTintColor = .white
         for b in [cb, eb, rb] {
             b.translatesAutoresizingMaskIntoConstraints = false
@@ -769,7 +771,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
                                               : Theme.text.color))
         let l = NSTextField(labelWithString: line)
         l.font = .systemFont(ofSize: 11.5)
-        if mark == "e" { l.textColor = Theme.red.color }
+        if mark == "e" { l.hbText = "red" }
         l.lineBreakMode = .byTruncatingTail
         row.addArrangedSubview(ic); row.addArrangedSubview(l)
         logBox?.addArrangedSubview(row)
@@ -930,7 +932,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         let fb = NSButton(title: " " + L("Filter"), target: self,
                           action: #selector(toggleFilter))
         fb.bezelStyle = .rounded
-        fb.image = hbIcon("search", size: 12, tint: Theme.text.color)
+        fb.image = hbIcon("search", size: 12, tint: Theme.dyn("text"))
         fb.imagePosition = .imageLeading
         fb.font = .systemFont(ofSize: 11.5)
         fb.translatesAutoresizingMaskIntoConstraints = false
@@ -1015,7 +1017,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         func navBtn(_ ic: String, _ sel: Selector, _ id: String) -> NSButton {
             let b = NSButton(title: "", target: self, action: sel)
             b.bezelStyle = .rounded
-            b.image = hbIcon(ic, size: 12, tint: Theme.text.color)
+            b.image = hbIcon(ic, size: 12, tint: Theme.dyn("text"))
             b.translatesAutoresizingMaskIntoConstraints = false
             b.widthAnchor.constraint(equalToConstant: 24).isActive = true
             b.setAccessibilityIdentifier(id)
@@ -1730,7 +1732,7 @@ final class SftpView: NSView {
         conc = Int(Vault.shared.settingsInt("sftp_concurrency", 3))
         conc = min(8, max(1, conc))
         wantsLayer = true
-        layer?.backgroundColor = Theme.page.color.cgColor
+        layer?.hbBg = "page"
 
         let cols = NSStackView()
         cols.orientation = .horizontal
@@ -1746,7 +1748,7 @@ final class SftpView: NSView {
             if k == 1 {
                 wrap.wantsLayer = true
                 wrap.layer?.borderWidth = 1
-                wrap.layer?.borderColor = Theme.line.color.cgColor
+                wrap.layer?.hbBorder = "line"
             }
             p.container.translatesAutoresizingMaskIntoConstraints = false
             wrap.addSubview(p.container)
@@ -1765,9 +1767,9 @@ final class SftpView: NSView {
         xwrap = NSView()
         xwrap.translatesAutoresizingMaskIntoConstraints = false
         xwrap.wantsLayer = true
-        xwrap.layer?.backgroundColor = Theme.card.color.cgColor
+        xwrap.layer?.hbBg = "card"
         xwrap.layer?.borderWidth = 1
-        xwrap.layer?.borderColor = Theme.line.color.cgColor
+        xwrap.layer?.hbBorder = "line"
         addSubview(xwrap)
         let h = NSStackView()
         h.orientation = .horizontal
@@ -1776,7 +1778,7 @@ final class SftpView: NSView {
                                     bottom: 4, right: 10)
         h.translatesAutoresizingMaskIntoConstraints = false
         let ic = NSImageView(image: hbIcon("fwd", size: 12,
-                                           tint: Theme.text.color))
+                                           tint: Theme.dyn("text")))
         h.addArrangedSubview(ic)
         xhead = NSTextField(labelWithString: L("传输队列 · 0 进行中"))
         xhead.font = .systemFont(ofSize: 11.5)
@@ -2109,7 +2111,7 @@ final class SftpView: NSView {
                                       bottom: 3, right: 0)
         let ic = NSImageView(image: hbIcon(
             x.kind == .up ? "up" : x.kind == .down ? "down" : "fwd",
-            size: 12, tint: Theme.text.color))
+            size: 12, tint: Theme.dyn("text")))
         row.addArrangedSubview(ic)
         let nm = NSTextField(labelWithString: x.name)
         nm.lineBreakMode = .byTruncatingMiddle
@@ -2127,12 +2129,12 @@ final class SftpView: NSView {
         row.addArrangedSubview(dl)
         let track = NSView()
         track.wantsLayer = true
-        track.layer?.backgroundColor = Theme.line.color.cgColor
+        track.layer?.hbBg = "line"
         track.layer?.cornerRadius = 2
         track.translatesAutoresizingMaskIntoConstraints = false
         let fill = NSView()
         fill.wantsLayer = true
-        fill.layer?.backgroundColor = Theme.blue.color.cgColor
+        fill.layer?.hbBg = "blue"
         fill.layer?.cornerRadius = 2
         fill.translatesAutoresizingMaskIntoConstraints = false
         track.addSubview(fill)
@@ -2197,14 +2199,14 @@ final class SftpView: NSView {
                 x.pct?.stringValue = L("已完成")
             }
             if x.skipped { x.pct?.stringValue = L("已跳过") }
-            x.fill?.layer?.backgroundColor = Theme.green.color.cgColor
+            x.fill?.layer?.hbBg = "green"
         case .fail:
             x.pct?.stringValue = L("失败") + ": "
                 + (x.err ?? L("未知错误"))
-            x.fill?.layer?.backgroundColor = Theme.red.color.cgColor
+            x.fill?.layer?.hbBg = "red"
         case .cancel:
             x.pct?.stringValue = L("已取消")
-            x.fill?.layer?.backgroundColor = Theme.line.color.cgColor
+            x.fill?.layer?.hbBg = "line"
         }
     }
 

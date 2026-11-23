@@ -57,7 +57,7 @@ final class SSHTab: TermTab, ConnDelegate {
     private func buildStageView() {
         let v = NSView()
         v.wantsLayer = true
-        v.layer?.backgroundColor = Theme.page.color.cgColor
+        v.layer?.hbBg = "page"
         v.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(v)
         NSLayoutConstraint.activate([
@@ -114,7 +114,7 @@ final class SSHTab: TermTab, ConnDelegate {
         let card = NSView()
         card.wantsLayer = true
         card.layer?.cornerRadius = 8
-        card.layer?.backgroundColor = Theme.card.color.cgColor
+        card.layer?.hbBg = "card"
         card.translatesAutoresizingMaskIntoConstraints = false
         v.addSubview(card)
         let l = NSTextField(wrappingLabelWithString: "")
@@ -182,7 +182,7 @@ final class SSHTab: TermTab, ConnDelegate {
             if i > 0 {
                 let ln = NSView()
                 ln.wantsLayer = true
-                ln.layer?.backgroundColor = Theme.blue.color.cgColor
+                ln.layer?.hbBg = "blue"
                 ln.frame = NSRect(x: x - 14, y: 24, width: 10, height: 2)
                 steps.addSubview(ln)
             }
@@ -278,7 +278,7 @@ final class SSHTab: TermTab, ConnDelegate {
         let card = NSView()
         card.wantsLayer = true
         card.layer?.cornerRadius = 8
-        card.layer?.backgroundColor = Theme.dangerBg.color.cgColor
+        card.layer?.hbBg = "dangerBg"
         card.translatesAutoresizingMaskIntoConstraints = false
         let host = stageView ?? view   // stageView 在 → 卡其下；否则叠底
         host.addSubview(card)
@@ -386,7 +386,7 @@ final class SSHTab: TermTab, ConnDelegate {
         retry.isBordered = false
         retry.wantsLayer = true
         retry.layer?.cornerRadius = 6
-        retry.layer?.backgroundColor = Theme.blue.color.cgColor
+        retry.layer?.hbBg = "blue"
         retry.attributedTitle = NSAttributedString(
             string: L("重试"), attributes: [
                 .foregroundColor: NSColor.white,
@@ -462,7 +462,7 @@ final class SSHTab: TermTab, ConnDelegate {
         statusBar?.removeFromSuperview()
         let b = NSView()
         b.wantsLayer = true
-        b.layer?.backgroundColor = Theme.amber.color.cgColor
+        b.layer?.hbBg = "amber"
         b.translatesAutoresizingMaskIntoConstraints = false
         let l = NSTextField(labelWithString: text)
         l.translatesAutoresizingMaskIntoConstraints = false
