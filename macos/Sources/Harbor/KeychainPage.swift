@@ -118,30 +118,7 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
     func generate(type t: hb_key_type, bits: Int,
                   name: String, pass: String) {
-        var k = hb_key_info()
-        let e = name.withCString { nm in
-            hb_key_generate(t, Int32(bits),
-                            name.isEmpty ? nil : nm, &k)
-        }
-        guard e == HB_OK else { NSSound.beep(); return }
-        defer { hb_key_info_clear(&k) }
-        let o = hb_obj_new("key")!
-        let kid = hb_obj_id(o).str
-        hb_obj_set_str(o, "name", name.isEmpty ? k.comment.str : name)
-        hb_obj_set_str(o, "keytype", k.kind.str)
-        hb_obj_set_str(o, "kind", k.kind.str)
-        hb_obj_set_int(o, "bits", Int64(k.bits))
-        hb_obj_set_str(o, "fingerprint", k.fingerprint)
-        hb_obj_set_str(o, "public", k.public_line)
-        hb_obj_set_str(o, "created",
-            "\(Int64(Date().timeIntervalSince1970))")
-        Vault.shared.put(o)
-        if let p = k.private_text {
-            Vault.shared.setSecret(kid, "private", p.str)
-        }
-        if !pass.isEmpty {
-            Vault.shared.setSecret(kid, "passphrase", pass)
-        }
+        _ = KeyOps.generate(type: t, bits: bits, name: name, pass: pass)
         reload()
     }
 
@@ -172,31 +149,7 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         }
     }
     func doImport(path: String, pass: String) {
-        var k = hb_key_info()
-        let e = pass.withCString { pp in
-            hb_key_inspect_file(path, pass.isEmpty ? nil : pp, &k) }
-        guard e == HB_OK else {
-            let a = NSAlert()
-            a.messageText = e.rawValue == HB_ERR_PASSPHRASE.rawValue
-                ? L("口令错误或需要口令") : L("无法识别密钥文件")
-            a.addButton(withTitle: L("确定"))
-            if let w = window { a.beginSheetModal(for: w) { _ in } }
-            return
-        }
-        defer { hb_key_info_clear(&k) }
-        let o = hb_obj_new("key")!
-        let kid = hb_obj_id(o).str
-        let base = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-        hb_obj_set_str(o, "name", k.comment.str.isEmpty ? base : k.comment.str)
-        hb_obj_set_str(o, "keytype", k.kind.str)
-        hb_obj_set_str(o, "kind", k.kind.str)
-        hb_obj_set_int(o, "bits", Int64(k.bits))
-        hb_obj_set_str(o, "fingerprint", k.fingerprint)
-        hb_obj_set_str(o, "public", k.public_line)
-        hb_obj_set_bool(o, "encrypted", k.encrypted)
-        Vault.shared.put(o)
-        if let p = k.private_text { Vault.shared.setSecret(kid, "private", p.str) }
-        // 导入口令不落库：首次使用时询问，由“记住”保存（与 Linux 一致）
+        _ = KeyOps.doImport(path: path, pass: pass, window: window)
         reload()
     }
 
@@ -310,5 +263,72 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let v = NSTextField(labelWithString: txt)
         v.lineBreakMode = .byTruncatingMiddle
         return v
+    }
+}
+
+/// 密钥生成/导入（KeychainPage 与 HostForm 内联复用）。返回新 key id。
+enum KeyOps {
+    @discardableResult
+    static func generate(type t: hb_key_type, bits: Int,
+                         name: String, pass: String) -> String? {
+        var k = hb_key_info()
+        let e = name.withCString { nm in
+            hb_key_generate(t, Int32(bits),
+                            name.isEmpty ? nil : nm, &k)
+        }
+        guard e == HB_OK else { NSSound.beep(); return nil }
+        defer { hb_key_info_clear(&k) }
+        let o = hb_obj_new("key")!
+        let kid = hb_obj_id(o).str
+        hb_obj_set_str(o, "name", name.isEmpty ? k.comment.str : name)
+        hb_obj_set_str(o, "keytype", k.kind.str)
+        hb_obj_set_str(o, "kind", k.kind.str)
+        hb_obj_set_int(o, "bits", Int64(k.bits))
+        hb_obj_set_str(o, "fingerprint", k.fingerprint)
+        hb_obj_set_str(o, "public", k.public_line)
+        hb_obj_set_str(o, "created",
+            "\(Int64(Date().timeIntervalSince1970))")
+        Vault.shared.put(o)
+        if let p = k.private_text {
+            Vault.shared.setSecret(kid, "private", p.str)
+        }
+        if !pass.isEmpty {
+            Vault.shared.setSecret(kid, "passphrase", pass)
+        }
+        return kid
+    }
+    @discardableResult
+    static func doImport(path: String, pass: String,
+                         window: NSWindow?) -> String? {
+        var k = hb_key_info()
+        let e = pass.withCString { pp in
+            hb_key_inspect_file(path, pass.isEmpty ? nil : pp, &k) }
+        guard e == HB_OK else {
+            let a = NSAlert()
+            a.messageText = e.rawValue == HB_ERR_PASSPHRASE.rawValue
+                ? L("口令错误或需要口令") : L("无法识别密钥文件")
+            a.addButton(withTitle: L("确定"))
+            if let w = window { a.beginSheetModal(for: w) { _ in } }
+            return nil
+        }
+        defer { hb_key_info_clear(&k) }
+        let o = hb_obj_new("key")!
+        let kid = hb_obj_id(o).str
+        let base = URL(fileURLWithPath: path)
+            .deletingPathExtension().lastPathComponent
+        hb_obj_set_str(o, "name",
+                       k.comment.str.isEmpty ? base : k.comment.str)
+        hb_obj_set_str(o, "keytype", k.kind.str)
+        hb_obj_set_str(o, "kind", k.kind.str)
+        hb_obj_set_int(o, "bits", Int64(k.bits))
+        hb_obj_set_str(o, "fingerprint", k.fingerprint)
+        hb_obj_set_str(o, "public", k.public_line)
+        hb_obj_set_bool(o, "encrypted", k.encrypted)
+        Vault.shared.put(o)
+        if let p = k.private_text {
+            Vault.shared.setSecret(kid, "private", p.str)
+        }
+        // 导入口令不落库：首次使用时询问，由“记住”保存（与 Linux 一致）
+        return kid
     }
 }

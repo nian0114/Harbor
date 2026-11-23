@@ -21,13 +21,45 @@ final class SidebarView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         scroll.drawsBackground = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scroll)
+        // 账户页脚：未登录 / 点击登录（同步登录在 M4）
+        let foot = NSButton()
+        foot.title = ""
+        foot.isBordered = false
+        foot.translatesAutoresizingMaskIntoConstraints = false
+        foot.setAccessibilityIdentifier("sidebar-account")
+        let f1 = NSTextField(labelWithString: L("未登录"))
+        f1.font = .boldSystemFont(ofSize: 12)
+        f1.translatesAutoresizingMaskIntoConstraints = false
+        let f2 = NSTextField(labelWithString: L("点击登录"))
+        f2.font = .systemFont(ofSize: 10)
+        f2.textColor = .secondaryLabelColor
+        f2.translatesAutoresizingMaskIntoConstraints = false
+        foot.addSubview(f1); foot.addSubview(f2)
+        let sep = NSView()
+        sep.wantsLayer = true
+        sep.layer?.backgroundColor = Theme.line.color.cgColor
+        sep.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(sep); addSubview(foot)
         wantsLayer = true
         layer?.backgroundColor = Theme.sidebar.color.cgColor
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             scroll.topAnchor.constraint(equalTo: topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scroll.bottomAnchor.constraint(equalTo: sep.topAnchor),
+            sep.leadingAnchor.constraint(equalTo: leadingAnchor),
+            sep.trailingAnchor.constraint(equalTo: trailingAnchor),
+            sep.heightAnchor.constraint(equalToConstant: 1),
+            foot.leadingAnchor.constraint(equalTo: leadingAnchor),
+            foot.trailingAnchor.constraint(equalTo: trailingAnchor),
+            foot.topAnchor.constraint(equalTo: sep.bottomAnchor),
+            foot.bottomAnchor.constraint(equalTo: bottomAnchor),
+            foot.heightAnchor.constraint(equalToConstant: 46),
+            f1.leadingAnchor.constraint(equalTo: foot.leadingAnchor,
+                                        constant: 14),
+            f1.topAnchor.constraint(equalTo: foot.topAnchor, constant: 8),
+            f2.leadingAnchor.constraint(equalTo: f1.leadingAnchor),
+            f2.topAnchor.constraint(equalTo: f1.bottomAnchor, constant: 1),
         ])
     }
     required init?(coder: NSCoder) { nil }

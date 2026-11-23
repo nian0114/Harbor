@@ -135,6 +135,17 @@ final class ConnCtl {
         return h
     }
 
+    /// 连接视图头部副标题 "host:port"。
+    var targetDesc: String {
+        if let h = targetHostObj() {
+            defer { hb_obj_free(h) }
+            let addr = hb_obj_get_str(h, "address").str
+            let port = hb_obj_get_int(h, "port", 22)
+            return "\(addr):\(port > 0 ? port : 22)"
+        }
+        return quickTarget ?? ""
+    }
+
     // ---------- 入口 ----------
     func start(rows: Int32, cols: Int32) {
         missingJump = nil

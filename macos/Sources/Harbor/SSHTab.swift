@@ -10,6 +10,10 @@ final class SSHTab: TermTab, ConnDelegate {
     private var stageView: NSView?
     private var stageLines = ""
     private var logLabel: NSTextField?
+    private var logAttr = NSMutableAttributedString()
+    private var logCard: NSView?
+    private var hideBtn: NSButton?
+    private var stageFoot: [NSButton] = []
     private var dots: [NSTextField] = []
     private static let stages = [L("解析"), "TCP", L("密钥交换"),
                                  L("认证"), "shell"]
@@ -66,12 +70,18 @@ final class SSHTab: TermTab, ConnDelegate {
         let nameL = NSTextField(labelWithString: title)
         nameL.font = .boldSystemFont(ofSize: 15)
         nameL.translatesAutoresizingMaskIntoConstraints = false
+        // 副标题 "SSH host:port"（对齐 Linux 头部）
+        let sub = NSTextField(labelWithString: "SSH \(conn.targetDesc)")
+        sub.font = .systemFont(ofSize: 11)
+        sub.textColor = .secondaryLabelColor
+        sub.translatesAutoresizingMaskIntoConstraints = false
         let hideB = NSButton(title: L("隐藏日志"), target: self,
                              action: #selector(toggleLog))
         hideB.bezelStyle = .rounded
         hideB.translatesAutoresizingMaskIntoConstraints = false
         hideB.setAccessibilityIdentifier("conn-hidelog")
-        v.addSubview(icon); v.addSubview(nameL); v.addSubview(hideB)
+        v.addSubview(icon); v.addSubview(nameL); v.addSubview(sub)
+        v.addSubview(hideB)
         // 步骤节点行
         let steps = NSView()
         steps.translatesAutoresizingMaskIntoConstraints = false
@@ -97,6 +107,8 @@ final class SSHTab: TermTab, ConnDelegate {
         l.setAccessibilityIdentifier("stage-log")
         card.addSubview(l)
         logLabel = l
+        logCard = card
+        hideBtn = hideB
         // 底部按钮
         let close = NSButton(title: L("关闭"), target: self,
                              action: #selector(closeSelf))
@@ -105,6 +117,7 @@ final class SSHTab: TermTab, ConnDelegate {
                             action: #selector(retry))
         over.bezelStyle = .rounded
         over.setAccessibilityIdentifier("conn-restart")
+        stageFoot = [close, over]
         [close, over].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             v.addSubview($0)
@@ -117,7 +130,11 @@ final class SSHTab: TermTab, ConnDelegate {
             icon.heightAnchor.constraint(equalToConstant: 40),
             nameL.leadingAnchor.constraint(equalTo: icon.trailingAnchor,
                                            constant: 12),
-            nameL.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
+            nameL.centerYAnchor.constraint(equalTo: icon.centerYAnchor,
+                                           constant: -8),
+            sub.leadingAnchor.constraint(equalTo: nameL.leadingAnchor),
+            sub.topAnchor.constraint(equalTo: nameL.bottomAnchor,
+                                     constant: 2),
             hideB.trailingAnchor.constraint(equalTo: v.trailingAnchor,
                                             constant: -20),
             hideB.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
@@ -158,6 +175,14 @@ final class SSHTab: TermTab, ConnDelegate {
         stageView = v
     }
     @objc private func toggleLog() { logLabel?.isHidden.toggle() }
+    @objc private func toggleErrDetails(_ b: NSButton) {
+        if let card = b.superview {
+            for s in card.subviews where
+                s.accessibilityIdentifier() == "conn-error-details" {
+                s.isHidden.toggle()
+            }
+        }
+    }
     @objc private func closeSelf() {
         // 关闭当前 tab（经窗口）
         if let w = view.window as? MainWindow {
@@ -168,7 +193,16 @@ final class SSHTab: TermTab, ConnDelegate {
     // ---------- ConnDelegate ----------
     func conn(_ c: ConnCtl, stage idx: Int, line: String, mark: Character) {
         stageLines += line + "\n"
-        logLabel?.stringValue = stageLines
+        // 错误行标红（对齐 Linux add_log_line 的 hb-red）
+        logAttr.append(NSAttributedString(
+            string: line + "\n",
+            attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 11,
+                                                   weight: .regular),
+                .foregroundColor: mark == "e"
+                    ? NSColor.systemRed : NSColor.labelColor,
+            ]))
+        logLabel?.attributedStringValue = logAttr
         if idx >= 0 && idx < dots.count {
             for i in 0...idx {
                 dots[i].stringValue = "●\n" + SSHTab.stages[i]
@@ -210,31 +244,82 @@ final class SSHTab: TermTab, ConnDelegate {
         statusDot = Theme.dotErr
         failed = true
         statusBar?.removeFromSuperview(); statusBar = nil
-        stageView?.removeFromSuperview(); stageView = nil
-        view.layer?.backgroundColor = Theme.page.color.cgColor
-        view.wantsLayer = true
-        // 红色失败卡片（与 Linux 一致：标题 + ▸技术详情 + 关闭/编辑主机/重试）
+        // Linux 对齐：整个连接视图（头部+步骤+日志）保留，错误卡片插到
+        // 日志卡片之下；隐藏 隐藏日志 与底部 关闭/重新开始 行。
+        hideBtn?.isHidden = true
+        stageFoot.forEach { $0.isHidden = true }
         let card = NSView()
         card.wantsLayer = true
         card.layer?.cornerRadius = 8
         card.layer?.backgroundColor = Theme.dangerBg.color.cgColor
         card.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(card)
+        let host = stageView ?? view   // stageView 在 → 卡其下；否则叠底
+        host.addSubview(card)
+        if let lc = logCard, host === stageView {
+            NSLayoutConstraint.activate([
+                card.topAnchor.constraint(equalTo: lc.bottomAnchor,
+                                          constant: 12),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                card.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+            ])
+        }
         NSLayoutConstraint.activate([
-            card.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            card.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            card.widthAnchor.constraint(equalToConstant: 420),
+            card.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            card.widthAnchor.constraint(equalToConstant: 430),
         ])
         let tl = NSTextField(labelWithString: t)
         tl.font = .boldSystemFont(ofSize: 13)
         tl.translatesAutoresizingMaskIntoConstraints = false
         tl.setAccessibilityIdentifier("conn-error-title")
-        let det = NSTextField(wrappingLabelWithString:
-            L("▸ 技术详情") + "  " + (details ?? stageLines))
+        card.addSubview(tl)
+        // 人类可读提示行（对齐 Linux；libssh2 原文只在 ▸技术详情 里）
+        var hintText: String?; var hintRed = false
+        switch UInt32(bitPattern: Int32(code)) {
+        case HB_SSH_ERR_AUTH.rawValue:
+            hintText = L("服务器拒绝了凭据。检查用户名、密码或密钥后重试。")
+        case HB_SSH_ERR_HOSTKEY_CHANGED.rawValue:
+            hintText = L("为安全起见已阻断连接 —— 主机密钥与本地记录不符。")
+            hintRed = true
+        case HB_SSH_ERR_REFUSED.rawValue:
+            hintText = L("目标端口拒绝连接。确认服务已启动、端口正确。")
+        case HB_SSH_ERR_UNREACHABLE.rawValue, HB_SSH_ERR_RESOLVE.rawValue:
+            hintText = L("无法到达主机。检查地址和网络连接。")
+        case HB_SSH_ERR_TIMEOUT.rawValue:
+            hintText = L("连接等待超时。检查网络或稍后重试。")
+        default: break
+        }
+        var anchor: NSView = tl
+        if let ht = hintText {
+            let hl = NSTextField(wrappingLabelWithString: ht)
+            hl.font = .systemFont(ofSize: 11)
+            hl.textColor = hintRed ? .systemRed : .secondaryLabelColor
+            hl.translatesAutoresizingMaskIntoConstraints = false
+            card.addSubview(hl)
+            NSLayoutConstraint.activate([
+                hl.topAnchor.constraint(equalTo: tl.bottomAnchor,
+                                        constant: 6),
+                hl.leadingAnchor.constraint(equalTo: tl.leadingAnchor),
+                hl.trailingAnchor.constraint(equalTo: card.trailingAnchor,
+                                             constant: -16),
+            ])
+            anchor = hl
+        }
+        // ▸ 技术详情：默认收起（对齐 Linux expander），libssh2 原文只在展开后
+        let expB = NSButton(title: L("▸ 技术详情"), target: self,
+                            action: #selector(toggleErrDetails))
+        expB.bezelStyle = .disclosure
+        expB.setButtonType(.pushOnPushOff)
+        expB.font = .systemFont(ofSize: 11)
+        expB.translatesAutoresizingMaskIntoConstraints = false
+        let det = NSTextField(wrappingLabelWithString: details ?? stageLines)
         det.font = .systemFont(ofSize: 11)
         det.textColor = .secondaryLabelColor
+        det.isHidden = true
         det.translatesAutoresizingMaskIntoConstraints = false
         det.setAccessibilityIdentifier("conn-error-details")
+        card.addSubview(expB)
         let close = NSButton(title: L("关闭"), target: self,
                              action: #selector(closeSelf))
         let edit = NSButton(title: L("编辑主机"), target: self,
@@ -246,8 +331,9 @@ final class SSHTab: TermTab, ConnDelegate {
             $0.translatesAutoresizingMaskIntoConstraints = false
             card.addSubview($0)
         }
+        retry.bezelColor = .controlAccentColor   // 重试 = 蓝色主按钮
         retry.keyEquivalent = "\r"
-        card.addSubview(tl); card.addSubview(det)
+        card.addSubview(det)
         close.setAccessibilityIdentifier("conn-close")
         edit.setAccessibilityIdentifier("conn-edit-host")
         retry.setAccessibilityIdentifier("conn-retry")
@@ -255,7 +341,11 @@ final class SSHTab: TermTab, ConnDelegate {
             tl.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
             tl.leadingAnchor.constraint(equalTo: card.leadingAnchor,
                                         constant: 16),
-            det.topAnchor.constraint(equalTo: tl.bottomAnchor, constant: 6),
+            expB.topAnchor.constraint(equalTo: anchor.bottomAnchor,
+                                      constant: 6),
+            expB.leadingAnchor.constraint(equalTo: tl.leadingAnchor),
+            det.topAnchor.constraint(equalTo: expB.bottomAnchor,
+                                     constant: 4),
             det.leadingAnchor.constraint(equalTo: tl.leadingAnchor),
             det.trailingAnchor.constraint(equalTo: card.trailingAnchor,
                                           constant: -16),
@@ -263,7 +353,7 @@ final class SSHTab: TermTab, ConnDelegate {
                                             constant: -16),
             retry.bottomAnchor.constraint(equalTo: card.bottomAnchor,
                                           constant: -14),
-            retry.topAnchor.constraint(equalTo: det.bottomAnchor,
+            retry.topAnchor.constraint(equalTo: expB.bottomAnchor,
                                        constant: 12),
             edit.trailingAnchor.constraint(equalTo: retry.leadingAnchor,
                                            constant: -8),
@@ -272,7 +362,6 @@ final class SSHTab: TermTab, ConnDelegate {
                                             constant: -8),
             close.centerYAnchor.constraint(equalTo: retry.centerYAnchor),
         ])
-        stageView = card
     }
     func connDisconnected(_ c: ConnCtl) {
         statusDot = Theme.dotPend
@@ -284,7 +373,17 @@ final class SSHTab: TermTab, ConnDelegate {
         if c.reconnectPending { return }  // 自动重连条已显示
         showEnded(code: Int32(code))
     }
-    func connOSInfo(_ c: ConnCtl, id: String, pretty: String) {}
+    func connOSInfo(_ c: ConnCtl, id: String, pretty: String) {
+        // 探测到的系统写回主机对象 → 主机页 OS 图标（与 Linux 一致）
+        guard !id.isEmpty, let hostId = conn.hostId,
+              let o = Vault.shared.get(hostId) else { return }
+        if hb_obj_get_str(o, "os").str != id {
+            hb_obj_set_str(o, "os", id)
+            Vault.shared.put(o)
+            if let w = view.window as? MainWindow { w.refreshHosts() }
+        }
+        hb_obj_free(o)
+    }
 
     /// SSH 会话结束：重连条（不是 Local 的 已结束 条）。
     private func showEnded(code: Int32) {
@@ -352,6 +451,7 @@ final class SSHTab: TermTab, ConnDelegate {
         ended = false
         failed = false
         stageLines = ""
+        logAttr = NSMutableAttributedString()
         buildStageView()
         conn.reconnectNow()
     }
