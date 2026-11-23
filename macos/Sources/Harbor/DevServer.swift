@@ -164,6 +164,15 @@ final class DevServer {
         case "stall-reset":
             win?.maxRunloopStall = 0; return "OK"
         case "set":    return cmdSet(arg)
+        case "setbool":
+            // setbool <key> <0|1> —— bool 型设置（settingsBool 读的
+            // 是 cJSON bool，"1" 字符串读不出）。
+            let kv = arg.split(separator: " ", maxSplits: 1)
+            guard kv.count == 2 else { return "ERR setbool-args" }
+            Vault.shared.setSettingsBool(String(kv[0]),
+                                         kv[1] != "0")
+            win?.applySettings()
+            return "OK"
         case "state":  return cmdState()
         case "gridinfo": return cmdGridInfo()
         case "hier":    return cmdHier(arg)
@@ -262,6 +271,20 @@ final class DevServer {
             let ti = Int(arg) ?? u.lastUserInfo?["tab"] ?? -1
             u.devSimulateClick(ti)
             return "OK \(ti)"
+        case "notif-post":
+            // 直接打系统通知接缝（M8 投递/授权验证用）：
+            // notif-post <tab|-1> <title>|<body>[|high]
+            guard let u = NotifyCenter.shared.system
+                as? UNSystemNotifier else { return "ERR" }
+            let parts = arg.split(separator: " ", maxSplits: 1)
+            let ti = Int(parts.first.map(String.init) ?? "-1") ?? -1
+            let fs = (parts.count > 1 ? String(parts[1]) : "")
+                .split(separator: "|").map(String.init)
+            guard fs.count >= 2 else { return "ERR notif-post-args" }
+            u.post(title: fs[0], body: fs[1],
+                   tabIndex: ti >= 0 ? ti : nil,
+                   priorityHigh: fs.count > 2 && fs[2] == "high")
+            return "OK"
         case "notif-jump":
             // 与 NotifRow.onClick 同路：item.tabIndex → select
             guard let i = Int(arg), i >= 0,
@@ -274,6 +297,10 @@ final class DevServer {
                 .joined(separator: " ;; ")
         case "tray-count":
             return "OK \(MenuBar.onlineCount(win))"
+        case "tray-action":
+            guard let i = Int(arg),
+                  MenuBar.shared.devPerformItem(i) else { return "ERR" }
+            return "OK"
         case "close-win":
             // 模拟点窗口 ×（走 windowShouldClose → close_to_tray 分支）
             win?.performClose(nil)
@@ -289,8 +316,8 @@ final class DevServer {
             else { SleepPolicy.shared.devSleep() }
             return "OK"
         case "assert-state":
-            return "OK \(SleepPolicy.shared.devAssertionHeld
-                ? "held" : "none")"
+            let held = SleepPolicy.shared.devAssertionHeld
+            return "OK \(held ? "held" : "none")"
         case "watch-badge":
             if let w = selTab as? WsTab,
                let g = w.badgeGlyph { return "badge=\(g.0)" }

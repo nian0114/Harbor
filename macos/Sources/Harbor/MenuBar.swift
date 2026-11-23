@@ -99,4 +99,11 @@ final class MenuBar: NSObject, NSMenuDelegate {
     var devMenuItems: [String] {
         item?.menu?.items.map { $0.title } ?? []
     }
+    /// dev：按 index 触发菜单项（与点击同路：performActionForItem）。
+    func devPerformItem(_ i: Int) -> Bool {
+        guard let m = item?.menu,
+              i >= 0, i < m.items.count else { return false }
+        m.performActionForItem(at: i)
+        return true
+    }
 }
