@@ -543,12 +543,19 @@ final class DevServer {
             if let c = s as? NSControl, c.accessibilityIdentifier() == id {
                 if let b = c as? NSButton {
                     b.state = (text == "1" || text == "true") ? .on : .off
+                } else if let sw = c as? NSSwitch {
+                    sw.state = (text == "1" || text == "true") ? .on : .off
+                    sw.sendAction(sw.action, to: sw.target)
                 } else {
                     c.stringValue = text
                     // 像真实输入一样触发 controlTextDidChange（表单校验）
                     NotificationCenter.default.post(
                         name: NSControl.textDidChangeNotification,
                         object: c)
+                    // 搜索框等靠 target/action 的控件：提交等效一次编辑结束
+                    if c.action != nil {
+                        c.sendAction(c.action, to: c.target)
+                    }
                 }
                 return true
             }
@@ -560,7 +567,11 @@ final class DevServer {
         guard let v else { return false }
         for s in v.subviews {
             if let c = s as? NSControl, c.accessibilityIdentifier() == id {
-                if let b = c as? NSButton { b.performClick(nil) }
+                if let sw = c as? NSSwitch {
+                    // NSSwitch 非 NSButton：performClick 不切 state
+                    sw.state = sw.state == .on ? .off : .on
+                    sw.sendAction(sw.action, to: sw.target)
+                } else if let b = c as? NSButton { b.performClick(nil) }
                 else { c.sendAction(c.action, to: c.target) }
                 return true
             }
