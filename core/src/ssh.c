@@ -920,7 +920,25 @@ static int auth_key_source(hb_ssh *h, hop *hp, const char *priv_text,
     return 1;
 }
 
-/* keyboard-interactive：用密码填满所有挑战项 */
+/* keyboard-interactive 上下文：首个 prompt 轮用已给的密码静默应答；
+ * 之后再挑战（密码被拒、OTP 等）或本来就没有密码时，按服务器 prompt
+ * 原文问用户（共享外层重试计数）。用户等待期间刷新握手死线。 */
+typedef struct {
+    hb_ssh *h;
+    hop    *hp;
+    int64_t *dl;           /* 认证死线（PROMPT 返回后重置） */
+    const char *pw;        /* 首轮应答（可为 NULL） */
+    char   *owned;         /* 问用户得到的秘密（hb_secret，用完释放） */
+    int    *tries;         /* 与外层共享的用户提示次数 */
+    int     prompted;      /* 服务器是否真的发过 prompt（零 prompt 轮不算） */
+    int     rounds;        /* 已见的 prompt 轮数 */
+    int     cancelled;     /* 用户在提示上取消 */
+} kbi_ctx;
+
+/* keyboard-interactive 回调：
+ * - 零 prompt 轮 → 不答（用于探测"服务器只挂名不真问"）；
+ * - 第一个 prompt 轮且已知密码 → echo-off 的项静默填密码；
+ * - 其余 → 把服务器的 prompt 原文（instruction 非空则作前缀）抛给用户。 */
 static void kbi_cb(const char *name, int name_len,
                    const char *instruction, int instruction_len,
                    int num_prompts,
@@ -928,10 +946,45 @@ static void kbi_cb(const char *name, int name_len,
                    LIBSSH2_USERAUTH_KBDINT_RESPONSE *responses,
                    void **abstract)
 {
-    const char *pw = (abstract && *abstract) ? *abstract : NULL;
+    const char *pw = NULL;
+    kbi_ctx *kx = abstract ? *abstract : NULL;
     int i;
-    (void)name; (void)name_len; (void)instruction; (void)instruction_len;
-    (void)prompts;
+    (void)name; (void)name_len;
+    if (!kx || num_prompts <= 0)
+        return;
+    kx->prompted = 1;
+    if (kx->rounds == 0 && kx->pw) {
+        pw = kx->pw;
+        for (i = 0; i < num_prompts; i++) {
+            responses[i].text = strdup(prompts[i].echo ? "" : pw);
+            responses[i].length =
+                (unsigned int)strlen(responses[i].text);
+        }
+        kx->rounds++;
+        return;
+    }
+    if (!kx->cancelled && *kx->tries < 3) {
+        char msg[512];
+        char *g;
+        if (instruction_len > 0)
+            snprintf(msg, sizeof msg, "%.*s\n%.*s",
+                     instruction_len, instruction,
+                     (int)prompts[0].length, prompts[0].text);
+        else
+            snprintf(msg, sizeof msg, "%.*s",
+                     (int)prompts[0].length, prompts[0].text);
+        g = prompt_secret(kx->h, kx->hp, 0, msg);
+        if (!g) {
+            kx->cancelled = 1;
+            return;
+        }
+        (*kx->tries)++;
+        hb_secret_free(kx->owned);
+        kx->owned = g;
+        pw = g;
+        *kx->dl = hb_now_ms() + HANDSHAKE_MS;
+    }
+    kx->rounds++;
     if (!pw)
         return;
     for (i = 0; i < num_prompts; i++) {
@@ -953,6 +1006,61 @@ static int auth_password(hb_ssh *h, hop *hp, const char *methods, int64_t *dl)
         hb__ssh_set_err(h, "server does not offer password/keyboard-interactive");
         return -HB_SSH_ERR_AUTH;
     }
+
+    /* OpenSSH 顺序：keyboard-interactive 先于 password。
+     * password 失败后再上 kbi 会让 PAM 服务器施加分钟级惩罚（macOS sshd
+     * 实测挂起 ≈2min）；kbi 先行则首轮即用已知密码静默应答，PAM 自己的
+     * 重试节奏不受惩罚影响。kbi 真问过且失败 → 不再回退 password
+     * （白白多记一次失败尝试并再触惩罚）。 */
+    if (allow_kbi) {
+        kbi_ctx kx = { h, hp, dl, use, NULL, &tries, 0, 0, 0 };
+        for (;;) {
+            int rc = -1, before = kx.rounds;
+            *libssh2_session_abstract(hp->sess) = &kx;
+            SSH_LOOP(h, hp, *dl,
+                     libssh2_userauth_keyboard_interactive_ex(
+                         hp->sess, hp->cfg.user,
+                         (unsigned int)strlen(hp->cfg.user), &kbi_cb),
+                     rc, w);
+            *libssh2_session_abstract(hp->sess) = NULL;
+            if (kx.owned) {      /* 用户答案并入本轮凭据生命周期 */
+                hb_secret_free(got);
+                got = kx.owned;
+                kx.owned = NULL;
+                use = got;
+            }
+            if (kx.cancelled) {
+                hb_secret_free(got);
+                hb__ssh_emit_error(h, HB_SSH_ERR_CANCELLED,
+                                   HB_TR("连接已取消"));
+                return -HB_SSH_ERR_CANCELLED;
+            }
+            if (w) {
+                hb_secret_free(got);
+                return fail_wait(h, w, HB_SSH_ERR_AUTH);
+            }
+            if (rc == 0) {
+                hb_secret_free(got);
+                return 0;
+            }
+            /* 本轮服务器没发 prompt（kbi 挂名但无设备/PAM 未启用）——
+             * 密码尚未送出，回退 password 方法不会触惩罚。 */
+            if (kx.rounds == before)
+                break;
+            /* 真问过且失败：像 OpenSSH 一样重发 kbi 请求，由服务器驱动
+             * 下一轮 prompt（PAM 会再给一次密码询问）。用户重试次数
+             * 与服务器 MaxAuthTries 为界。 */
+            if (tries >= 3)
+                break;
+        }
+        if (kx.prompted || !allow_pw) {
+            hb_secret_free(got);
+            hb__ssh_set_lib_err(h, hp->sess);
+            return -HB_SSH_ERR_AUTH;
+        }
+        /* kbi 零 prompt → 回退 password。 */
+    }
+
     while (tries < 3) {
         int rc = -1;
         if (!use) {
@@ -971,38 +1079,19 @@ static int auth_password(hb_ssh *h, hop *hp, const char *methods, int64_t *dl)
             use = got;
             *dl = hb_now_ms() + HANDSHAKE_MS;
         }
-        if (allow_pw) {
-            SSH_LOOP(h, hp, *dl,
-                     libssh2_userauth_password_ex(
-                         hp->sess, hp->cfg.user,
-                         (unsigned int)strlen(hp->cfg.user),
-                         use, (unsigned int)strlen(use), NULL),
-                     rc, w);
-            if (w) {
-                hb_secret_free(got);
-                return fail_wait(h, w, HB_SSH_ERR_AUTH);
-            }
-            if (rc == 0) {
-                hb_secret_free(got);
-                return 0;
-            }
+        SSH_LOOP(h, hp, *dl,
+                 libssh2_userauth_password_ex(
+                     hp->sess, hp->cfg.user,
+                     (unsigned int)strlen(hp->cfg.user),
+                     use, (unsigned int)strlen(use), NULL),
+                 rc, w);
+        if (w) {
+            hb_secret_free(got);
+            return fail_wait(h, w, HB_SSH_ERR_AUTH);
         }
-        if (allow_kbi && !ssh_authenticated(hp)) {
-            *libssh2_session_abstract(hp->sess) = (void *)use;
-            SSH_LOOP(h, hp, *dl,
-                     libssh2_userauth_keyboard_interactive_ex(
-                         hp->sess, hp->cfg.user,
-                         (unsigned int)strlen(hp->cfg.user), &kbi_cb),
-                     rc, w);
-            *libssh2_session_abstract(hp->sess) = NULL;
-            if (w) {
-                hb_secret_free(got);
-                return fail_wait(h, w, HB_SSH_ERR_AUTH);
-            }
-            if (rc == 0) {
-                hb_secret_free(got);
-                return 0;
-            }
+        if (rc == 0) {
+            hb_secret_free(got);
+            return 0;
         }
         hb_secret_free(got);
         got = NULL;

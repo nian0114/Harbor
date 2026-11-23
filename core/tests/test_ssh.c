@@ -795,6 +795,172 @@ static void test_auth_failed(void)
     hb_session_free(s);
 }
 
+
+/* 再起一个允许密码认证的 sshd（fix_port+1）。无 root 时 UsePAM no
+ * 密码永远校验失败 —— 正好用来测重试/耗尽/取消路径。 */
+static pid_t fixture_spawn_pw(void)
+{
+    char path[4600];
+    pid_t pid;
+    int i, ok = 0;
+    FILE *f;
+    snprintf(path, sizeof path, "%s/sshd_pw_config", fix_dir);
+    f = fopen(path, "w");
+    fprintf(f,
+            "Port %d\n"
+            "ListenAddress 127.0.0.1\n"
+            "HostKey %s/hostkey\n"
+            "PidFile %s/sshd_pw.pid\n"
+            "AuthorizedKeysFile %s/authorized_keys\n"
+            "UsePAM no\n"
+            "StrictModes no\n"
+            "PasswordAuthentication yes\n"
+            "KbdInteractiveAuthentication yes\n"
+            "PermitTTY yes\n"
+            "LogLevel ERROR\n",
+            fix_port + 1, fix_dir, fix_dir, fix_dir);
+    fclose(f);
+    pid = fork();
+    if (pid == 0) {
+        int errfd;
+        char logp[4400];
+        snprintf(logp, sizeof logp, "%s/sshd_pw.err", fix_dir);
+        errfd = open(logp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (errfd >= 0)
+            dup2(errfd, STDERR_FILENO);
+        execl("/usr/sbin/sshd", "/usr/sbin/sshd", "-D", "-e", "-f",
+              path, NULL);
+        _exit(127);
+    }
+    for (i = 0; i < 100 && !ok; i++) {
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in a;
+        memset(&a, 0, sizeof a);
+        a.sin_family = AF_INET;
+        a.sin_port = htons((uint16_t)(fix_port + 1));
+        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (connect(fd, (void *)&a, sizeof a) == 0)
+            ok = 1;
+        close(fd);
+        if (!ok)
+            usleep(50000);
+    }
+    if (!ok) {
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
+        fprintf(stderr, "pw sshd did not start — skip\n");
+        return -1;
+    }
+    return pid;
+}
+
+static hb_ssh_opts pw_opts(void)
+{
+    hb_ssh_opts o = base_opts();
+    o.target.port = fix_port + 1;
+    o.target.auth = HB_SSH_AUTH_PASSWORD;
+    o.target.privkey = NULL;
+    o.command = "echo hi; exit 0";
+    return o;
+}
+
+/* 密码重试：脚本连答三次错密码 → 应看到 ≥2 次 PROMPT（"密码错误，请重试"），
+ * 尝试耗尽后以 HB_SSH_ERR_AUTH 收尾而不是超时。 */
+static void test_password_retry(void)
+{
+    pid_t pw = fixture_spawn_pw();
+    hb_ssh_opts o;
+    hb_session *s;
+    drv d;
+    if (pw < 0)
+        return;
+    o = pw_opts();
+    drv_init(&d);
+    d.hk_reply = 1;
+    d.prompt_replies[0] = "bad1";
+    d.prompt_replies[1] = "bad2";
+    d.prompt_replies[2] = "bad3";
+    d.n_prompts_set = 3;
+    s = hb_session_new_ssh(&o, 24, 80, 200);
+    CHECK(s != NULL);
+    if (s) {
+        CHECK(drv_run(s, &d, 30000));
+        /* 第一问 "…的密码"，其后重试 "密码错误，请重试" */
+        CHECK(d.prompt_n >= 2);
+        if (d.prompt_n >= 1)
+            CHECK_EQ_INT(d.prompt_codes[0], 0);
+        /* 耗尽 → AUTH（不是 TIMEOUT/CONNECT 类） */
+        CHECK_EQ_INT(d.err_code, HB_SSH_ERR_AUTH);
+        CHECK_EQ_INT(d.connected, 0);
+        hb_session_free(s);
+    }
+    kill(pw, SIGTERM);
+    waitpid(pw, NULL, 0);
+}
+
+/* 密码提示取消 → CANCELLED（不是超时） */
+static void test_password_cancel(void)
+{
+    pid_t pw = fixture_spawn_pw();
+    hb_ssh_opts o;
+    hb_session *s;
+    drv d;
+    if (pw < 0)
+        return;
+    o = pw_opts();
+    drv_init(&d);
+    d.hk_reply = 1;
+    d.prompt_replies[0] = NULL;   /* 第一问就取消 */
+    d.n_prompts_set = 1;
+    s = hb_session_new_ssh(&o, 24, 80, 200);
+    CHECK(s != NULL);
+    if (s) {
+        CHECK(drv_run(s, &d, 20000));
+        CHECK_EQ_INT(d.err_code, HB_SSH_ERR_CANCELLED);
+        CHECK_EQ_INT(d.prompt_n, 1);
+        hb_session_free(s);
+    }
+    kill(pw, SIGTERM);
+    waitpid(pw, NULL, 0);
+}
+
+/* kbi→password 回退：本 fixture sshd 在 method 列表里挂名
+ * keyboard-interactive（实测方法串 = publickey,password,
+ * keyboard-interactive），但 UsePAM no 且无其他 kbdint 设备，
+ * kbi 尝试零 prompt 直接失败。此时密码从未送出，客户端应回退
+ * password 方法正常发问（首问 "…的密码"，重试 "密码错误，请重试"），
+ * 而不是把 kbi 挂名失败当作认证终结。 */
+static void test_password_kbi_fallback(void)
+{
+    pid_t pw = fixture_spawn_pw();
+    hb_ssh_opts o;
+    hb_session *s;
+    drv d;
+    if (pw < 0)
+        return;
+    o = pw_opts();
+    drv_init(&d);
+    d.hk_reply = 1;
+    d.prompt_replies[0] = "bad1";
+    d.prompt_replies[1] = "bad2";
+    d.prompt_replies[2] = "bad3";
+    d.n_prompts_set = 3;
+    s = hb_session_new_ssh(&o, 24, 80, 200);
+    CHECK(s != NULL);
+    if (s) {
+        CHECK(drv_run(s, &d, 30000));
+        /* 回退成立：password 方法的 ≥2 次提示照常到达 */
+        CHECK(d.prompt_n >= 2);
+        if (d.prompt_n >= 1)
+            CHECK_EQ_INT(d.prompt_codes[0], 0);
+        CHECK_EQ_INT(d.err_code, HB_SSH_ERR_AUTH);
+        CHECK_EQ_INT(d.connected, 0);
+        hb_session_free(s);
+    }
+    kill(pw, SIGTERM);
+    waitpid(pw, NULL, 0);
+}
+
 /* 7. 关闭端口 → REFUSED；不存在域名 → RESOLVE */
 static void test_refused_resolve(void)
 {
@@ -1375,6 +1541,9 @@ int main(void)
     test_genkey_auths();
     test_pem_enc_auth();
     test_auth_failed();
+    test_password_retry();
+    test_password_cancel();
+    test_password_kbi_fallback();
     test_refused_resolve();
     test_proxyjump();
     test_jump_bulk();
