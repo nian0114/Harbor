@@ -101,6 +101,8 @@ final class MainWindow: NSWindow, NSWindowDelegate {
          * 对话框（key-confirm/密码）以本窗为 parent。 */
         ForwardMgr.shared.window = self
         ForwardMgr.shared.startAll()
+        /* M6：实例化同步服务（lazy init → tryResume 恢复会话） */
+        _ = SyncService.shared
 
         // 主 runloop 卡顿计量（perf 验收用）
         stallTimer = Timer.scheduledTimer(withTimeInterval: 0.05,
