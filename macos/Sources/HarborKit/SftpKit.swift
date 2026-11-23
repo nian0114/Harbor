@@ -95,11 +95,15 @@ public enum SftpKit {
         fmtSize(UInt64(max(0, bps))) + "/s"
     }
 
-    /// 列表 mtime 列：linux "%m-%d %H:%M"。
+    /// 列表 mtime 列：linux "%m-%d %H:%M"。formatter 每次新建在
+    /// debug 下是行渲染热点（~0.14ms/次）；仅主线程调用，缓存安全。
     public static func fmtMtime(_ t: Int64) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "MM-dd HH:mm"
-        return f.string(from: Date(timeIntervalSince1970: TimeInterval(t)))
+        struct C { static let f: DateFormatter = {
+            let f = DateFormatter()
+            f.dateFormat = "MM-dd HH:mm"
+            return f
+        }() }
+        return C.f.string(from: Date(timeIntervalSince1970: TimeInterval(t)))
     }
 
     /// 目录优先比较器（linux dirfirst_cmp + 列排序组合；kind 列同

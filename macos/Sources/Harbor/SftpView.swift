@@ -1107,17 +1107,20 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
     }
 
     // ---------- 列表模型 ----------
-    /// shown = items 过滤 + 排序（目录恒在前，同 linux dirfirst+cols）。
-    func applyShown() {
-        var f = items
-        if !showHidden { f = f.filter { !$0.name.hasPrefix(".") } }
-        let q = filterEntry.stringValue.trimmingCharacters(
-            in: .whitespaces).lowercased()
-        if !q.isEmpty { f = f.filter { $0.name.lowercased().contains(q) } }
-        let sd = table.sortDescriptors.first
-        let key = SftpKit.SortKey(raw: sd?.key ?? "name")
-        shown = SftpKit.sortEntries(f, key: key,
-            ascending: sd?.ascending ?? true,
+    /// shown 代次：applyShown/rebuildShown 每次递增，后台算完的过期
+    /// 结果（filter 连打、翻页中途）直接丢弃，只有最新一代写回。
+    private var shownGen: UInt = 0
+    /// 过滤 + 排序的纯计算（后台线程可跑；目录恒在前，同 linux
+    /// dirfirst+cols）。2000 条 localized 排序在 debug 下单列 ~0.7s。
+    private static func computeShown(_ src: [FsEntry], hidden: Bool,
+                                     q: String, key: SftpKit.SortKey,
+                                     asc: Bool) -> [FsEntry] {
+        var f = src
+        if !hidden { f = f.filter { !$0.name.hasPrefix(".") } }
+        if !q.isEmpty {
+            f = f.filter { $0.name.lowercased().contains(q) }
+        }
+        return SftpKit.sortEntries(f, key: key, ascending: asc,
             isDir: { $0.isDir }, name: { $0.name },
             value: { e in
                 switch key {
@@ -1127,7 +1130,42 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
                 default: return 0
                 }
             })
-        table.reloadData()
+    }
+    /// shown 写回后的表刷新：全量 reloadData 会把全部可见 rowview
+    /// 销毁重建（debug ~5ms/行）；行数变化通知 + 仅重载可见行即可，
+    /// 离屏行滚动到视野时由 viewFor 惰性生成。
+    private func reloadVisible() {
+        table.noteNumberOfRowsChanged()
+        let r = table.rows(in: table.visibleRect)
+        guard r.length > 0, let range = Range(r) else {
+            table.reloadData()
+            return
+        }
+        table.reloadData(
+            forRowIndexes: IndexSet(range),
+            columnIndexes: IndexSet(integersIn:
+                0..<table.numberOfColumns))
+    }
+    /// shown = items 过滤 + 排序：主线程只拍快照和写回，计算在后台。
+    func applyShown() {
+        let src = items
+        let hidden = showHidden
+        let q = filterEntry.stringValue.trimmingCharacters(
+            in: .whitespaces).lowercased()
+        let sd = table.sortDescriptors.first
+        let key = SftpKit.SortKey(raw: sd?.key ?? "name")
+        let asc = sd?.ascending ?? true
+        shownGen &+= 1
+        let g = shownGen
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let out = Self.computeShown(src, hidden: hidden, q: q,
+                                        key: key, asc: asc)
+            DispatchQueue.main.async {
+                guard let self, self.shownGen == g else { return }
+                self.shown = out
+                self.reloadVisible()
+            }
+        }
     }
     func refresh() {
         guard let fs, let cwd else { return }
@@ -1142,10 +1180,27 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
                              (r.message ?? L("未知错误")))
                 return
             }
+            self.rebuildShown(r.entries, cwd: cwd, lgen: lgen)
+        }
+        _ = g
+    }
+    /// 大目录（2000+）：entry 重建 + 过滤 + 排序一次性在后台算完
+    /// （原逐条 FsEntry 重建 + applyShown 各一遍，debug 下合计 ~1s
+    /// 主线程），回主线程一次提交 items+shown+reloadData。
+    private func rebuildShown(_ es: [FsEntry], cwd: String, lgen: UInt) {
+        let hidden = showHidden
+        let q = filterEntry.stringValue.trimmingCharacters(
+            in: .whitespaces).lowercased()
+        let sd = table.sortDescriptors.first
+        let key = SftpKit.SortKey(raw: sd?.key ?? "name")
+        let asc = sd?.ascending ?? true
+        shownGen &+= 1
+        let g = shownGen
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // 一次性替换（linux splice 大目录修复同义）
             var out: [FsEntry] = []
-            out.reserveCapacity(r.entries.count)
-            for e in r.entries {
+            out.reserveCapacity(es.count)
+            for e in es {
                 if e.name == "." || e.name == ".." ||
                    e.name.contains("/") { continue }
                 out.append(FsEntry(name: e.name,
@@ -1153,10 +1208,16 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
                     size: e.size, mtime: e.mtime, mode: e.mode,
                     isDir: e.isDir, isLink: e.isLink))
             }
-            self.items = out
-            self.applyShown()
+            let sh = Self.computeShown(out, hidden: hidden, q: q,
+                                       key: key, asc: asc)
+            DispatchQueue.main.async {
+                guard let self, self.listGen == lgen,
+                      self.shownGen == g else { return }
+                self.items = out
+                self.shown = sh
+                self.reloadVisible()
+            }
         }
-        _ = g
     }
     private func navSync() {
         backB.isEnabled = !back.isEmpty
@@ -1266,42 +1327,64 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
     }
 
     // ---------- table dataSource/delegate ----------
+    /// 行图标缓存：hbIcon 每次新建 NSImage+lockFocus 重绘，行渲染
+    /// 下是热点；3 种图标全局复用（仅主线程访问）。
+    private static var rowIcons: [String: NSImage] = [:]
+    private static func rowIcon(dir: Bool, link: Bool) -> NSImage {
+        let k = dir ? "d" : link ? "l" : "f"
+        if let i = rowIcons[k] { return i }
+        let i = hbIcon(dir ? "folder" : link ? "link" : "file",
+                       size: 13,
+                       tint: dir ? Theme.blue.color : Theme.text.color)
+        rowIcons[k] = i
+        return i
+    }
+    /// 文本列复用 cell：列 id 各自进池，重取后只更新文本/颜色/字体
+    /// （原每格新建 NSTextField，debug 下 reload 重排是行渲染热点）。
+    private func textCell(_ t: NSTableView,
+                          _ id: NSUserInterfaceItemIdentifier,
+                          _ s: String, dim: Bool,
+                          mono: Bool = false) -> NSTextField {
+        let l = (t.makeView(withIdentifier: id, owner: self)
+                 as? NSTextField) ?? NSTextField(labelWithString: "")
+        l.identifier = id
+        l.stringValue = s
+        l.textColor = dim ? .secondaryLabelColor : .labelColor
+        l.font = mono ? .monospacedSystemFont(ofSize: 11,
+                                              weight: .regular)
+                      : .systemFont(ofSize: NSFont.systemFontSize)
+        return l
+    }
     func numberOfRows(in t: NSTableView) -> Int { shown.count }
     func tableView(_ t: NSTableView, viewFor c: NSTableColumn?,
                    row: Int) -> NSView? {
-        guard row < shown.count else { return nil }
+        guard row < shown.count, let cid = c?.identifier
+        else { return nil }
         let e = shown[row]
-        switch c?.identifier.rawValue {
+        switch cid.rawValue {
         case "name":
-            let row_ = NSStackView()
-            row_.orientation = .horizontal
-            row_.spacing = 6
-            let ic = NSImageView(image: hbIcon(
-                e.isDir ? "folder" : e.isLink ? "link" : "file",
-                size: 13, tint: e.isDir ? Theme.blue.color
-                                        : Theme.text.color))
-            let l = NSTextField(labelWithString: e.name)
-            l.lineBreakMode = .byTruncatingMiddle
-            row_.addArrangedSubview(ic); row_.addArrangedSubview(l)
+            let row_ = (t.makeView(withIdentifier: cid, owner: self)
+                        as? NameCell) ?? NameCell()
+            row_.identifier = cid
+            row_.ic.image = Self.rowIcon(dir: e.isDir, link: e.isLink)
+            row_.l.stringValue = e.name
             row_.toolTip = e.path
             return row_
         case "mtime":
-            let l = NSTextField(labelWithString: SftpKit.fmtMtime(e.mtime))
-            l.textColor = .secondaryLabelColor
-            return l
+            return textCell(t, cid, SftpKit.fmtMtime(e.mtime),
+                            dim: true)
         case "size":
-            return NSTextField(labelWithString:
-                e.isDir ? "—" : SftpKit.fmtSize(e.size))
+            return textCell(t, cid,
+                            e.isDir ? "—" : SftpKit.fmtSize(e.size),
+                            dim: false)
         case "kind":
-            let l = NSTextField(labelWithString:
-                e.isDir ? "folder" : e.isLink ? "link" : "file")
-            l.textColor = .secondaryLabelColor
-            return l
+            return textCell(t, cid,
+                            e.isDir ? "folder" : e.isLink ? "link"
+                                  : "file",
+                            dim: true)
         case "mode":
-            let l = NSTextField(labelWithString: SftpKit.modeString(e.mode))
-            l.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-            l.textColor = .secondaryLabelColor
-            return l
+            return textCell(t, cid, SftpKit.modeString(e.mode),
+                            dim: true, mono: true)
         default: return nil
         }
     }
@@ -1567,6 +1650,21 @@ extension SftpKit.SortKey {
         default: self = .name
         }
     }
+}
+
+/// name 列复用 cell（stack：图标 + 截断标签；makeView 池化）。
+private final class NameCell: NSStackView {
+    let ic = NSImageView()
+    let l = NSTextField(labelWithString: "")
+    init() {
+        super.init(frame: .zero)
+        orientation = .horizontal
+        spacing = 6
+        l.lineBreakMode = .byTruncatingMiddle
+        addArrangedSubview(ic)
+        addArrangedSubview(l)
+    }
+    required init?(coder: NSCoder) { fatalError() }
 }
 
 /// 行快捷键：F5 刷新 / F2 重命名 / ⌫ 删除 / ⌥↑ 上级 / ⌘A 全选。
