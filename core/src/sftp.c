@@ -10,7 +10,9 @@
  * 同时只能一个在飞；不同 HANDLE 的 sftp_read/sftp_write 状态在句柄
  * 上，可以并发。因此引擎设一个全局 ctl 槽串行化所有控制面调用，文件
  * 数据读写直接做 —— 传输并发由后者提供。EAGAIN 后必须用相同参数重试
- * 同一调用（否则已发出的请求串会丢）。
+ * 同一调用（否则已发出的请求串会丢）。注意：会话级出站 packet 槽只
+ * 有一个（session->packet.outbuf），跨 channel 的发包必须由 txo 属主
+ * 门控串行 —— 见 tx_pend 注释。
  *
  * 断线清理：本地临时文件总能删；远端 .harbor-part-* 在断线时清不掉会
  * 留残件，但绝不留下半截最终文件（先写临时名，收尾才 rename 进位）。
@@ -126,6 +128,7 @@ typedef struct xfr {                 /* 传输运行态 */
     uint64_t  total, done;
     uint32_t  files_total, files_done;
     int64_t   last_prog;
+    uint64_t  dbg_calls, dbg_eagain; /* HB_SFTP_DBG 计数 */
 } xfr;
 
 struct sfreq {
@@ -198,8 +201,16 @@ typedef struct {
      * 调用（否则 open 态被踩）。e->sf 上的 ctl 调用由 ctl 槽天然串行，
      * 传输各有独立 sftp channel —— 均无需登记。 */
     sfreq          *io_owner;
+    /* 出站挂起属主（libssh2 会话级出站 packet 槽，见 tx_pend 注） */
+    sfreq          *txo;
+    int64_t         tx_orph0;        /* 孤儿挂起首见时刻（死线用） */
     bool           conn_dead;
     bool           shutting;
+    int            dbg;              /* HB_SFTP_DBG 环境开关 */
+    int64_t        dbg_last;         /* 上次进展时刻（停摆转储用） */
+    int64_t        dbg_tick;         /* 周期转储节拍 */
+    uint64_t       dbg_sweeps;       /* sweep 计数 */
+    uint64_t       dbg_blocked;      /* tx_try 拦截计数（门控生效证据） */
 } eng;
 
 static void ctl_drop(eng *e, sfreq *r);
@@ -559,13 +570,17 @@ static void emit_prog(eng *e, sfreq *r, int force)
     if (!force && now - r->x->last_prog < PROG_MS)
         return;
     r->x->last_prog = now;
+    e->dbg_last = now;              /* 传输推进 = 真进展 */
     emit_res(e, r, HB_SFTP_R_PROGRESS, HB_SFTP_OK, NULL);
 }
 
 /* 终态登记 → 统一进 ST_ZOM：先排干远端句柄再发射 */
 static int req_done(eng *e, sfreq *r, hb_sftp_status st, const char *msg)
 {
-    (void)e;
+    /* 持有出站挂起的请求换产者（收尾调用是别的包，续打规则不同）：
+     * 交出属主 → 由 orphan 排空兜底，否则收尾包会被成功错吞。 */
+    if (e->txo == r)
+        e->txo = NULL;
     r->dst = st;
     free(r->dmsg);
     r->dmsg = msg ? strdup(msg)
@@ -583,6 +598,40 @@ static int req_fail(eng *e, sfreq *r)
     if (st == HB_SFTP_ERR_CONN)
         e->conn_dead = true;
     return req_done(e, r, st, NULL);
+}
+
+/* ==================== 出站挂起属主门控 ==================== */
+
+/* libssh2 ≥1.11 会话级只有一个出站 packet 槽（session->packet.outbuf，
+ * 对齐 pf.c tx_* / ssh.c shell_* 门控）。有包未发完时，别的
+ * transport_send 会替它续发并把成功错记给调用方：借用方负载根本没入
+ * 包（SFTP 层当它已发出 → 等不来的 ack → 停摆判死），真属主重试又把
+ * 同一负载组包重发（dup → 内层密文流坏）。sftp_write/read、meta ctl、
+ * drain、keepalive、channel_open/close 全是这个槽的生产者；channel 分
+ * 了家也没用 —— 槽在会话上。真实网络背压下并发传输必踩（回环不背压
+ * 不现）。属主登记在请求粒度：无挂起或属主本人才可发起调用。 */
+static int tx_pend(eng *e)
+{
+    if (!(libssh2_session_block_directions(e->hp->sess) &
+          LIBSSH2_SESSION_BLOCK_OUTBOUND)) {
+        e->txo = NULL;
+        return 0;
+    }
+    return 1;
+}
+/* 该请求可否发起/续打会产生包的调用。 */
+static int tx_try(eng *e, sfreq *r)
+{
+    int ok = !tx_pend(e) || e->txo == r;
+    if (!ok)
+        e->dbg_blocked++;
+    return ok;
+}
+/* 调用后登记属主（尚无属主时）。 */
+static void tx_note(eng *e, sfreq *r)
+{
+    if (tx_pend(e) && !e->txo)
+        e->txo = r;
 }
 
 /* ============================ ctl 槽 ============================ */
@@ -1248,6 +1297,9 @@ static int walk_local(xfr *x, const char *ldir, const char *rdir,
 static int xfer_fail(eng *e, sfreq *r, hb_sftp_status st, const char *msg)
 {
     xfr *x = r->x;
+    /* 同 req_done：失败换产者 → 出站挂起移交 orphan 排空。 */
+    if (e->txo == r)
+        e->txo = NULL;
     r->dst = st;
     free(r->dmsg);
     r->dmsg = msg ? strdup(msg) : strdup(status_msg(st));
@@ -1289,19 +1341,6 @@ static int xfer_next(sfreq *r)
     r->dst = HB_SFTP_OK;
     r->st = X_Z_DONE;
     return ST_WORK;
-}
-
-/* 有传输在飞？期间禁 drain：libssh2 transport 是 session 级共享，
- * drain 的小包 send 插进 sftp_write 的 EAGAIN 断点之间会触发
- * SOCKET_SEND(-7) 把整条连接打死（loopback 不背压 → 只在真网复现）。
- * 传输期间杂散入站包由传输自身的 read 消耗，drain 可缺席。 */
-static int xfer_active(eng *e)
-{
-    sfreq *r;
-    for (r = e->act_h; r; r = r->next)
-        if (r->is_xfer)
-            return 1;
-    return 0;
 }
 
 /* 有元数据请求（LIST/STAT/…）在跑或排队？ */
@@ -1801,11 +1840,13 @@ static int xfer_step(eng *e, sfreq *r)
              * 传输的调用在各自 channel 上互不干扰。 */
             {
             size_t cap = xfer_wcall_cap(e);
+            x->dbg_calls++;
             n = libssh2_sftp_write(x->rh, (const char *)x->buf + x->boff,
                                    x->blen - x->boff > cap
                                        ? cap : x->blen - x->boff);
             }
             if (n == LIBSSH2_ERROR_EAGAIN) {
+                x->dbg_eagain++;
                 if (xfer_stalled(r))
                     return xfer_fail(e, r, HB_SFTP_ERR_CONN, NULL);
                 return ST_BLK;
@@ -2103,6 +2144,7 @@ static int eng_sweep(eng *e)
     int progressed = 0;
     uint32_t cids[64];
     size_t cni;
+    e->dbg_sweeps++;
 
     /* 取消集合快照（append/realloc 在 mu 内，裸读会 UAF） */
     pthread_mutex_lock(&e->mu);
@@ -2110,10 +2152,36 @@ static int eng_sweep(eng *e)
     memcpy(cids, e->cancel_ids, cni * sizeof *cids);
     pthread_mutex_unlock(&e->mu);
 
+    /* 出站挂起无主（属主已收尾/失败/收割）：对齐 pf.c tx_sacrifice
+     * —— 借任一 channel 发 1 字节 window-adjust 代偿排空（1.11.0
+     * mismatch-resume 会把残包续发干净；adjust 自己被吞仅多记 1
+     * 字节窗口，远端不知情因而无害）。排空前所有请求被 tx_try 挡住；
+     * EAGAIN 不算进展 → 交还 poll 等 POLLOUT，不空转。
+     * 1.11.1 起 mismatch 直接 EAGAIN 且不再排空 —— 代偿排不动时
+     * 给死线判连接死，总比全请求永久饿死强（正常路径下属主生前会
+     * 由 cancel 泵清，孤儿极少出现）。 */
+    if (tx_pend(e) && !e->txo && e->sf) {
+        LIBSSH2_CHANNEL *ch = libssh2_sftp_get_channel(e->sf);
+        int arc = ch ? libssh2_channel_receive_window_adjust2(ch, 1, 1,
+                                                            NULL)
+                     : LIBSSH2_ERROR_EAGAIN;
+        if (arc != LIBSSH2_ERROR_EAGAIN)
+            progressed = 1;
+        if (!e->tx_orph0)
+            e->tx_orph0 = hb_now_ms();
+        else if (hb_now_ms() - e->tx_orph0 > HB_SFTP_STALL_MS)
+            e->conn_dead = true;      /* 孤儿残包排不动 → 链路判死 */
+    } else {
+        e->tx_orph0 = 0;
+    }
+
     /* drain 伪请求：吃空闲期杂散入站包（keepalive 回复等）。
      * 阻塞时不得短路整个 sweep —— 活跃请求（尤其传输）还要继续走。 */
     if (e->draining) {
-        if (ctl_do(e, &e->drain, CTL_LSTAT, ".", NULL, 0, NULL, NULL)
+        if (!tx_try(e, &e->drain)) {
+            /* 出站挂起属主在别家 → 让位（伪请求无截止期） */
+        } else if (ctl_do(e, &e->drain, CTL_LSTAT, ".", NULL, 0, NULL,
+                          NULL)
             != ST_BLK) {
             e->draining = false;
             if (e->ctl.rc < 0 &&
@@ -2121,6 +2189,7 @@ static int eng_sweep(eng *e)
                 e->conn_dead = true;
             progressed = 1;
         }
+        tx_note(e, &e->drain);
     }
 
     /* 两遍序：元数据请求永远先于传输 step。一个 4MiB read/write
@@ -2134,19 +2203,41 @@ static int eng_sweep(eng *e)
             pp = &r->next;          /* pass0=非传输, pass1=传输 */
             continue;
         }
+        if (!tx_try(e, r)) {
+            /* 出站挂起属主在别家：本请求这轮不得发任何包 */
+            pp = &r->next;
+            continue;
+        }
         if (id_in(cids, cni, r->id)) {
             /* 取消：在飞 ctl 操作必须先泵完才能释放槽 */
             if (r->ctl_pending) {
                 if (ctl_pump(e) == ST_BLK) {
+                    tx_note(e, r);
                     pp = &r->next;
                     continue;
                 }
                 r->ctl_pending = false;
             }
+            /* 同理：出站挂起属主的请求也必须先用自己的 step 把残包
+             * 泵完 —— 直接换清理序列就是换参数续打（1.11.0 被吞包 /
+             * 1.11.1 mismatch-EAGAIN），且属主一死残包即成不可排
+             * 的孤儿。 */
+            if (e->txo == r) {
+                st = req_step(e, r);
+                tx_note(e, r);
+                if (e->txo == r) {
+                    pp = &r->next;
+                    progressed = (st == ST_WORK) ? 1 : progressed;
+                    continue;
+                }
+                if (st == ST_DONE)
+                    goto reap;
+            }
             /* 同理：传输直调在飞也要先驱动到完成 —— 直接换状态会让
              * EAGAIN 的 read/write 永远等不到同参续打（io_owner 卡死） */
             if (e->io_owner == r) {
                 st = req_step(e, r);
+                tx_note(e, r);
                 if (st == ST_DONE)
                     goto reap;
                 if (e->io_owner == r) {
@@ -2160,6 +2251,7 @@ static int eng_sweep(eng *e)
             pthread_mutex_unlock(&e->mu);
             req_cancel(e, r);
             st = req_step(e, r);        /* 立即跑清理序列第一步 */
+            tx_note(e, r);
             if (st == ST_DONE)
                 goto reap;
             pp = &r->next;
@@ -2169,6 +2261,7 @@ static int eng_sweep(eng *e)
         st = req_step(e, r);
         if (st == ST_DONE) {
         reap:
+            e->dbg_last = hb_now_ms();   /* 请求完成 = 真进展 */
             *pp = r->next;
             if (!e->act_h)
                 e->act_t = NULL;
@@ -2180,17 +2273,51 @@ static int eng_sweep(eng *e)
                 e->n_xfer--;
             if (e->io_owner == r)
                 e->io_owner = NULL;
+            if (e->txo == r)
+                e->txo = NULL;      /* 残包移交 orphan 排空 */
             ctl_drop(e, r);
             req_free(r);
             progressed = 1;
             continue;
         }
+        tx_note(e, r);              /* 本轮若产生挂起 → 登记属主 */
         if (st == ST_WORK)
             progressed = 1;
         pp = &r->next;
       }
     }
     return progressed;
+}
+
+/* 停摆转储（HB_SFTP_DBG）：长时间无进展时打印门控与请求状态 */
+static void eng_dbg_dump(eng *e)
+{
+#ifndef NDEBUG
+    sfreq *r;
+    int dirs = e->hp ? libssh2_session_block_directions(e->hp->sess) : -1;
+    fprintf(stderr,
+            "[sftpdbg] idle dirs=%x txo=%u io=%u ctl=%u drain=%d dead=%d"
+            " sweeps=%llu blocked=%llu\n",
+            dirs,
+            e->txo ? e->txo->id : 0,
+            e->io_owner ? e->io_owner->id : 0,
+            e->ctl.owner ? e->ctl.owner->id : 0,
+            (int)e->draining, (int)e->conn_dead,
+            (unsigned long long)e->dbg_sweeps,
+            (unsigned long long)e->dbg_blocked);
+    for (r = e->act_h; r; r = r->next)
+        fprintf(stderr,
+                "[sftpdbg]  req=%u op=%d st=%d xf=%d ctlp=%d wsub=%d "
+                "done=%llu/%llu wr=%llu ea=%llu\n",
+                r->id, r->op, r->st, (int)r->is_xfer,
+                (int)r->ctl_pending, r->wsub,
+                r->x ? (unsigned long long)r->x->done : 0ull,
+                r->x ? (unsigned long long)r->x->total : 0ull,
+                r->x ? (unsigned long long)r->x->dbg_calls : 0ull,
+                r->x ? (unsigned long long)r->x->dbg_eagain : 0ull);
+#else
+    (void)e;
+#endif
 }
 
 /* 断线：全部按 CONN 终态；本地临时件总能删 */
@@ -2227,6 +2354,7 @@ static void eng_abort_all(eng *e, hb_sftp_status st)
     e->n_xfer = 0;
     e->ctl.owner = NULL;
     e->io_owner = NULL;
+    e->txo = NULL;
     e->draining = false;
 }
 
@@ -2241,6 +2369,7 @@ int hb__sftp_run(void *ctx, hb_session *s)
         return -1;
     e->s = s;
     e->h = h;
+    e->dbg_last = hb_now_ms();
     e->hp = hb__ssh_target(h);
 
     for (;;) {
@@ -2260,8 +2389,16 @@ int hb__sftp_run(void *ctx, hb_session *s)
 
         eng_promote(e);
 
+        if (e->dbg && hb_now_ms() - e->dbg_tick > 2000) {
+            e->dbg_tick = hb_now_ms();
+            eng_dbg_dump(e);
+        }
         if (eng_sweep(e))
             continue;                   /* 有进展 → 立即下一轮 */
+        if (e->dbg && hb_now_ms() - e->dbg_last > 3000) {
+            e->dbg_last = hb_now_ms();
+            eng_dbg_dump(e);
+        }
 
         /* 全 ST_BLK / 空闲 → poll 等 socket 或命令管道 */
         {
@@ -2273,7 +2410,7 @@ int hb__sftp_run(void *ctx, hb_session *s)
             if (e->shutting && !e->act_h && !e->pend_h && !e->draining)
                 break;                  /* 清理完 */
 
-            tmo = hb__ssh_ka_tick(h, 1);
+            tmo = hb__ssh_ka_tick(h, !tx_pend(e));
             if (h->disconnected) {
                     e->conn_dead = true;
                 continue;
@@ -2287,8 +2424,11 @@ int hb__sftp_run(void *ctx, hb_session *s)
              * 漏订会让 ka_last_in 不刷新、半开检测误判断线，
              * 也会让 drain 机制失去触发机会。 */
             pf[1].events = POLLIN | POLLERR | POLLHUP;
-            (void)dirs;
-            if (dirs & LIBSSH2_SESSION_BLOCK_OUTBOUND)
+            if ((dirs & LIBSSH2_SESSION_BLOCK_OUTBOUND) || tx_pend(e))
+                /* block_directions 只报最后一个 EAGAIN 调用的方向：
+                 * 挂起出站包存在但上个调用堵在入站时 dirs 不含
+                 * OUTBOUND —— 不补订 POLLOUT 残包只能靠 50ms 兜底
+                 * 周期慢排空（限速链路实测吞吐掉一个量级）。 */
                 pf[1].events |= POLLOUT;
             /* block_directions 只反映最后一个 EAGAIN 调用想等的方向；
              * ctl 槽在飞必然等入站 → 总补 POLLIN。 */
@@ -2317,9 +2457,10 @@ int hb__sftp_run(void *ctx, hb_session *s)
                  * 避开 ctl 槽占用与独占调用（sftp_init/shutdown）；
                  * 元数据在跑/排队时也得让位 —— drain 每轮占一个 ctl
                  * 槽位会把 LIST 的插空延迟放大（重负载下实测顶爆
-                 * 500ms 预算）；传输期间的杂散包本就被各自 read 消耗。 */
+                 * 500ms 预算）。发包冲突已由 txo 门控兜住，传输期
+                 * 不再另设禁区。 */
                 if (!e->ctl.owner && !e->draining && !e->conn_dead &&
-                    !e->io_owner && !meta_pending(e) && !xfer_active(e)) {
+                    !e->io_owner && !meta_pending(e)) {
                     memset(&e->drain, 0, sizeof e->drain);
                     e->drain.op = RQ_DRAIN;
                     e->draining = true;
@@ -2330,7 +2471,7 @@ int hb__sftp_run(void *ctx, hb_session *s)
                 h->disconnected = true;
             }
         }
-        (void)hb__ssh_ka_tick(h, 1);
+        (void)hb__ssh_ka_tick(h, !tx_pend(e));
         if (h->disconnected)
             e->conn_dead = true;
     }
@@ -2375,6 +2516,9 @@ void *hb__sftp_eng_new(void)
     pthread_mutex_init(&e->mu, NULL);
     e->conc = DEF_CONC;
     e->drain.op = RQ_DRAIN;
+#ifndef NDEBUG
+    e->dbg = getenv("HB_SFTP_DBG") != NULL;
+#endif
     return e;
 }
 

@@ -227,6 +227,17 @@ static int tcp_connect(hb_ssh *h, struct addrinfo *res, int timeout_ms,
         int rc;
         if (fd < 0)
             continue;
+#ifndef NDEBUG
+        {
+            /* HB_SNDBUF（测试钩子，仅 debug 构建）：钳小发送缓冲
+             * 制造确定背压 —— SFTP 并发门控回归测试用它把出站
+             * 半包逼出来。 */
+            const char *sb = getenv("HB_SNDBUF");
+            int sv = sb ? atoi(sb) : 0;
+            if (sv > 0)
+                setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sv, sizeof sv);
+        }
+#endif
         rc = connect(fd, res->ai_addr, res->ai_addrlen);
         if (rc != 0 && errno != EINPROGRESS) {
             if (errno == ECONNREFUSED)

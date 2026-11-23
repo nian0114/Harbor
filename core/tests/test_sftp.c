@@ -12,7 +12,12 @@
 
 #include "sftp_priv.h"      /* 目录穿越防护判定函数（直接单测） */
 
+#include <arpa/inet.h>
 #include <dirent.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <pthread.h>
+#include <sys/socket.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -923,6 +928,261 @@ static void test_proxyjump(void)
     sdrv_free(&d);
 }
 
+/* ---------------- T9: 限速链路下并发传输不互踩（txo 门控） ---------------- */
+
+/* 回环链路从不背压，libssh2 出站半包永远瞬间排空 → 借包互踩不现。
+ * 在客户端与 fixture 之间夹一个限速 TCP 中继：client→server 方向
+ * 小片读 + 睡，把客户端内核发送缓冲打满，制造持续的半包窗口。 */
+typedef struct {
+    int     lfd, cfd, sfd;
+    int     port;
+    int     chunk;                  /* client→server 每片字节数 */
+    int     usec;                   /* …每片后睡眠 */
+    int     bevery, bpause;         /* 停读脉冲周期/时长（ms） */
+    volatile int stop;
+    volatile uint64_t up, down;     /* 转发字节计数 */
+    pthread_t th;
+} trelay;
+
+static void relay_close_conn(trelay *t)
+{
+    if (t->cfd >= 0) close(t->cfd);
+    if (t->sfd >= 0) close(t->sfd);
+    t->cfd = t->sfd = -1;
+}
+
+static void *relay_run(void *arg)
+{
+    trelay *t = arg;
+    char buf[16384];
+    int64_t burst0 = now_ms();
+    while (!t->stop) {
+        /* 周期性停读 bpause：客户端内核发送缓冲（loopback 自动调
+         * 谐可至 tcp_wmem_max 数 MB）确定性灌满 → send() 短写 →
+         * libssh2 出站半包（txo 门控的测试对象）。平时全速转发。 */
+        if (now_ms() - burst0 > t->bevery) {
+            usleep((useconds_t)t->bpause * 1000);
+            burst0 = now_ms();
+        }
+        struct pollfd pf[3] = {
+            { t->lfd, POLLIN, 0 },
+            { t->cfd, POLLIN, 0 },
+            { t->sfd, POLLIN, 0 } };
+        int n = poll(pf, 3, 20);
+        if (n <= 0)
+            continue;
+        if (pf[0].revents & POLLIN) {
+            int c = accept(t->lfd, NULL, NULL);
+            if (c >= 0 && t->cfd < 0) {
+                struct sockaddr_in a;
+                t->cfd = c;
+                /* 不钳窗口：靠中继慢读把客户端内核发送缓冲灌满 —
+                 * 每个 send 必然短写 → 出站半包持续存在（门控受测）。
+                 * 钳 SO_RCVBUF 会撞 SWS 节流（窗口增量按半缓冲/MSS
+                 * 才公布，吞吐掉到 ~75KB/s 假阳性）。 */
+                if (getenv("TXG_RCVBUF")) {
+                    int rcv = atoi(getenv("TXG_RCVBUF"));
+                    if (rcv > 0)
+                        setsockopt(c, SOL_SOCKET, SO_RCVBUF,
+                                   &rcv, sizeof rcv);
+                }
+                memset(&a, 0, sizeof a);
+                a.sin_family = AF_INET;
+                a.sin_port = htons((uint16_t)fx.port);
+                a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+                t->sfd = socket(AF_INET, SOCK_STREAM, 0);
+                if (t->sfd < 0 ||
+                    connect(t->sfd, (struct sockaddr *)&a,
+                            sizeof a) < 0)
+                    relay_close_conn(t);
+            } else if (c >= 0) {
+                close(c);
+            }
+        }
+        /* client→server：尽量快转（窗口已由 SO_RCVBUF 钳到 8KB →
+         * 客户端 send 必然大片短写，TXG_USEC 可额外限速） */
+        if (pf[1].revents & POLLIN && t->cfd >= 0) {
+            ssize_t nr = read(t->cfd, buf, (size_t)t->chunk);
+            ssize_t off = 0;
+            int one = 1;
+            if (nr <= 0) { relay_close_conn(t); continue; }
+            /* 小窗口下 delayed-ACK 会把吞吐钉死在 window/40ms；
+             * QUICKACK 每次读后重臂，ack 立返 → 窗口快速复开，
+             * 短写照旧（背压保持）但吞吐不再塌方（Linux-only，
+             * macOS 无此项，靠 BEVERY 停顿造背压）。 */
+#ifdef TCP_QUICKACK
+            setsockopt(t->cfd, IPPROTO_TCP, TCP_QUICKACK,
+                       &one, sizeof one);
+#endif
+            (void)one;
+            while (off < nr &&
+                   write(t->sfd, buf + off, (size_t)(nr - off)) > 0)
+                off = nr;   /* 本机 relay 写基本一次成 */
+            t->up += (uint64_t)nr;
+            if (t->usec)
+                usleep((useconds_t)t->usec);
+        }
+        /* server→client：不限速 */
+        if (pf[2].revents & POLLIN && t->sfd >= 0) {
+            ssize_t nr = read(t->sfd, buf, sizeof buf);
+            ssize_t off = 0;
+            if (nr <= 0) { relay_close_conn(t); continue; }
+            while (off < nr) {
+                ssize_t nw = write(t->cfd, buf + off,
+                                   (size_t)(nr - off));
+                if (nw <= 0) break;
+                off += nw;
+            }
+            t->down += (uint64_t)nr;
+        }
+    }
+    return NULL;
+}
+
+static int relay_start(trelay *t)
+{
+    struct sockaddr_in a;
+    socklen_t al = sizeof a;
+    memset(t, 0, sizeof *t);
+    t->cfd = t->sfd = -1;
+    t->chunk = getenv("TXG_CHUNK") ? atoi(getenv("TXG_CHUNK")) : 16384;
+    t->usec = getenv("TXG_USEC") ? atoi(getenv("TXG_USEC")) : 0;
+    t->bevery = getenv("TXG_BEVERY") ? atoi(getenv("TXG_BEVERY")) : 3000;
+    t->bpause = getenv("TXG_BPAUSE") ? atoi(getenv("TXG_BPAUSE")) : 5000;
+    if (t->bevery <= 0)  t->bevery = 3000;
+    if (t->bpause <= 0)  t->bpause = 5000;
+    if (t->chunk <= 0 || t->chunk > 16384)
+        t->chunk = 16384;
+    t->lfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (t->lfd < 0)
+        return -1;
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(t->lfd, (struct sockaddr *)&a, sizeof a) < 0 ||
+        getsockname(t->lfd, (struct sockaddr *)&a, &al) < 0 ||
+        listen(t->lfd, 4) < 0) {
+        close(t->lfd);
+        return -1;
+    }
+    t->port = ntohs(a.sin_port);
+    if (pthread_create(&t->th, NULL, relay_run, t) != 0) {
+        close(t->lfd);
+        return -1;
+    }
+    return 0;
+}
+
+static void relay_stop(trelay *t)
+{
+    t->stop = 1;
+    pthread_join(t->th, NULL);
+    relay_close_conn(t);
+    close(t->lfd);
+}
+
+static void test_txgate(void)
+{
+#ifdef NDEBUG
+    fprintf(stderr, "txgate: skip (NDEBUG — HB_SNDBUF 钩子不存在,"
+                    " loopback 制造不出出站半包)\n");
+    return;
+#else
+    sdrv d;
+    hb_session *s;
+    hb_ssh_opts o = base_opts();
+    trelay t;
+    char lp[PATH_MAX], r1[PATH_MAX], r2[PATH_MAX], r3[PATH_MAX];
+    char h0[65], h1[65], h2[65], h3[65];
+    char kh_orig[sizeof fx.khline];
+    uint32_t q1, q2, q3, ql;
+    hb_sftp_result *r;
+    int i;
+
+    CHECK(relay_start(&t) == 0);
+    o.target.port = (uint16_t)t.port;
+    /* 钳小客户端发送缓冲：FXP 流水线的在飞量（~800KB）远小于
+     * loopback 自动调谐的发送缓冲（可至数 MB），不钳则 send()
+     * 永不短写、出站半包根本不现，门控测试形同空转。 */
+    setenv("HB_SNDBUF", "32768", 0);
+    /* known_hosts 行按 [h]:p 匹配 —— 把 fixture 行的端口换成
+     * 中继监听口（密钥 blob 不变），否则 TOFU 拒连。 */
+    memcpy(kh_orig, fx.khline, sizeof kh_orig);
+    snprintf(fx.khline, sizeof fx.khline, "[127.0.0.1]:%d %s",
+             t.port, strchr(kh_orig, ' ') + 1);
+    sdrv_init(&d);
+    s = sftp_conn(&d, &o);
+    memcpy(fx.khline, kh_orig, sizeof kh_orig);
+    CHECK(s != NULL);
+    if (!s) { sdrv_free(&d); relay_stop(&t); return; }
+
+    /* 3 并发 ~8MB 上传 + 传输中连续 LIST：无 txo 门控时借用方的
+     * transport_send 替残包续发并把成功错记给借用方（包被吞 → 等不
+     * 来的 ack → 停摆判死），真属主重试又重发同一负载（dup → 流坏）。 */
+    joinp(lp, sizeof lp, LD, "txg-src");
+    CHECK(wfile(lp, 8u * 1024 * 1024, 0600, 77) == 0);
+    joinp(r1, sizeof r1, RD, "txg1");
+    joinp(r2, sizeof r2, RD, "txg2");
+    joinp(r3, sizeof r3, RD, "txg3");
+    q1 = hb_sftp_upload(s, lp, r1, HB_SFTP_OVERWRITE);
+    q2 = getenv("TXG_SINGLE")
+             ? 0 : hb_sftp_upload(s, lp, r2, HB_SFTP_OVERWRITE);
+    q3 = getenv("TXG_SINGLE")
+             ? 0 : hb_sftp_upload(s, lp, r3, HB_SFTP_OVERWRITE);
+    ql = hb_sftp_list(s, RD);
+    CHECK(q1 && ql);
+    if (!getenv("TXG_SINGLE"))
+        CHECK(q2 && q3);
+    for (i = 0; i < 8; i++) {
+        usleep(getenv("TXG_FASTLIST") ? 250000 : 2000000);
+        pump(s, &d);
+        if (!getenv("TXG_NOLIST"))
+            (void)hb_sftp_list(s, RD);   /* 传输期间持续发元数据包 */
+    }
+    r = wait_done(s, &d, q1, 300000);
+    if (!(r && r->status == HB_SFTP_OK))
+        fprintf(stderr, "txgate q1: r=%p st=%d msg=%s\n", (void *)r,
+                r ? r->status : -1, r && r->message ? r->message : "?");
+    CHECK(r && r->status == HB_SFTP_OK);
+    if (q2) {
+        r = wait_done(s, &d, q2, 300000);
+        if (!(r && r->status == HB_SFTP_OK))
+            fprintf(stderr, "txgate q2: r=%p st=%d msg=%s\n", (void *)r,
+                    r ? r->status : -1,
+                    r && r->message ? r->message : "?");
+        CHECK(r && r->status == HB_SFTP_OK);
+    }
+    if (q3) {
+        r = wait_done(s, &d, q3, 300000);
+        if (!(r && r->status == HB_SFTP_OK))
+            fprintf(stderr, "txgate q3: r=%p st=%d msg=%s\n", (void *)r,
+                    r ? r->status : -1,
+                    r && r->message ? r->message : "?");
+        CHECK(r && r->status == HB_SFTP_OK);
+    }
+    r = wait_done(s, &d, ql, 30000);
+    if (!(r && r->status == HB_SFTP_OK))
+        fprintf(stderr, "txgate ql: r=%p st=%d msg=%s\n", (void *)r,
+                r ? r->status : -1, r && r->message ? r->message : "?");
+    CHECK(r && r->status == HB_SFTP_OK);
+    CHECK(sha256(lp, h0) == 0);
+    CHECK(sha256(r1, h1) == 0 && !strcmp(h0, h1));
+    if (q2)
+        CHECK(sha256(r2, h2) == 0 && !strcmp(h0, h2));
+    if (q3)
+        CHECK(sha256(r3, h3) == 0 && !strcmp(h0, h3));
+    /* 会话仍活 */
+    ql = hb_sftp_realpath(s, ".");
+    r = wait_done(s, &d, ql, 15000);
+    CHECK(r && r->status == HB_SFTP_OK);
+    hb_session_free(s);
+    sdrv_free(&d);
+    relay_stop(&t);
+    fprintf(stderr, "txgate relay: up=%llu down=%llu\n",
+            (unsigned long long)t.up, (unsigned long long)t.down);
+#endif
+}
+
 /* T10: 目录穿越防护 —— 判定函数单测（假服务器无法伪造，直接测逻辑） */
 static void test_safenames(void)
 {
@@ -1071,8 +1331,9 @@ static void test_links(void)
     sdrv_free(&d);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    const char *only = argc > 1 ? argv[1] : NULL;
     char cmd[PATH_MAX + 64];
     int rc = hb_sshd_start(&fx);
     if (rc == 77)
@@ -1086,12 +1347,15 @@ int main(void)
     mkdir(RD, 0755);
     mkdir(LD, 0755);
 
-    test_safenames();
-    test_main_ops();
-    test_atomicity();
-    test_stall_bound();
-    test_links();
-    test_proxyjump();
+#define RUN(t) do { if (!only || !strcmp(only, #t)) t(); } while (0)
+    RUN(test_safenames);
+    RUN(test_main_ops);
+    RUN(test_atomicity);
+    RUN(test_stall_bound);
+    RUN(test_links);
+    RUN(test_proxyjump);
+    RUN(test_txgate);
+#undef RUN
 
     hb_sshd_stop(&fx);
     snprintf(cmd, sizeof cmd, "true");
