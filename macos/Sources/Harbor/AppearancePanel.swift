@@ -148,6 +148,25 @@ final class AppearancePanel: NSView {
         }
         y += 14
 
+        // ---- 数据备份（.harbor-backup 加密导出/导入）----
+        let bk = NSTextField(labelWithString: L("数据备份"))
+        bk.font = .systemFont(ofSize: 12, weight: .semibold)
+        bk.hbText = "termDim"
+        bk.frame = NSRect(x: 24, y: y, width: 200, height: 20)
+        addSubview(bk)
+        y += 26
+        let ex = NSButton(title: L("导出加密备份…"), target: self,
+                          action: #selector(exportBackup))
+        ex.bezelStyle = .rounded
+        ex.frame = NSRect(x: 24, y: y, width: 150, height: 24)
+        ex.setAccessibilityIdentifier("bk-export")
+        addSubview(ex)
+        let im = NSButton(title: L("导入加密备份…"), target: self,
+                          action: #selector(importBackup))
+        im.bezelStyle = .rounded
+        im.frame = NSRect(x: 184, y: y, width: 150, height: 24)
+        im.setAccessibilityIdentifier("bk-import")
+        addSubview(im)
         y += 40
         frame = NSRect(x: 0, y: 0, width: 480, height: y)
     }
@@ -297,5 +316,164 @@ final class ShortcutCapButton: NSButton {
         // 冲突解绑可能影响其它行 → 全量刷新标题
         (superview as? AppearancePanel)?.refreshShortcuts()
         if superview == nil { refreshTitle() }
+    }
+}
+
+// ---------- 加密备份（FR-15，docs/api/backup-format.md）----------
+/// 导出：文件面板 → 口令+确认 → worker 里 hb_backup_export + 写盘。
+/// 口令走 [CChar] 缓冲，用完 memzero；字段同时清空。
+/// 导入：读文件 → 口令 → worker preview（不写库）→ 展示对象数确认 →
+/// 主线程 import（最后一步写库）。口令错/损坏 = HB_ERR_INVAL，库不变。
+extension AppearancePanel {
+    @objc func exportBackup() {
+        let sp = NSSavePanel()
+        sp.nameFieldStringValue = "harbor.harbor-backup"
+        guard sp.runModal() == .OK, let url = sp.url else { return }
+        askBackupPassword(confirm: true) { [weak self] pw in
+            guard let self, var pw else { return }
+            DispatchQueue.global().async {
+                var out: UnsafeMutablePointer<UInt8>?
+                var len = 0
+                var msg = L("导出失败")
+                defer { for i in pw.indices { pw[i] = 0 } }
+                let path = url.path
+                var err = HB_ERR_INVALID
+                if let v = self.v.vault {
+                    err = pw.withUnsafeMutableBufferPointer { bp in
+                        hb_backup_export(v, bp.baseAddress, &out, &len)
+                    }
+                }
+                if err == HB_OK, let o = out {
+                    let d = Data(bytes: o, count: len)
+                    for i in 0..<len { o[i] = 0 }
+                    free(o)
+                    do {
+                        try d.write(to: URL(fileURLWithPath: path))
+                        msg = L("加密备份已导出")
+                    } catch { msg = L("导出失败") }
+                }
+                DispatchQueue.main.async { self.bkAlert(msg) }
+            }
+        }
+    }
+
+    @objc func importBackup() {
+        let op = NSOpenPanel()
+        guard op.runModal() == .OK, let u = op.url,
+              let data = try? Data(contentsOf: u) else {
+            bkAlert(L("无法读取备份文件")); return
+        }
+        askBackupPassword(confirm: false) { [weak self] pw in
+            guard let self, var pw else { return }
+            DispatchQueue.global().async {
+                var st = hb_backup_stat()
+                var perr = HB_ERR_INVALID
+                data.withUnsafeBytes { raw in
+                    pw.withUnsafeMutableBufferPointer { bp in
+                        perr = hb_backup_preview(
+                            raw.baseAddress!.assumingMemoryBound(
+                                to: UInt8.self),
+                            raw.count, bp.baseAddress, &st)
+                    }
+                }
+                DispatchQueue.main.async {
+                    guard perr == HB_OK else {
+                        for i in pw.indices { pw[i] = 0 }
+                        self.bkAlert(L("口令错误或文件已损坏"))
+                        return
+                    }
+                    // 移交所有权：置空本帧副本，box 独持存储才能真擦除
+                    let box = PWBox(pw); pw = []
+                    self.confirmImport(data: data,
+                                       pw: box, total: st.total)
+                }
+            }
+        }
+    }
+
+    /// [CChar] 所有权盒：让数组存储唯一持有，清零才真写回原内存。
+    final class PWBox { var buf: [CChar]; init(_ b: [CChar]) { buf = b } }
+    private func confirmImport(data: Data,
+                               pw box: PWBox, total: Int) {
+        let a = NSAlert()
+        a.messageText = L("导入加密备份")
+        a.informativeText = String(format:
+            L("备份文件校验通过，包含 %d 个对象。"
+              + "同 id 对象与密钥将被覆盖，此操作不可撤销。"), total)
+        a.addButton(withTitle: L("导入"))
+        a.addButton(withTitle: L("取消"))
+        DialogRegistry.shared.present(alert: a, kind: "bk-import",
+                                      in: window) { [weak self] ok in
+            guard let self else { return }
+            defer { for i in box.buf.indices { box.buf[i] = 0 } }
+            guard ok else { return }
+            var st = hb_backup_stat()
+            var err = HB_ERR_INVALID
+            data.withUnsafeBytes { raw in
+                box.buf.withUnsafeMutableBufferPointer { bp in
+                    if let v = self.v.vault {
+                        err = hb_backup_import(v,
+                            raw.baseAddress!.assumingMemoryBound(
+                                to: UInt8.self),
+                            raw.count, bp.baseAddress, &st)
+                    }
+                }
+            }
+            self.bkAlert(err == HB_OK
+                ? String(format: L("已导入：新增 %d，覆盖 %d"),
+                         st.created, st.overwritten)
+                : L("口令错误或文件已损坏"))
+        }
+    }
+
+    /// 口令对话框：导出=新口令+确认，导入=解密口令。
+    /// 完成回调给 [CChar]（含 NUL 结尾），用毕由调用方清零。
+    private func askBackupPassword(confirm: Bool,
+                                   cb: @escaping ([CChar]?) -> Void) {
+        let a = NSAlert()
+        a.messageText = confirm ? L("导出加密备份") : L("导入加密备份")
+        a.informativeText = confirm ? L("设置备份密码")
+                                      : L("输入该备份的导出密码：")
+        a.addButton(withTitle: L("确定")); a.addButton(withTitle: L("取消"))
+        let p1 = NSSecureTextField(frame: NSRect(x: 0, y: 28,
+                                               width: 240, height: 22))
+        p1.placeholderString = L("备份密码")
+        p1.setAccessibilityIdentifier("bk-pw")
+        let vv = NSView(frame: NSRect(x: 0, y: 0, width: 240,
+                                      height: confirm ? 56 : 30))
+        var p2: NSSecureTextField?
+        if confirm {
+            let f = NSSecureTextField(frame: NSRect(x: 0, y: 0,
+                                                    width: 240, height: 22))
+            f.placeholderString = L("确认备份密码")
+            f.setAccessibilityIdentifier("bk-pw2")
+            p2 = f; vv.addSubview(f)
+        }
+        vv.addSubview(p1)
+        a.accessoryView = vv
+        DialogRegistry.shared.present(alert: a, kind: "bk-pw",
+                                      in: window) { ok in
+            defer { p1.stringValue = ""; p2?.stringValue = "" }
+            guard ok else { cb(nil); return }
+            let s1 = p1.stringValue
+            guard !s1.isEmpty,
+                  p2 == nil || p2!.stringValue == s1 else {
+                if p2 != nil {
+                    let b = NSAlert()
+                    b.messageText = L("两次输入的密码不一致")
+                    DialogRegistry.shared.present(alert: b, kind: "bk-err",
+                                                  in: self.window) { _ in }
+                }
+                cb(nil); return
+            }
+            cb(Array(s1.utf8CString))
+        }
+    }
+
+    private func bkAlert(_ t: String) {
+        let a = NSAlert()
+        a.messageText = t
+        DialogRegistry.shared.present(alert: a, kind: "bk-toast",
+                                      in: window) { _ in }
     }
 }
