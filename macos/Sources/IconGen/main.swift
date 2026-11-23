@@ -93,6 +93,8 @@ func parseD(_ d: String) -> CGPath {
                    : CGPoint(x: x, y: y)
     }
     while i < d.endIndex {
+        while i < d.endIndex && isSep(d[i]) { i = d.index(after: i) }
+        guard i < d.endIndex else { break }
         if d[i].isLetter { cmd = d[i]; i = d.index(after: i) }
         let rel = cmd.isLowercase
         switch Character(cmd.lowercased()) {
@@ -159,7 +161,7 @@ func arcSegs(from p0: CGPoint, to p1: CGPoint, rx: Double, ry: Double,
         let s = ux*vy - uy*vx < 0 ? -1.0 : 1.0
         return s * acos(c)
     }
-    var th = ang(1, 0, (x1p - cxp)/rx, (y1p - cyp)/ry)
+    let th = ang(1, 0, (x1p - cxp)/rx, (y1p - cyp)/ry)
     var dth = ang((x1p - cxp)/rx, (y1p - cyp)/ry,
                   (-x1p - cxp)/rx, (-y1p - cyp)/ry)
     if !sweep && dth > 0 { dth -= 2 * .pi }
@@ -214,11 +216,10 @@ func render(svg: String, into ctx: CGContext, size: CGFloat,
             let id = str(tag, "id") ?? ""
             var g = Grad()
             // 找配对 </linearGradient> 收集 stops
-            if let e = rest.firstIndex(of: "</linearGradient>") {
-                let body = rest[rest.startIndex..<e]
-                var b = body
-                while let s = b.firstIndex(of: "<stop") {
-                    b = b[b.index(after: s)...]
+            if let rr = rest.range(of: "</linearGradient>") {
+                var b = rest[rest.startIndex..<rr.lowerBound]
+                while let sr = b.range(of: "<stop") {
+                    b = b[sr.upperBound...]
                     guard let se = b.firstIndex(of: ">") else { break }
                     let stag = String(b[b.startIndex..<se])
                     if let off = num(stag, "offset"),
@@ -227,7 +228,7 @@ func render(svg: String, into ctx: CGContext, size: CGFloat,
                     }
                     b = b[b.index(after: se)...]
                 }
-                rest = rest[rest.index(after: e)...]
+                rest = rest[rr.upperBound...]
             }
             grads[id] = g
             continue
@@ -236,9 +237,9 @@ func render(svg: String, into ctx: CGContext, size: CGFloat,
             || tag.hasPrefix("/defs") { continue }
 
         ctx.saveGState()
-        ctx.concat(st.xf)
+        ctx.concatenate(st.xf)
         let xf = parseXf(str(tag, "transform"))
-        ctx.concat(xf)
+        ctx.concatenate(xf)
         ctx.setAlpha(st.opacity)
         let strokeC = color(str(tag, "stroke"))
         let fillAttr = str(tag, "fill")
@@ -255,8 +256,8 @@ func render(svg: String, into ctx: CGContext, size: CGFloat,
                 if template { /* 模板：跳过渐变底 */ }
                 else if let g = grads[id] {
                     ctx.addPath(path); ctx.clip()
-                    let cols = g.stops.map(\.1) as CFArray
-                    let loc = g.stops.map(\.0)
+                    let cols = g.stops.map { $0.1.cgColor } as CFArray
+                    let loc = g.stops.map { CGFloat($0.0) }
                     if let cg = CGGradient(colorsSpace:
                         CGColorSpaceCreateDeviceRGB(), colors: cols,
                         locations: loc) {

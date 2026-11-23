@@ -58,7 +58,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     /// 资源；缺失时退回手绘 >_ 轮廓）。
     static func statusImage() -> NSImage {
         if let img = Bundle.main
-            .imageForResource(NSImage.Name("statusIcon")) {
+            .image(forResource: NSImage.Name("statusIcon")) {
             img.isTemplate = true
             return img
         }

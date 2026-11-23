@@ -28,14 +28,14 @@ if [ "${1:-}" = "--test" ]; then
     exit $?
 fi
 if [ "${1:-}" = "--release" ]; then
-    swift build -c release --arch x86_64 --arch arm64 \
+    swift build -c release --product Harbor --arch x86_64 --arch arm64 \
         $(for t in $LINK; do printf -- "-Xlinker %s " "$t"; done)
-    BIN="$(swift build -c release --arch x86_64 --arch arm64 \
-        --show-bin-path)/Harbor"
+    BIN="$(swift build -c release --product Harbor --arch x86_64 \
+        --arch arm64 --show-bin-path)/Harbor"
 else
-    swift build \
+    swift build --product Harbor \
         $(for t in $LINK; do printf -- "-Xlinker %s " "$t"; done)
-    BIN="$(swift build --show-bin-path)/Harbor"
+    BIN="$(swift build --product Harbor --show-bin-path)/Harbor"
 fi
 
 # 3. 组装 .app
@@ -52,6 +52,7 @@ fi
 "$ICONBIN" \
     "$SRC/linux/data/icons/hicolor/scalable/apps/dev.harbor.Harbor.svg" \
     "$APP/Contents/Resources"
+rm -rf "$APP/Contents/Resources/AppIcon.iconset"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
