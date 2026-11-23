@@ -17,7 +17,10 @@ final class DialogRegistry {
         if let av = alert.accessoryView {
             registerFields(av)
         }
-        guard let w = window ?? NSApp.keyWindow ?? NSApp.mainWindow else {
+        /* SSH 启动的实例常无 key/main window —— 兜底任一顶窗，
+         * 避免 runModal 脱离 dev 追踪（TOFU 卡死即此因）。 */
+        guard let w = window ?? NSApp.keyWindow ?? NSApp.mainWindow
+                ?? NSApp.windows.first else {
             let r = alert.runModal()
             done(r == .alertFirstButtonReturn); return
         }
@@ -43,14 +46,30 @@ final class DialogRegistry {
             if !id.isEmpty { textViews[id] = tv }
         }
     }
+    /// 手动 beginSheetModal 的 alert（present(done:) 只能回 Bool，
+    /// 多分支响应需 raw response）——仍登记进 dev dialogs。
+    /// 必须在 beginSheetModal 之后调用（alert.window 才存在）。
+    func track(alert: NSAlert, kind: String) {
+        if let av = alert.accessoryView { registerFields(av) }
+        tracked.append((alert.window, kind))
+    }
+    func untrack(alert: NSAlert) { untrack(alert.window) }
+
     private func untrack(_ w: NSWindow) {
         tracked.removeAll { $0.win === w }
         fields.removeAll()
         textViews.removeAll()
     }
 
+    /// beginSheetModal 在已有 sheet 时静默失败，其完成回调永不触发 →
+    /// 记录滞留。读取前清掉「未 attach 且不可见」的窗。
+    private func pruneStale() {
+        tracked.removeAll { !$0.win.isVisible && $0.win.sheetParent == nil }
+    }
+
     /// dev `dialogs`：JSON
     var json: String {
+        pruneStale()
         var arr: [[String: Any]] = []
         for t in tracked {
             let title = (t.win as? NSPanel)?.title ?? ""
@@ -116,6 +135,7 @@ final class DialogRegistry {
     }
     /// dev `dialog-press <button-title-or-id>`
     func press(_ label: String) -> Bool {
+        pruneStale()
         for t in tracked {
             if pressIn(t.win.contentView, label) { return true }
         }
