@@ -20,4 +20,18 @@ final class ThemeTests: XCTestCase {
         let c = Theme.RGBA(0x2f7cf6)
         XCTAssertEqual(c.b, 0xf6/255.0, accuracy: 0.001)
     }
+    /// FR-15：暗色 token 表与 linux/data/theme-dark.css 一一对应——
+    /// 每个亮色 token 必须有暗色值，无多余键。
+    func testDarkTokenParity() {
+        XCTAssertEqual(Set(Theme.light.keys), Set(Theme.dark.keys))
+    }
+    /// ui_theme: mode=dark 直接走暗色表。
+    func testModeDarkLookup() {
+        Theme.mode = .dark
+        defer { Theme.mode = .light }
+        XCTAssertEqual(Theme.c("text").r, Theme.dark["text"]!.r,
+                       accuracy: 0.001)
+    }
 }
+
+
