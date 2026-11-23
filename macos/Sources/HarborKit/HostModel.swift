@@ -8,6 +8,9 @@ public struct HostRec {
     public var address = ""
     public var port = 22
     public var user = ""
+    public var domain = ""     // RDP 域
+    public var tunnel = ""     // "ssh" = 经 SSH 隧道
+    public var via = ""        // 隧道经由的 ssh host id
     public var group = ""
     public var tags: [String] = []
     public var color = ""

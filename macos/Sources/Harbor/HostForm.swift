@@ -28,6 +28,16 @@ final class HostForm: NSView, NSTextFieldDelegate {
     private let keepF = NSTextField()
     private let colorP = NSPopUpButton()
     private var saveBtn: NSButton!
+    // 桌面（rdp/vnc）字段：桌面认证 + SSH 隧道（linux hb-host-form.c）
+    private let dpwF = NSSecureTextField()
+    private let dpwClearB = NSButton(title: "", target: nil, action: nil)
+    private var dpwCleared = false
+    private let domF = NSTextField()
+    private let tunnelSw = NSSwitch()
+    private let viaP = NSPopUpButton()
+    private var viaIds: [String?] = []
+    private let fwdBtn = NSButton(title: "", target: nil, action: nil)
+    private let tunnelHint = NSTextField(labelWithString: "")
     private var keyIds: [String] = []
     private var hostChoices: [(id: String, name: String)] = []
     /// 字段 → 错误标签
@@ -129,22 +139,30 @@ final class HostForm: NSView, NSTextFieldDelegate {
         rebuild()
     }
 
+    private var isDesktop: Bool {
+        ["rdp", "vnc"].contains(selProto)
+    }
+    private var selProto: String {
+        ["ssh", "rdp", "vnc"][max(0, protoP.indexOfSelectedItem)]
+    }
+
     /// 布局所有字段（内容宽度固定为表单宽）。
     private func rebuild() {
         content.subviews.forEach { $0.removeFromSuperview() }
         errFor.removeAll()
         y = 14
         heading(L("基本信息"))
+        let prevSel = protoP.indexOfSelectedItem
         protoP.removeAllItems()
-        protoP.addItems(withTitles: ["SSH", L("RDP（M5）"), L("VNC（M5）")])
-        protoP.selectItem(at: 0)
-        (protoP.item(at: 1))?.isEnabled = false
-        (protoP.item(at: 2))?.isEnabled = false
+        protoP.addItems(withTitles: ["SSH", "RDP", "VNC"])
+        protoP.selectItem(at: max(0, prevSel))
+        protoP.target = self; protoP.action = #selector(protoChanged)
         field(L("协议"), protoP); protoP.setAccessibilityIdentifier("hf-proto")
         field(L("别名"), aliasF); aliasF.setAccessibilityIdentifier("hf-alias")
         field(L("地址"), addrF, errKey: "addr")
         addrF.setAccessibilityIdentifier("hf-address")
-        portF.placeholderString = "22"
+        portF.placeholderString = selProto == "rdp" ? "3389"
+            : selProto == "vnc" ? "5901" : "22"
         field(L("端口"), portF, errKey: "port")
         portF.setAccessibilityIdentifier("hf-port")
         field(L("用户名"), userF); userF.setAccessibilityIdentifier("hf-user")
@@ -152,6 +170,28 @@ final class HostForm: NSView, NSTextFieldDelegate {
         tagsF.placeholderString = L("逗号分隔")
         field(L("标签"), tagsF); tagsF.setAccessibilityIdentifier("hf-tags")
 
+        if isDesktop {
+            buildDesktopSections()
+        } else {
+            buildSshSections()
+        }
+        // 颜色 / 标签已在基本信息内？保持原顺序：高级段收尾
+        if !isDesktop {
+            buildAdvanced()
+        } else {
+            buildAdvancedDesktop()
+        }
+        content.frame = NSRect(x: 0, y: 0,
+                               width: content.bounds.width, height: y + 8)
+        rebuildJumpRows()
+        for f in [addrF, portF, keepF, aliasF, userF] where f.delegate == nil {
+            f.delegate = self
+        }
+        authChanged()
+    }
+
+    /// ssh 专属：认证 + 跳板（linux sec_auth / sec_jump）。
+    private func buildSshSections() {
         heading(L("认证"))
         authP.removeAllItems()
         authP.addItems(withTitles: [L("自动"), L("密码"), L("密钥"),
@@ -210,6 +250,8 @@ final class HostForm: NSView, NSTextFieldDelegate {
         content.addSubview(je); errFor["jump"] = je
         y += jshow ? 18 : 4
 
+    }
+    private func buildAdvanced() {
         heading(L("高级"))
         reloadSnippets()
         field(L("启动片段"), snippetP)
@@ -217,18 +259,146 @@ final class HostForm: NSView, NSTextFieldDelegate {
         keepF.placeholderString = L("30（0=关闭）")
         field(L("保活(秒)"), keepF, errKey: "keep")
         keepF.setAccessibilityIdentifier("hf-keepalive")
+        buildColor()
+    }
+    /// 桌面主机的高级段：颜色（Linux 桌面主机也显示颜色/分组/OS 段，
+    /// 此处颜色行与 ssh 共用）。
+    private func buildAdvancedDesktop() {
+        heading(L("高级"))
+        buildColor()
+    }
+    private func buildColor() {
         colorP.removeAllItems()
         colorP.addItems(withTitles: [L("无"), "red", "orange", "amber",
                                      "green", "blue", "pink", "purple"])
         field(L("颜色"), colorP); colorP.setAccessibilityIdentifier("hf-color")
+    }
 
-        content.frame = NSRect(x: 0, y: 0,
-                               width: content.bounds.width, height: y + 8)
-        rebuildJumpRows()
-        for f in [addrF, portF, keepF, aliasF, userF] where f.delegate == nil {
-            f.delegate = self
+    /// rdp/vnc 专属：桌面认证 + SSH 隧道（linux sec_dauth / sec_tunnel）。
+    private func buildDesktopSections() {
+        heading(L("桌面认证"))
+        // 用户名复用「基本信息」user 字段；密码可存 Vault secret
+        dpwF.placeholderString = L("密码（可空，连接时询问）")
+        let pr = NSStackView()
+        pr.orientation = .horizontal; pr.spacing = 6
+        dpwF.setAccessibilityIdentifier("hf-dpassword")
+        pr.addArrangedSubview(dpwF)
+        dpwClearB.title = L("清除已保存密码")
+        dpwClearB.bezelStyle = .inline
+        dpwClearB.target = self; dpwClearB.action = #selector(dpwClear)
+        dpwClearB.setAccessibilityIdentifier("hf-dpw-clear")
+        dpwClearB.isHidden = !hadDsecret || dpwCleared
+        pr.addArrangedSubview(dpwClearB)
+        field("", pr)
+        if selProto == "rdp" {
+            domF.placeholderString = L("留空 = 本机域")
+            field(L("域（RDP）"), domF)
+            domF.setAccessibilityIdentifier("hf-domain")
         }
-        authChanged()
+        heading(L("隧道"))
+        tunnelSw.target = self; tunnelSw.action = #selector(tunnelChanged)
+        field(L("通过 SSH 隧道"), tunnelSw)
+        tunnelSw.setAccessibilityIdentifier("hf-tunnel")
+        reloadVia()
+        field(L("经由 SSH 主机"), viaP)
+        viaP.setAccessibilityIdentifier("hf-via")
+        viaP.target = self; viaP.action = #selector(tunnelChanged)
+        fwdBtn.title = L("生成配套转发规则")
+        fwdBtn.bezelStyle = .rounded
+        fwdBtn.target = self; fwdBtn.action = #selector(genFwd)
+        fwdBtn.toolTip = L("创建本机端口 → 此主机端口的 Local 转发，经所选 SSH 主机")
+        fwdBtn.setAccessibilityIdentifier("hf-genfwd")
+        let fb = NSStackView()
+        fb.orientation = .vertical; fb.spacing = 4
+        fb.alignment = .left
+        fb.addArrangedSubview(fwdBtn)
+        tunnelHint.textColor = .systemGreen
+        tunnelHint.font = .systemFont(ofSize: 10)
+        tunnelHint.setAccessibilityIdentifier("hf-genfwd-hint")
+        fb.addArrangedSubview(tunnelHint)
+        field("", fb)
+        fwdBtnRefresh()
+    }
+
+    private var hadDsecret = false
+    @objc private func dpwClear() {
+        dpwCleared = true
+        dpwClearB.isHidden = true
+        dpwF.stringValue = ""
+        dpwF.toolTip = L("保存后将清除已保存密码")
+    }
+    @objc private func protoChanged() {
+        /* 端口仍停在某协议的默认值 → 跟随新协议（留空即默认） */
+        let p = Int(portF.stringValue)
+        if p == nil || [22, 3389, 5901].contains(p ?? 0) {
+            portF.stringValue = ""
+        }
+        rebuild(); validate()
+    }
+    @objc private func tunnelChanged() { fwdBtnRefresh() }
+    private func fwdBtnRefresh() {
+        viaP.isEnabled = tunnelSw.state == .on
+        fwdBtn.isEnabled = tunnelSw.state == .on
+            && viaP.indexOfSelectedItem > 0
+    }
+    private func reloadVia() {
+        let sel = viaP.indexOfSelectedItem > 0
+            ? viaIds[safe: viaP.indexOfSelectedItem] ?? nil : nil
+        viaP.removeAllItems()
+        viaP.addItem(withTitle: L("（无）"))
+        viaIds = [nil]
+        for hc in hostChoices where hc.id != orig?.id {
+            viaP.addItem(withTitle: hc.name.isEmpty ? hc.id : hc.name)
+            viaIds.append(hc.id)
+        }
+        if let sel, let i = viaIds.firstIndex(where: { $0 == sel }) {
+            viaP.selectItem(at: i)
+        }
+    }
+    /// 「生成配套转发规则」：10000+dest_port 起向上找空闲端口建 local 规则。
+    @objc private func genFwd() {
+        let vi = viaP.indexOfSelectedItem
+        guard vi > 0, vi < viaIds.count, let vid = viaIds[vi]
+        else { tunnelHint.stringValue = L("请先选择经由 SSH 主机"); return }
+        let dport = Int(portF.stringValue)
+            ?? (selProto == "rdp" ? 3389 : 5901)
+        var p = dport + 10000
+        if p > 65535 { p = 10000 }
+        let fwds = Vault.shared.list("forward")
+        defer { fwds.forEach { hb_obj_free($0) } }
+        var bport = 0
+        while p <= 65535 {
+            let clash = fwds.contains { o in
+                hb_obj_get_str(o, "kind").str != "remote"
+                    && Int(hb_obj_get_int(o, "bind_port", 0)) == p
+            }
+            if !clash && hb_pf_probe_bind("127.0.0.1", Int32(p), nil)
+                    == HB_OK { bport = p; break }
+            p += 1
+        }
+        guard bport > 0 else {
+            tunnelHint.stringValue = L("找不到空闲监听端口"); return
+        }
+        guard let o = Vault.shared.newObj("forward") else { return }
+        hb_obj_set_str(o, "kind", "local")
+        hb_obj_set_str(o, "bind_addr", "127.0.0.1")
+        hb_obj_set_int(o, "bind_port", Int64(bport))
+        hb_obj_set_str(o, "dest_addr", "127.0.0.1")
+        hb_obj_set_int(o, "dest_port", Int64(dport))
+        hb_obj_set_str(o, "via", vid)
+        hb_obj_set_bool(o, "autostart", false)
+        hb_obj_set_bool(o, "enabled", false)
+        hb_obj_set_int(o, "order", Int64(Date().timeIntervalSince1970))
+        Vault.shared.put(o); hb_obj_free(o)
+        var vname = vid
+        if let vh = Vault.shared.get(vid) {
+            let nm = hb_obj_get_str(vh, "name").str
+            if !nm.isEmpty { vname = nm }
+            hb_obj_free(vh)
+        }
+        tunnelHint.stringValue = String(format:
+            L("已创建转发规则 127.0.0.1:%d → 127.0.0.1:%d（经 %@）"),
+            bport, dport, vname)
     }
     override func resize(withOldSuperviewSize s: NSSize) {
         super.resize(withOldSuperviewSize: s)
@@ -453,6 +623,17 @@ final class HostForm: NSView, NSTextFieldDelegate {
     func fill(_ h: HostRec) {
         orig = h
         rebuild()
+        protoP.selectItem(at: ["ssh", "rdp", "vnc"]
+            .firstIndex(of: h.proto) ?? 0)
+        rebuild()               // 按协议铺开对应分区
+        hadDsecret = Vault.shared.secret(h.id, "password") != nil
+        dpwClearB.isHidden = !hadDsecret || dpwCleared
+        domF.stringValue = h.domain
+        tunnelSw.state = h.tunnel == "ssh" ? .on : .off
+        if let i = viaIds.firstIndex(where: { $0 == h.via }) {
+            viaP.selectItem(at: i)
+        }
+        fwdBtnRefresh()
         aliasF.stringValue = h.name
         addrF.stringValue = h.address
         portF.stringValue = h.port > 0 ? "\(h.port)" : ""
@@ -498,15 +679,41 @@ final class HostForm: NSView, NSTextFieldDelegate {
         h.keepalive = Int(keepF.stringValue) ?? -1
         h.color = ["", "red", "orange", "amber", "green", "blue",
                    "pink", "purple"][max(0, colorP.indexOfSelectedItem)]
-        h.proto = "ssh"
+        h.proto = selProto
+        let dport = Int(portF.stringValue)
+        h.port = dport ?? (selProto == "rdp" ? 3389
+                           : selProto == "vnc" ? 5901 : 22)
+        if isDesktop {
+            h.domain = selProto == "rdp" ? domF.stringValue : ""
+            h.tunnel = tunnelSw.state == .on ? "ssh" : ""
+            h.via = tunnelSw.state == .on
+                ? (viaIds[safe: viaP.indexOfSelectedItem] ?? nil) ?? "" : ""
+            /* ssh 专属字段清空 */
+            h.auth = "auto"; h.keyId = ""; h.identityFile = ""
+            h.jumps = []; h.snippetId = ""; h.keepalive = -1
+        } else {
+            h.domain = ""; h.tunnel = ""; h.via = ""
+        }
         return h
     }
     @objc private func save() {
         let h = rec
         guard !h.address.isEmpty else { NSSound.beep(); return }
-        let pw = pwF.stringValue.isEmpty ? nil : pwF.stringValue
-        pwF.stringValue = ""
-        onSave?(h, pw)
+        if isDesktop {
+            /* 桌面密码：空 = 保留已保存；dpwCleared = 显式清除 */
+            let pw = dpwF.stringValue.isEmpty ? nil : dpwF.stringValue
+            dpwF.stringValue = ""
+            if dpwCleared, !h.id.isEmpty {
+                Vault.shared.vault.map {
+                    _ = hb_vault_set_secret($0, h.id, "password", nil)
+                }
+            }
+            onSave?(h, pw)
+        } else {
+            let pw = pwF.stringValue.isEmpty ? nil : pwF.stringValue
+            pwF.stringValue = ""
+            onSave?(h, pw)
+        }
     }
     @objc private func cancel() { onCancel?() }
 }
