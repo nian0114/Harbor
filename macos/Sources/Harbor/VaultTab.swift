@@ -12,6 +12,9 @@ final class VaultTab: TermTab {
     private var hostsPage: HostsPage?
     private var keychainPage: KeychainPage?
     private var appearancePanel: AppearancePanel?
+    private var snippetsPage: SnippetsPage?
+    private var knownPage: KnownPage?
+    private var logsPage: LogsPage?
 
     init() {
         super.init(title: L("Vault"), view: NSView())
@@ -59,6 +62,9 @@ final class VaultTab: TermTab {
         appearancePanel?.removeFromSuperview(); appearancePanel = nil
         hostsPage?.removeFromSuperview(); hostsPage = nil
         keychainPage?.removeFromSuperview(); keychainPage = nil
+        snippetsPage?.removeFromSuperview(); snippetsPage = nil
+        knownPage?.removeFromSuperview(); knownPage = nil
+        logsPage?.removeFromSuperview(); logsPage = nil
         if sec == "hosts" {
             let p = HostsPage(frame: area.bounds)
             p.autoresizingMask = [.width, .height]
@@ -79,6 +85,41 @@ final class VaultTab: TermTab {
             keychainPage = p
             return
         }
+        if sec == "snippets" {
+            let p = SnippetsPage(frame: area.bounds)
+            p.autoresizingMask = [.width, .height]
+            p.onSendSnippet = { [weak self] id in
+                (self?.view.window as? MainWindow)?.sendSnippet(id: id)
+            }
+            p.onHistoryToggle = { [weak self] in
+                (self?.view.window as? MainWindow)?.applyHistorySetting()
+            }
+            p.hostLabel = { id in
+                guard let h = Vault.shared.get(id) else { return id }
+                defer { hb_obj_free(h) }
+                let n = hb_obj_get_str(h, "name").str
+                let a = hb_obj_get_str(h, "addr").str
+                return n.isEmpty ? (a.isEmpty ? id : a)
+                    : (a.isEmpty ? n : "\(n) (\(a))")
+            }
+            area.addSubview(p)
+            snippetsPage = p
+            return
+        }
+        if sec == "knownhosts" {
+            let p = KnownPage(frame: area.bounds)
+            p.autoresizingMask = [.width, .height]
+            area.addSubview(p)
+            knownPage = p
+            return
+        }
+        if sec == "logs" {
+            let p = LogsPage(frame: area.bounds)
+            p.autoresizingMask = [.width, .height]
+            area.addSubview(p)
+            logsPage = p
+            return
+        }
         if sec == "appearance" {
             let p = AppearancePanel()
             p.onChange = { [weak self] in
@@ -92,6 +133,9 @@ final class VaultTab: TermTab {
         }
     }
     func refreshHosts() { hostsPage?.reload() }
+    var snippetsRef: SnippetsPage? { snippetsPage }
+    var knownRef: KnownPage? { knownPage }
+    var logsRef: LogsPage? { logsPage }
     /// dev hook 找页面（page(HostsPage.self) 走 contentCard 子树）
     func page<T: NSView>(_ t: T.Type) -> T? {
         func walk(_ v: NSView) -> T? {

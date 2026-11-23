@@ -244,6 +244,8 @@ final class SSHTab: TermTab, ConnDelegate {
             case HB_SESS_EV_BELL: term?.bell()
             case HB_SESS_EV_WATCH:
                 if let h = ev.watch { self.handleWatchHit(h.pointee) }
+            case HB_SESS_EV_COMMAND:
+                if let t = ev.text { self.historyAdd(String(cString: t)) }
             case HB_SESS_EV_EXIT:
                 self.statusDot = Theme.dotErr
                 self.showEnded(code: ev.code)
@@ -252,6 +254,7 @@ final class SSHTab: TermTab, ConnDelegate {
         }
         term?.session = s
         applyWatch()
+        applyHistoryEnabled()
         s.drain()
     }
     func connConnected(_ c: ConnCtl) {

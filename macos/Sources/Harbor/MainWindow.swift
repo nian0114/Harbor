@@ -460,6 +460,25 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         } else {
             targets = []
         }
+        // broadcast 且目标 >1 → 先确认（对齐 linux maybe_send 的广播确认）。
+        if let w, w.broadcast, targets.count > 1 {
+            let a = NSAlert()
+            a.messageText = String(
+                format: L("广播已开启：发送到全部 %d 个分屏？"),
+                targets.count)
+            a.addButton(withTitle: L("发送"))
+            a.addButton(withTitle: L("取消"))
+            DialogRegistry.shared.present(alert: a, kind: "snip-bcast",
+                                          in: self) { ok in
+                if ok { self.deliverConfirmed(text, run: run,
+                                              targets: targets) }
+            }
+            return
+        }
+        deliverConfirmed(text, run: run, targets: targets)
+    }
+    private func deliverConfirmed(_ text: String, run: Bool,
+                                  targets: [TermTab]) {
         var sent = false
         for l in targets {
             guard let s = l.session, s.alive else { continue }
@@ -476,6 +495,11 @@ final class MainWindow: NSWindow, NSWindowDelegate {
             DialogRegistry.shared.present(alert: a, kind: "toast",
                                           in: self) { _ in }
         }
+    }
+
+    /// history_enabled 变化 → 应用到所有已开 session（Snippets 页开关）。
+    func applyHistorySetting() {
+        for t in tabs { t.applyHistoryEnabled() }
     }
 
     /// 侧栏选区 → 切到 Vault tab 并展示分区（dev select-sidebar 同路）。

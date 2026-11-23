@@ -67,6 +67,12 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     }
 
     // ---------------- 工具栏（对齐 hb_workspace_init 的 bar） ----------------
+    private let assistHost = NSView()
+    private var assistW: NSLayoutConstraint?
+    private var assistBtn: NSButton?
+    private var assistPanel: AssistPanel?
+    private(set) var assistOn = false
+
     private func buildChrome() {
         view.wantsLayer = true
         view.layer?.backgroundColor = Theme.card.color.cgColor
@@ -95,14 +101,22 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         fb.font = .systemFont(ofSize: 11.5)
         fb.setAccessibilityIdentifier("ws-focus")
         focusBtn = fb
-        [bar, ic, ttLabel, search, bcastBtn, focusBtn, bodyHost,
-         findHost].forEach {
+        let ab = NSButton(title: L("助手栏"), target: self,
+                          action: #selector(toggleAssist))
+        ab.bezelStyle = .texturedRounded
+        ab.font = .systemFont(ofSize: 11.5)
+        ab.setAccessibilityIdentifier("ws-assist")
+        assistBtn = ab
+        [bar, ic, ttLabel, search, bcastBtn, focusBtn, ab, bodyHost,
+         findHost, assistHost].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false }
         view.addSubview(bar)
         bar.addSubview(ic); bar.addSubview(ttLabel)
         bar.addSubview(search); bar.addSubview(bcastBtn)
-        bar.addSubview(focusBtn)
+        bar.addSubview(focusBtn); bar.addSubview(ab)
         view.addSubview(findHost); view.addSubview(bodyHost)
+        view.addSubview(assistHost)
+        assistW = assistHost.widthAnchor.constraint(equalToConstant: 0)
         findH = findHost.heightAnchor.constraint(equalToConstant: 0)
         findH?.isActive = true
         NSLayoutConstraint.activate([
@@ -116,8 +130,11 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             ttLabel.leadingAnchor.constraint(
                 equalTo: ic.trailingAnchor, constant: 7),
             ttLabel.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            focusBtn.trailingAnchor.constraint(
+            ab.trailingAnchor.constraint(
                 equalTo: bar.trailingAnchor, constant: -10),
+            ab.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            focusBtn.trailingAnchor.constraint(
+                equalTo: ab.leadingAnchor, constant: -6),
             focusBtn.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             bcastBtn.trailingAnchor.constraint(
                 equalTo: focusBtn.leadingAnchor, constant: -6),
@@ -131,10 +148,15 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             findHost.topAnchor.constraint(equalTo: bar.bottomAnchor),
             bodyHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             bodyHost.trailingAnchor.constraint(
-                equalTo: view.trailingAnchor),
+                equalTo: assistHost.leadingAnchor),
             bodyHost.topAnchor.constraint(equalTo: findHost.bottomAnchor),
             bodyHost.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            assistHost.trailingAnchor.constraint(
+                equalTo: view.trailingAnchor),
+            assistHost.topAnchor.constraint(equalTo: findHost.bottomAnchor),
+            assistHost.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        assistW?.isActive = true
     }
 
     /// find bar 展开/收起（find 补丁调用）
@@ -372,6 +394,32 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             box.bottomAnchor.constraint(equalTo: mv.bottomAnchor,
                                         constant: -inset),
         ])
+    }
+
+    /// 助手栏（prototype assist 栏）：右侧 Snippets 快捷发送面板。
+    @objc func toggleAssist() { setAssist(!assistOn) }
+    func setAssist(_ on: Bool) {
+        assistOn = on
+        assistW?.constant = on ? 210 : 0
+        assistBtn?.state = on ? .on : .off
+        if on && assistPanel == nil {
+            let p = AssistPanel()
+            p.onSend = { [weak self] id in
+                (self?.view.window as? MainWindow)?.sendSnippet(id: id)
+            }
+            p.translatesAutoresizingMaskIntoConstraints = false
+            assistHost.addSubview(p)
+            NSLayoutConstraint.activate([
+                p.leadingAnchor.constraint(equalTo: assistHost.leadingAnchor),
+                p.trailingAnchor.constraint(equalTo: assistHost.trailingAnchor),
+                p.topAnchor.constraint(equalTo: assistHost.topAnchor),
+                p.bottomAnchor.constraint(equalTo: assistHost.bottomAnchor),
+            ])
+            assistPanel = p
+        }
+        assistPanel?.isHidden = !on   // NSView 不裁剪，0 宽时须隐藏
+        assistPanel?.reload()
+        view.layoutSubtreeIfNeeded()
     }
 
     @objc func toggleFocusMode() {

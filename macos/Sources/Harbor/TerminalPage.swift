@@ -28,6 +28,23 @@ class TermTab: NSObject {
     var wsTitle: String { title }
     /// snippet scope / watch 主机规则用的 host id；Local → nil。
     var wsHostId: String? { nil }
+
+    /// 工作区叶覆盖返回全部叶 session；会话页返回自身。
+    var allSessions: [Session] { session.map { [$0] } ?? [] }
+    /// FR-08 shell history：settings.history_enabled（默认开）。
+    func applyHistoryEnabled() {
+        let on = Vault.shared.settingsBool("history_enabled", true)
+        for s in allSessions { hb_session_set_history(s.sess, on) }
+    }
+    /// HB_SESS_EV_COMMAND → vault history（密码已被 core OSC133/启发式过滤）。
+    func historyAdd(_ text: String) {
+        guard let v = Vault.shared.vault, !text.isEmpty else { return }
+        if let h = wsHostId {
+            h.withCString { _ = hb_vault_history_add(v, $0, text) }
+        } else {
+            _ = hb_vault_history_add(v, nil, text)
+        }
+    }
     /// SSH 叶（watch 默认开、SSH 图标）；SSHTab 覆盖为 true。
     var isSSHLeaf: Bool { false }
     /// 会话已死（pane-head 出重连钮）。
@@ -156,6 +173,8 @@ class TermTab: NSObject {
             case HB_SESS_EV_BELL: term?.bell()
             case HB_SESS_EV_WATCH:
                 if let h = ev.watch { self.handleWatchHit(h.pointee) }
+            case HB_SESS_EV_COMMAND:
+                if let t = ev.text { self.historyAdd(String(cString: t)) }
             case HB_SESS_EV_EXIT:
                 let code = ev.code
                 self.statusDot = Theme.dotErr
@@ -166,6 +185,7 @@ class TermTab: NSObject {
         term.session = s
         session = s
         applyWatch()
+        applyHistoryEnabled()
         s.drain()
     }
 
@@ -216,6 +236,8 @@ class TermTab: NSObject {
 /// 工作区 tab：tabs[] 里的会话页包装（对齐 Linux tab→workspace 壳）。
 /// term/session/title/statusDot 同步自焦点叶；running 为任一叶存活。
 final class WsTab: TermTab {
+    override var allSessions: [Session] {
+        ws.leavesList.compactMap { $0.session } }
     let ws: Workspace
 
     init(leaf: TermTab) {

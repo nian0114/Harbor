@@ -37,6 +37,18 @@ final class Vault {
             NSLog("hb_vault_open failed: %d", r.rawValue)
         }
         vault = v
+        // 变更回调（同 Linux hb-store "changed" 信号）：log/history/对象写入
+        // → 通知各页 reload。回调可能发自会话线程，投递前切回主队列。
+        if let v {
+            hb_vault_set_change_cb(v, { _, tp, _, _ in
+                let t = tp.map { String(cString: $0) } ?? ""
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: .hbVaultChanged, object: nil,
+                        userInfo: ["type": t])
+                }
+            }, nil)
+        }
     }
 
     // ---- DEK ----
@@ -172,6 +184,36 @@ final class Vault {
         _ = hb_vault_put(v, o)
         hb_obj_free(o)
     }
+    func settingsBool(_ k: String, _ def: Bool) -> Bool {
+        guard let v = vault else { return def }
+        var o: OpaquePointer?
+        guard hb_vault_settings(v, &o) == HB_OK, let o else { return def }
+        defer { hb_obj_free(o) }
+        return hb_obj_get_bool(o, k, def)
+    }
+    func setSettingsBool(_ k: String, _ val: Bool) {
+        guard let v = vault else { return }
+        var o: OpaquePointer?
+        guard hb_vault_settings(v, &o) == HB_OK, let o else { return }
+        hb_obj_set_bool(o, k, val)
+        _ = hb_vault_put(v, o)
+        hb_obj_free(o)
+    }
+    func settingsInt(_ k: String, _ def: Int64) -> Int64 {
+        guard let v = vault else { return def }
+        var o: OpaquePointer?
+        guard hb_vault_settings(v, &o) == HB_OK, let o else { return def }
+        defer { hb_obj_free(o) }
+        return hb_obj_get_int(o, k, def)
+    }
+    func setSettingsInt(_ k: String, _ val: Int64) {
+        guard let v = vault else { return }
+        var o: OpaquePointer?
+        guard hb_vault_settings(v, &o) == HB_OK, let o else { return }
+        hb_obj_set_int(o, k, val)
+        _ = hb_vault_put(v, o)
+        hb_obj_free(o)
+    }
 }
 
 // ---------- vault 对象便捷层 ----------
@@ -237,4 +279,8 @@ extension UnsafeMutablePointer where Pointee == CChar {
         guard UInt(bitPattern: self) != 0 else { return "" }
         return String(cString: self)
     }
+}
+
+extension Notification.Name {
+    static let hbVaultChanged = Notification.Name("hb-vault-changed")
 }
