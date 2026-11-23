@@ -139,7 +139,7 @@ final class App: NSObject, NSApplicationDelegate {
         else { t?.fontSize += d }
     }
     @objc func showSettings() {
-        win.sidebar.select(7)
+        win.vaultTab.sidebar.select(7)
         win.showSection(7)
     }
 }

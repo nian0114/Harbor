@@ -5,6 +5,9 @@ import HarborKit
 // ---------- Tab ----------
 class TermTab: NSObject {
     let id = UUID()
+    /// pinned 页（Vault/SFTP）：不可关、strip 画图标不画 ×。
+    var closable = true
+    var iconName: String?
     var title: String { didSet { onChange?() } }
     var statusDot: Theme.RGBA = Theme.dotPend { didSet { onChange?() } }
     var view: NSView

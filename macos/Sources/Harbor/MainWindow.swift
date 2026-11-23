@@ -5,13 +5,12 @@ import HarborKit
 // ---------- 主窗口 ----------
 final class MainWindow: NSWindow, NSWindowDelegate {
     let strip = TabStrip()
-    let sidebar = SidebarView()
+    let vaultTab = VaultTab()
+    let sftpTab = SFTPTab()
     let content = NSView()
     var tabs: [TermTab] = []
     var selTab = 0
     private var contentCard: NSView?
-    private var sidebarVisible = true
-    private var appearancePanel: AppearancePanel?
     var maxRunloopStall: TimeInterval = 0
     private var stallTimer: Timer?
     private var lastBeat = Date()
@@ -53,11 +52,8 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         bell.autoresizingMask = [.minXMargin]
         bar.addSubview(bell)
 
-        // body
-        sidebar.frame = NSRect(x: 0, y: 0, width: 172, height: 662)
-        sidebar.autoresizingMask = [.height, .maxXMargin]
-        contentView?.addSubview(sidebar)
-        content.frame = NSRect(x: 172, y: 0, width: 928, height: 662)
+        // body：Vault/SFTP pinned + 会话 tab 全宽；侧栏属 Vault tab 内部
+        content.frame = NSRect(x: 0, y: 0, width: 1100, height: 662)
         content.autoresizingMask = [.width, .height]
         content.wantsLayer = true
         content.layer?.backgroundColor = Theme.page.color.cgColor
@@ -72,11 +68,15 @@ final class MainWindow: NSWindow, NSWindowDelegate {
             self.tabs.insert(t, at: b)
             self.select(b)
         }
-        sidebar.onSelect = { [weak self] i in self?.showSection(i) }
-        sidebar.select(0)
+        vaultTab.sidebar.onSelect = { [weak self] i in self?.showSection(i) }
+        vaultTab.sidebar.select(0)
+        vaultTab.onSSH = { [weak self] id, q, t in self?.openSSH(hostId: id, quickTarget: q, title: t) }
 
-        newLocalTab()
-        showSection(0)
+        // prototype：Vault/SFTP pinned 在前；启动停在 Vault（主机）
+        tabs = [vaultTab, sftpTab]
+        strip.tabs = tabs
+        select(0)
+        vaultTab.showSection(0)
         applySettings()
 
         // 主 runloop 卡顿计量（perf 验收用）
@@ -115,7 +115,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         strip.needsDisplay = true
     }
     func closeTab(_ i: Int) {
-        guard i < tabs.count else { return }
+        guard i < tabs.count, tabs[i].closable else { return }   // pinned 不可关
         let t = tabs[i]
         if t.running {
             let a = NSAlert()
@@ -133,26 +133,18 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         closeTabNow(i)
     }
     private func closeTabNow(_ i: Int) {
-        guard i < tabs.count else { return }
+        guard i < tabs.count, tabs[i].closable else { return }
         let t = tabs[i]
         t.kill()
         t.view.removeFromSuperview()
         tabs.remove(at: i)
         strip.tabs = tabs
-        if tabs.isEmpty { newLocalTab(); return }
         select(min(selTab, tabs.count - 1))
     }
     @objc func toggleSidebar() {
-        sidebarVisible.toggle()
-        sidebar.isHidden = !sidebarVisible
-        content.frame = sidebarVisible
-            ? NSRect(x: 172, y: 0, width: (contentView?.bounds.width ?? 1100)-172,
-                     height: (contentView?.bounds.height ?? 700)-38)
-            : NSRect(x: 0, y: 0, width: contentView?.bounds.width ?? 1100,
-                     height: (contentView?.bounds.height ?? 700)-38)
+        // prototype：仅 Vault tab 激活时切换侧栏；会话 tab 上无操作
+        if selTab == 0 { vaultTab.toggleSidebar() }
     }
-    private var hostsPage: HostsPage?
-    private var keychainPage: KeychainPage?
 
     /// 由主机页/快速连接起 SSH tab。
     func openSSH(hostId: String?, quickTarget: String?, title: String) {
@@ -165,46 +157,13 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         t.connect()
     }
 
+    /// 侧栏选区 → 切到 Vault tab 并展示分区（dev select-sidebar 同路）。
     func showSection(_ i: Int) {
         guard i >= 0 && i < kSections.count else { return }
-        let sec = kSections[i].id
-        appearancePanel?.removeFromSuperview()
-        hostsPage?.removeFromSuperview(); hostsPage = nil
-        keychainPage?.removeFromSuperview(); keychainPage = nil
-        if sec == "hosts", let card = contentCard {
-            let p = HostsPage(frame: card.bounds)
-            p.autoresizingMask = [.width, .height]
-            p.onConnect = { [weak self] h in
-                self?.openSSH(hostId: h.id, quickTarget: nil,
-                              title: h.label)
-            }
-            p.onQuick = { [weak self] s in
-                self?.openSSH(hostId: nil, quickTarget: s, title: s)
-            }
-            card.addSubview(p)
-            hostsPage = p
-            return
-        }
-        if sec == "keychain", let card = contentCard {
-            let p = KeychainPage(frame: card.bounds)
-            p.autoresizingMask = [.width, .height]
-            card.addSubview(p)
-            keychainPage = p
-            return
-        }
-        if sec == "appearance" {
-            let p = AppearancePanel()
-            p.onChange = { [weak self] in self?.applySettings() }
-            appearancePanel = p
-            // 显示在当前 tab 上方半透明覆盖（card 非翻转，置顶靠上）
-            if let card = contentCard {
-                p.frame.origin = NSPoint(
-                    x: 20, y: card.bounds.height - p.frame.height - 20)
-                p.autoresizingMask = [.minYMargin]
-                card.addSubview(p)
-            }
-        }
+        if selTab != 0 { select(0) }
+        vaultTab.showSection(i)
     }
+    func refreshHosts() { vaultTab.refreshHosts() }
     func applySettings() {
         let v = Vault.shared
         for t in tabs {
