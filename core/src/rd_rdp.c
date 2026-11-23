@@ -416,6 +416,33 @@ static BOOL rdp_desktop_resize(rdpContext *context)
     return TRUE;
 }
 
+#ifdef __APPLE__
+/* macOS 是静态构建：freerdp_client_load_addins 会按设置推导
+   DeviceRedirection（NetworkAutoDetect/Heartbeat/Multitransport 默认开）
+   → 强拉编译时未包含的 rdpdr/rdpsnd → 整段失败；关掉这些特性又会让
+   对端发到 message channel 0。这里直接挂静态通道入口，只加载用到的
+   cliprdr + drdynvc(disp)。 */
+static BOOL hb_rdp_load_channels(freerdp *instance)
+{
+    rdpContext *context = instance->context;
+    rdpSettings *s = context->settings;
+    extern BOOL cliprdr_VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS_EX, PVOID);
+    extern BOOL drdynvc_VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS_EX, PVOID);
+    return freerdp_channels_client_load_ex(context->channels, s,
+                                           cliprdr_VirtualChannelEntryEx,
+                                           s) == CHANNEL_RC_OK &&
+           freerdp_channels_client_load_ex(context->channels, s,
+                                           drdynvc_VirtualChannelEntryEx,
+                                           s) == CHANNEL_RC_OK;
+}
+#else
+static BOOL hb_rdp_load_channels(freerdp *instance)
+{
+    return freerdp_client_load_addins(instance->context->channels,
+                                      instance->context->settings) != 0;
+}
+#endif
+
 static BOOL rdp_pre_connect(freerdp *instance)
 {
     rdpContext *context = instance->context;
@@ -448,7 +475,7 @@ static BOOL rdp_pre_connect(freerdp *instance)
     freerdp_settings_set_bool(s, FreeRDP_FastPathInput, TRUE);
     freerdp_settings_set_bool(s, FreeRDP_FrameMarkerCommandEnabled, TRUE);
 
-    if (!freerdp_client_load_addins(context->channels, s))
+    if (!hb_rdp_load_channels(instance))
         return FALSE;
 
     rd_rdp *be = bep(rd);
@@ -508,6 +535,7 @@ static void hb_rdp_global_uninit(void) {}
 static BOOL hb_rdp_client_new(freerdp *instance, rdpContext *context)
 {
     (void)context;
+    instance->LoadChannels = hb_rdp_load_channels;
     instance->PreConnect = rdp_pre_connect;
     instance->PostConnect = rdp_post_connect;
     instance->PostDisconnect = rdp_post_disconnect;
