@@ -20,6 +20,8 @@ ALLOWLIST = [
      'language autonym, shown untranslated like "English"'),
     ('core/src/ssh.c', '"密码"',
      'kbi password-prompt detection keyword, matched against server text'),
+    ('macos/Sources/HarborKit/PaletteRank.swift', '"全局"',
+     'snippet scope value written by the vault, matched as data not UI'),
 ]
 
 def scan(src):

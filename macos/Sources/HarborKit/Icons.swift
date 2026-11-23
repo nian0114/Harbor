@@ -29,6 +29,8 @@ public enum Icons {
         "plus": "<path d=\"M12 5v14M5 12h14\"/>",
         "chevron-d": "<path d=\"m6 9 6 6 6-6\"/>",
         "chevron-r": "<path d=\"m9 6 6 6-6 6\"/>",
+        "chevron-u": "<path d=\"m6 15 6-6 6 6\"/>",
+        "chevron-l": "<path d=\"m15 6-6 6 6 6\"/>",
         "dots": "<circle cx=\"5\" cy=\"12\" r=\"1.6\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"12\" cy=\"12\" r=\"1.6\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"19\" cy=\"12\" r=\"1.6\" fill=\"currentColor\" stroke=\"none\"/>",
         "info": "<circle cx=\"12\" cy=\"12\" r=\"8.6\"/><path d=\"M12 11v5M12 7.8h.01\"/>",
         "ubuntu": "<circle cx=\"12\" cy=\"12\" r=\"8.2\" stroke-dasharray=\"11.5 5.7\"/><circle cx=\"12\" cy=\"3.8\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"4.9\" cy=\"16.1\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"19.1\" cy=\"16.1\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"/>",

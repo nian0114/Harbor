@@ -51,6 +51,20 @@ final class TerminalView: NSView, NSTextInputClient {
     var inputMirror: ((MirrorEv) -> Void)?
     /// 点击终端 → 工作区聚焦本 pane。
     var onFocusRequest: (() -> Void)?
+    /// Esc 且 find 开着 → 先关 find（由 FindBar/Workspace 处理），
+    /// 不传给 session（对齐 linux Esc-first）。
+    var onFindClose: (() -> Void)?
+
+    // ---- 查找状态（对齐 linux hb-terminal.c find_*） ----
+    /// 命中按绝对行存（abs = total_pushed + vt_row），新输出推入
+    /// scrollback 时行号稳定；recompute 靠 vt generation 变化驱动。
+    private(set) var findActive = false
+    private var findNeedle = ""
+    private var findMs: [(abs: Int64, col: Int, len: Int)] = []
+    private var findCur = -1
+    private var findGen: UInt64 = 0
+    private var totalPushed: Int64 = 0
+    private var findHash = 0
 
     private var geom = CellGeom(cellW: 8, cellH: 16, padX: 12, padY: 10,
                                 baseline: 13)
@@ -189,6 +203,15 @@ final class TerminalView: NSView, NSTextInputClient {
         var vr: Int32 = 0, vc: Int32 = 0
         hb_vt_size(vt, &vr, &vc)
         sbCount = Int(hb_vt_scrollback_count(vt))
+        totalPushed = Int64(hb_vt_total_pushed(vt))
+        // find：vt generation 变化 → 重算命中（保留当前项 abs 锚点）
+        let gen = hb_vt_generation(vt)
+        if findActive && !findNeedle.isEmpty && gen != findGen {
+            let keep = findCur >= 0 ? findMs[findCur].abs : -1
+            findRunLocked(vt, keepAbs: keep)
+            findGen = gen
+            findHash &+= 1
+        }
         var v = false, b = false
         hb_vt_cursor(vt, &curRow, &curCol, &v, &b, &curShape)
         curVis = v; curBlink = b
@@ -221,6 +244,108 @@ final class TerminalView: NSView, NSTextInputClient {
         }
         hb_vt_unlock(vt)
         _ = t0
+    }
+
+    // ---- 查找 API（FindBar 调用；对齐 hb_terminal_find_*） ----
+
+    /// 锁内执行 hb_vt_search，行号转绝对行；keep_abs >= 0 时当前项
+    /// 尽量回到该绝对行的命中（对齐 linux find_run）。
+    private func findRunLocked(_ vt: OpaquePointer, keepAbs: Int64) {
+        var ms: UnsafeMutablePointer<hb_vt_match>?
+        let n = hb_vt_search(vt, findNeedle, true, &ms)
+        let total = Int64(hb_vt_total_pushed(vt))
+        findMs = (0..<n).map {
+            (abs: total + Int64(ms![$0].row),
+             col: Int(ms![$0].col), len: Int(ms![$0].len))
+        }
+        ms.map { free($0) }
+        if findMs.isEmpty { findCur = -1; return }
+        findCur = 0
+        if keepAbs >= 0 {
+            while findCur < findMs.count &&
+                  findMs[findCur].abs < keepAbs { findCur += 1 }
+            findCur = min(findCur, findMs.count - 1)
+            if findCur < findMs.count - 1 &&
+               findMs[findCur].abs != keepAbs &&
+               findMs[findCur + 1].abs == keepAbs { findCur += 1 }
+        }
+    }
+
+    /// 设置/更新 needle；返回命中总数。空串 = 关。
+    @discardableResult
+    func findSet(_ needle: String) -> Int {
+        findActive = true
+        findNeedle = needle
+        findMs = []; findCur = -1
+        if !needle.isEmpty, let vt = session?.vt {
+            hb_vt_lock(vt)
+            findGen = hb_vt_generation(vt)
+            totalPushed = Int64(hb_vt_total_pushed(vt))
+            findRunLocked(vt, keepAbs: -1)
+            hb_vt_unlock(vt)
+        }
+        if !findMs.isEmpty { findScrollCur() }
+        findHash &+= 1
+        needsDisplay = true
+        return findMs.count
+    }
+
+    /// dir>=0 下一个 / dir<0 上一个，循环；返回 1-based 当前序号（0=无）。
+    @discardableResult
+    func findStep(_ dir: Int) -> Int {
+        guard !findMs.isEmpty else { return 0 }
+        findCur = (findCur + (dir >= 0 ? 1 : -1) + findMs.count)
+                  % findMs.count
+        findScrollCur()
+        findHash &+= 1
+        needsDisplay = true
+        return findCur + 1
+    }
+
+    /// (cur 1-based, total)
+    func findCounts() -> (Int, Int) {
+        (findCur >= 0 ? findCur + 1 : 0, findMs.count)
+    }
+
+    /// 关闭：清命中 + 高亮。
+    func findClear() {
+        findActive = false
+        findNeedle = ""
+        findMs = []; findCur = -1
+        findHash &+= 1
+        needsDisplay = true
+    }
+
+    /// 当前命中滚到视图垂直居中（对齐 linux find_scroll_cur）。
+    private func findScrollCur() {
+        guard findCur >= 0 else { return }
+        let vrow = Int(findMs[findCur].abs - totalPushed)
+        var off = rows() / 2 - vrow
+        off = min(max(off, 0), sbCount)
+        if off != scrollOff { scrollOff = off }
+    }
+
+    /// 某可视行的命中覆盖（0 无 / 1 命中 / 2 当前）。
+    /// 命中较少时用线性扫描+二分定位行段。
+    private func findState(col: Int, w: Int, visRow: Int) -> Int {
+        guard findActive && !findMs.isEmpty else { return 0 }
+        let absRow = totalPushed + Int64(visRow - scrollOff)
+        // 二分：首个 abs >= absRow 的命中
+        var lo = 0, hi = findMs.count
+        while lo < hi {
+            let mi = (lo + hi) / 2
+            if findMs[mi].abs < absRow { lo = mi + 1 } else { hi = mi }
+        }
+        var st = 0, mi = lo
+        while mi < findMs.count && findMs[mi].abs == absRow {
+            let m = findMs[mi]
+            if col < m.col + m.len && m.col < col + w {
+                st = (mi == findCur) ? 2 : max(st, 1)
+                if st == 2 { break }
+            }
+            mi += 1
+        }
+        return st
     }
 
     // ---- 行布局：按内容 hash 缓存 ----
@@ -291,6 +416,9 @@ final class TerminalView: NSView, NSTextInputClient {
             if cell.attrs & UInt16(HB_ATTR_CONCEAL) != 0 { s = " " }
             let w = cell.width == 2 ? 2 : 1
             if selCovered(col, w, visRow) { bgc = theme.selection }
+            let fs = findState(col: col, w: w, visRow: visRow)
+            if fs == 2 { bgc = theme.findCur }
+            else if fs == 1 { bgc = theme.find }
             let key = (cell.attrs, fg, bgc)
             if inRun && (key != runKey) { flush() }
             if !inRun { runStart = col; runKey = key; inRun = true }
@@ -316,7 +444,7 @@ final class TerminalView: NSView, NSTextInputClient {
         let visRows = min(gridRows, rows())
         for vis in 0..<visRows where vis < grid.count {
             let line = grid[vis]
-            let h = hashRow(line) ^ selHash
+            let h = hashRow(line) ^ selHash ^ findHash
             var lay = rowLayouts[vis]
             if lay == nil || lay!.hash != h {
                 lay = layoutRow(line, visRow: vis, hash: h)
@@ -590,6 +718,11 @@ final class TerminalView: NSView, NSTextInputClient {
         handleKey(e)
     }
     func handleKey(_ e: NSEvent) {
+        // Esc 先关 find bar（不发给 session，对齐 linux Esc-first）
+        if findActive && e.keyCode == 53 {
+            onFindClose?()
+            return
+        }
         guard let s = session else { return }
         let mods = KeyMap.mods(e.modifierFlags.rawValue,
                                optionIsMeta: optionIsMeta)

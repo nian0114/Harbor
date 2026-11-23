@@ -80,6 +80,7 @@ final class App: NSObject, NSApplicationDelegate {
         main.addItem(file)
         let fm = NSMenu(title: L("文件"))
         fm.addItem(item(L("新建本地标签页"), #selector(newTab), "t", id: "new-local-tab"))
+        fm.addItem(item(L("命令面板"), #selector(openPalette), "k", id: "palette"))
         fm.addItem(item(L("新建 Workspace…"), #selector(openWorkspacePicker),
                         "w", [.command, .option], id: "new-workspace"))
         fm.addItem(item(L("关闭标签页"), #selector(closeTab), "w", id: "close-tab"))
@@ -94,7 +95,7 @@ final class App: NSObject, NSApplicationDelegate {
         em.addItem(item(L("粘贴"), #selector(paste), "v", id: "paste"))
         em.addItem(item(L("全选"), #selector(selectAll), "a", id: "select-all"))
         em.addItem(.separator())
-        em.addItem(item(L("查找…"), nil, "f", id: "find"))
+        em.addItem(item(L("在终端中查找…"), #selector(openFind), "f", id: "find"))
         edit.submenu = em
 
         let sess = NSMenuItem()
@@ -160,8 +161,10 @@ final class App: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = main
     }
     @objc func newTab() { win.newLocalTab() }
+    @objc func openPalette() { win.openPalette() }
     @objc func openWorkspacePicker() { win.openWorkspacePicker() }
     @objc func closePane() { win.wsClosePane() }
+    @objc func openFind() { win.wsFind() }
     @objc func splitRight() { win.wsSplitRight() }
     @objc func splitDown() { win.wsSplitDown() }
     @objc func toggleBroadcast() { win.wsBroadcast() }

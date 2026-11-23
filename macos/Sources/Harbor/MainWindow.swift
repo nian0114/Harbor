@@ -210,6 +210,193 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     }
     func wsFocusMode() { selWs?.toggleFocusMode() }
     func wsMove(_ dir: Int) { selWs?.moveFocus(dir: dir) }
+    func wsFind() {
+        guard selTab >= 0 && selTab < tabs.count else { return }
+        tabs[selTab].openFind()
+    }
+
+    // ---- 命令面板 ⌘K（FR-20） ----
+    func openPalette() { Palette.open(in: self) }
+    func restoreFocusToTab() {
+        if selTab >= 0 && selTab < tabs.count {
+            makeFirstResponder(tabs[selTab].term)
+        }
+    }
+    /// 焦点会话 host（snippet scope 用）
+    var focusedHostId: String? {
+        selWs?.focusedLeaf?.wsHostId
+    }
+    var focusedHostGroup: String? {
+        guard let id = focusedHostId, let h = Vault.shared.get(id)
+        else { return nil }
+        defer { hb_obj_free(h) }
+        let g = hb_obj_get_str(h, "group").str
+        return g.isEmpty ? nil : g
+    }
+
+    func paletteExec(_ it: PalItem) {
+        switch it.kind {
+        case .host:
+            openSSH(hostId: it.id, quickTarget: nil, title: it.title)
+        case .section:
+            if let i = Int(it.id) {
+                select(0); vaultTab.showSection(i)
+                vaultTab.sidebar.select(i)
+            }
+        case .snippet:
+            sendSnippet(id: it.id)
+        case .cmd:
+            paletteCmd(it.id)
+        }
+    }
+    private func paletteCmd(_ id: String) {
+        switch id {
+        case "local":      newLocalTab()
+        case "workspace":  openWorkspacePicker()
+        case "broadcast":  wsBroadcast()
+        case "focus":      wsFocusMode()
+        case "export-logs": exportLogs()
+        case "appearance": select(0); vaultTab.showSection(7)
+                           vaultTab.sidebar.select(7)
+        default: break
+        }
+    }
+
+    /// 导出连接日志 CSV（对齐 linux run_export_logs）。
+    func exportLogs() {
+        let sp = NSSavePanel()
+        sp.nameFieldStringValue = "harbor-logs.csv"
+        sp.allowedContentTypes = [.commaSeparatedText]
+        sp.beginSheetModal(for: self) { r in
+            guard r == .OK, let url = sp.url,
+                  let v = Vault.shared.vault else { return }
+            var csv: UnsafeMutablePointer<CChar>?
+            guard hb_vault_log_export_csv(v, &csv) == HB_OK, let csv
+            else { return }
+            defer { free(csv) }
+            try? String(cString: csv)
+                .write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// Snippet 发送（对齐 hb_snippet_send）：
+    ///   无变量 → 直接 paste 到焦点 session（broadcast 开 → 全 pane）；
+    ///   有 {{var}} → 变量对话框（默认/记忆值），渲染后发送；
+    ///   run=true → 追加回车。
+    private static var snippetLastVals: [String: [String: String]] = [:]
+    func sendSnippet(id: String) {
+        let v = Vault.shared
+        guard let snip = v.get(id) else { return }
+        defer { hb_obj_free(snip) }
+        let body = hb_obj_get_str(snip, "body").str
+        let run = hb_obj_get_bool(snip, "run", false)
+        // 变量提取
+        var names: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+        var defs: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+        let nv = hb_snippet_vars(body, &names, &defs)
+        var ns: [String] = []
+        var ds: [String?] = []
+        for i in 0..<nv {
+            ns.append(names?[i].map { String(cString: $0) } ?? "")
+            ds.append(defs?[i].map { String(cString: $0) })
+        }
+        if let names { hb_strfreev(names, nv) }
+        if let defs { hb_strfreev(defs, nv) }
+        if nv == 0 { deliverSnippet(body, run: run); return }
+        // 变量对话框：每变量一行 field，默认/上次值预填
+        let a = NSAlert()
+        a.messageText = L("发送 Snippet")
+        a.informativeText = L("填写变量值：")
+        a.addButton(withTitle: L("发送"))
+        a.addButton(withTitle: L("取消"))
+        let acc = NSView()
+        acc.translatesAutoresizingMaskIntoConstraints = false
+        var fields: [NSTextField] = []
+        var prev: NSView = acc
+        let last = MainWindow.snippetLastVals[id] ?? [:]
+        for (i, n) in ns.enumerated() {
+            let l = NSTextField(labelWithString: n)
+            let f = NSTextField()
+            f.placeholderString = ds[i] ?? ""
+            f.stringValue = last[n] ?? ds[i] ?? ""
+            f.setAccessibilityIdentifier("snipvar-\(n)")
+            l.translatesAutoresizingMaskIntoConstraints = false
+            f.translatesAutoresizingMaskIntoConstraints = false
+            acc.addSubview(l); acc.addSubview(f)
+            NSLayoutConstraint.activate([
+                l.leadingAnchor.constraint(equalTo: acc.leadingAnchor),
+                l.widthAnchor.constraint(equalToConstant: 110),
+                f.leadingAnchor.constraint(equalTo: l.trailingAnchor,
+                                           constant: 8),
+                f.trailingAnchor.constraint(equalTo: acc.trailingAnchor),
+                l.centerYAnchor.constraint(equalTo: f.centerYAnchor),
+                prev === acc
+                    ? f.topAnchor.constraint(equalTo: acc.topAnchor)
+                    : f.topAnchor.constraint(
+                        equalTo: prev.bottomAnchor, constant: 6),
+            ])
+            fields.append(f)
+            prev = f
+        }
+        NSLayoutConstraint.activate([
+            acc.widthAnchor.constraint(equalToConstant: 320),
+            prev.bottomAnchor.constraint(equalTo: acc.bottomAnchor),
+        ])
+        a.accessoryView = acc
+        DialogRegistry.shared.present(alert: a, kind: "snip-vars",
+                                      in: self) { ok in
+            guard ok else { return }
+            let vals: [String] = fields.map { $0.stringValue }
+            var rec: [String: String] = [:]
+            for (i, n) in ns.enumerated() { rec[n] = vals[i] }
+            MainWindow.snippetLastVals[id] = rec
+            // 渲染：空值回退默认（values NULL 元素 = 默认）
+            var cvals: [UnsafePointer<CChar>?] = vals.map {
+                $0.isEmpty ? nil : UnsafePointer(strdup($0))
+            }
+            var cnames: [UnsafePointer<CChar>?] = ns.map {
+                UnsafePointer(strdup($0))
+            }
+            var text = body
+            if let r = hb_snippet_render(body, &cnames, &cvals, nv) {
+                text = String(cString: r)
+                free(r)
+            }
+            for p in cnames { free(UnsafeMutablePointer(mutating: p)) }
+            for p in cvals { free(UnsafeMutablePointer(mutating: p)) }
+            self.deliverSnippet(text, run: run)
+        }
+    }
+    /// paste 到焦点 session；broadcast 开 → 全 pane（对齐 linux 广播确认）。
+    private func deliverSnippet(_ text: String, run: Bool) {
+        let w = selWs
+        var targets: [TermTab]
+        if let w {
+            targets = w.broadcast
+                ? w.leavesList
+                : (w.focusedLeaf.map { [$0] } ?? [])
+        } else if selTab >= 0 && selTab < tabs.count {
+            targets = [tabs[selTab]]   // 单 pane tab：送到本 tab（linux parity）
+        } else {
+            targets = []
+        }
+        var sent = false
+        for l in targets {
+            guard let s = l.session, s.alive else { continue }
+            text.withCString { hb_session_paste(s.sess, $0) }
+            if run {
+                // HB_KEY_ENTER
+                hb_session_key(s.sess, hb_key(rawValue: 1), 0)
+            }
+            sent = true
+        }
+        if !sent {
+            let a = NSAlert()
+            a.messageText = L("没有活动终端")
+            DialogRegistry.shared.present(alert: a, kind: "toast",
+                                          in: self) { _ in }
+        }
+    }
 
     /// 侧栏选区 → 切到 Vault tab 并展示分区（dev select-sidebar 同路）。
     func showSection(_ i: Int) {

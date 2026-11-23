@@ -75,6 +75,13 @@ final class Workspace: NSObject, NSSplitViewDelegate {
                                            tint: Theme.termDim.color))
         ttLabel.font = .systemFont(ofSize: 12.5)
         ttLabel.textColor = Theme.termDim.color
+        let search = NSButton()
+        search.bezelStyle = .texturedRounded
+        search.isBordered = false
+        search.image = hbIcon("search", size: 13, tint: Theme.termDim.color)
+        search.target = self
+        search.action = #selector(onSearchBtn)
+        search.setAccessibilityIdentifier("ws-find")
         bcastBtn = NSButton(title: L("Broadcast"), target: self,
                             action: #selector(toggleBroadcast))
         bcastBtn.bezelStyle = .texturedRounded
@@ -86,12 +93,12 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         fb.font = .systemFont(ofSize: 11.5)
         fb.setAccessibilityIdentifier("ws-focus")
         focusBtn = fb
-        [bar, ic, ttLabel, bcastBtn, focusBtn, bodyHost,
+        [bar, ic, ttLabel, search, bcastBtn, focusBtn, bodyHost,
          findHost].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false }
         view.addSubview(bar)
         bar.addSubview(ic); bar.addSubview(ttLabel)
-        bar.addSubview(bcastBtn)
+        bar.addSubview(search); bar.addSubview(bcastBtn)
         bar.addSubview(focusBtn)
         view.addSubview(findHost); view.addSubview(bodyHost)
         findH = findHost.heightAnchor.constraint(equalToConstant: 0)
@@ -113,6 +120,10 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             bcastBtn.trailingAnchor.constraint(
                 equalTo: focusBtn.leadingAnchor, constant: -6),
             bcastBtn.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            search.trailingAnchor.constraint(
+                equalTo: bcastBtn.leadingAnchor, constant: -6),
+            search.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            search.widthAnchor.constraint(equalToConstant: 28),
             findHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             findHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             findHost.topAnchor.constraint(equalTo: bar.bottomAnchor),
@@ -494,7 +505,41 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     @objc private func onHeadClose(_ b: NSButton) {
         leafOfBtn(b).map { _ = closeLeaf($0) }
     }
+    @objc private func onSearchBtn() { openFind() }
 
+    /// ⌘F：焦点 pane 的查找栏（findHost 承载，绑定打开时的焦点 term）。
+    private lazy var findBar: FindBar = {
+        let b = FindBar()
+        b.onClose = { [weak self] in self?.closeFind() }
+        return b
+    }()
+    private var findTerm: TerminalView?
+
+    func openFind() {
+        guard let t = focusedLeaf?.term else { return }
+        findTerm?.findClear(); findTerm?.onFindClose = nil
+        findTerm = t
+        findBar.bind(t)
+        setFindBar(findBar)
+        findBar.open()
+        t.onFindClose = { [weak self] in self?.closeFind() }
+    }
+    func closeFind() {
+        findTerm?.findClear()
+        findTerm?.onFindClose = nil
+        findTerm = nil
+        setFindBar(nil)
+        if let f = focusedLeaf { view.window?.makeFirstResponder(f.term) }
+    }
+    /// dev hook：find 计数 n/总数
+    var findCountText: String { findTerm == nil ? "" : findBar.countText }
+    /// dev hook：设 find needle
+    func devFindSet(_ s: String) {
+        if findTerm == nil { openFind() }
+        findBar.devSet(s)
+    }
+    /// dev hook：find 上/下一条
+    func devFindStep(_ dir: Int) { findBar.devStep(dir) }
     /// dev hook：聚焦第 i 个 pane
     func devFocusPane(_ i: Int) {
         let ls = model.leaves
@@ -504,7 +549,8 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     /// dev hook：工作区状态摘要（panes/focused/broadcast/focusMode）
     var devState: String {
         "panes=\(model.leafCount) focused=\(model.focused.leafId != nil) " +
-        "broadcast=\(broadcast ? 1 : 0) focus=\(focusMode ? 1 : 0) find=off"
+        "broadcast=\(broadcast ? 1 : 0) focus=\(focusMode ? 1 : 0) " +
+        "find=\(findTerm == nil ? "off" : findBar.countText)"
     }
 
     /// 方向移动焦点（⌘⌥方向，对齐 hb_workspace_move_focus 几何最近）。

@@ -43,6 +43,58 @@ class TermTab: NSObject {
         return t
     }
 
+    // ---- 终端内查找 ⌘F（单 pane tab；WsTab 覆盖 → Workspace.findHost） ----
+    /// 浮在终端顶部的查找条（对齐 linux find bar 覆盖层）。
+    private var singleFindBar: FindBar?
+    private var singleFindTerm: TerminalView?
+
+    func openFind() {
+        guard let t = term else { return }
+        let b: FindBar
+        if let old = singleFindBar { b = old }
+        else {
+            b = FindBar()
+            b.onClose = { [weak self] in self?.closeFind() }
+            b.translatesAutoresizingMaskIntoConstraints = false
+            singleFindBar = b
+        }
+        if b.superview == nil {
+            view.addSubview(b)
+            NSLayoutConstraint.activate([
+                b.leadingAnchor.constraint(
+                    equalTo: view.leadingAnchor),
+                b.trailingAnchor.constraint(
+                    equalTo: view.trailingAnchor),
+                b.topAnchor.constraint(equalTo: view.topAnchor),
+                b.heightAnchor.constraint(equalToConstant: 32),
+            ])
+        }
+        singleFindTerm?.findClear()
+        singleFindTerm?.onFindClose = nil
+        singleFindTerm = t
+        b.bind(t)
+        b.open()
+        t.onFindClose = { [weak self] in self?.closeFind() }
+    }
+    func closeFind() {
+        singleFindTerm?.findClear()
+        singleFindTerm?.onFindClose = nil
+        singleFindTerm = nil
+        singleFindBar?.removeFromSuperview()
+        if let t = term { view.window?.makeFirstResponder(t) }
+    }
+    /// dev hook：设 find needle
+    func devFindSet(_ s: String) {
+        if singleFindTerm == nil { openFind() }
+        singleFindBar?.devSet(s)
+    }
+    /// dev hook：上/下一条
+    func devFindStep(_ dir: Int) { singleFindBar?.devStep(dir) }
+    /// dev hook：find 计数 n/总数（""=未开）
+    var findCountText: String {
+        singleFindTerm == nil ? "" : (singleFindBar?.countText ?? "")
+    }
+
     /// WsTab 覆盖：焦点叶变化 → tab 外观同步。普通叶为空实现。
     func syncFromWorkspace() {}
 
@@ -163,6 +215,13 @@ final class WsTab: TermTab {
     override var running: Bool { ws.anyRunning }
     override var allTerms: [TerminalView] { ws.allTerms }
     override func kill() { ws.killAll() }
+
+    // ---- ⌘F 转发到 Workspace（焦点 pane 的 find bar） ----
+    override func openFind() { ws.openFind() }
+    override func closeFind() { ws.closeFind() }
+    override func devFindSet(_ s: String) { ws.devFindSet(s) }
+    override func devFindStep(_ dir: Int) { ws.devFindStep(dir) }
+    override var findCountText: String { ws.findCountText }
 
     /// 焦点叶外观 → tab 外观（strip 重绘由 MainWindow 触发）。
     override func syncFromWorkspace() {
