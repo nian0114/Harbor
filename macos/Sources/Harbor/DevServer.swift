@@ -330,9 +330,85 @@ final class DevServer {
         case "hist-clear":
             guard let v = Vault.shared.vault else { return "ERR" }
             _ = hb_vault_history_clear(v); return "OK"
+        // ---- M3: SFTP ----
+        case "tab-sel":                          // <i>：切换 tab
+            guard let i = Int(arg), let w = win,
+                  i >= 0 && i < w.tabs.count else { return "ERR" }
+            w.select(i); return "OK \(i)"
+        case "sftp":     return win?.sftpTab.devState ?? "ERR"
+        case "sftp-pick":                        // <i> local|<host_id>
+            let kv = arg.split(separator: " ", maxSplits: 1)
+            guard kv.count == 2, let i = Int(kv[0]),
+                  let p = sftpPane(i) else { return "ERR usage" }
+            p.pick(kv[1] == "local" ? nil : String(kv[1]))
+            return "OK"
+        case "sftp-cd":                          // <i> <path>
+            let kv = arg.split(separator: " ", maxSplits: 1)
+            guard kv.count == 2, let i = Int(kv[0]),
+                  let p = sftpPane(i) else { return "ERR usage" }
+            p.browseTo(String(kv[1]), nav: true); return "OK"
+        case "sftp-nav":                         // <i> up|back|fwd
+            let kv = arg.split(separator: " ")
+            guard kv.count == 2, let i = Int(kv[0]),
+                  let p = sftpPane(i) else { return "ERR usage" }
+            p.devNav(String(kv[1])); return "OK"
+        case "sftp-filter":                      // <i> <text>
+            let kv = arg.split(separator: " ", maxSplits: 1)
+            guard let i = Int(kv[0]), let p = sftpPane(i)
+            else { return "ERR usage" }
+            p.devFilter(kv.count > 1 ? String(kv[1]) : ""); return "OK"
+        case "sftp-hidden":                      // <i> on|off
+            let kv = arg.split(separator: " ")
+            guard kv.count == 2, let i = Int(kv[0]),
+                  let p = sftpPane(i) else { return "ERR usage" }
+            p.devHidden(kv[1] == "on"); return "OK"
+        case "sftp-sel":                         // <i> <idx,idx,...>
+            let kv = arg.split(separator: " ")
+            guard kv.count == 2, let i = Int(kv[0]),
+                  let p = sftpPane(i) else { return "ERR usage" }
+            p.devSelect(kv[1].split(separator: ",")
+                                   .compactMap { Int($0) })
+            return "OK sel=\(p.selItems().count)"
+        case "sftp-dbl":                         // <i> <idx>
+            let kv = arg.split(separator: " ")
+            guard kv.count == 2, let i = Int(kv[0]),
+                  let r = Int(kv[1]), let p = sftpPane(i)
+            else { return "ERR usage" }
+            p.devActivate(r); return "OK"
+        case "sftp-op":                          // <i> <mkdir|rename|delete|chmod|copy|open|refresh|selectall>
+            let kv = arg.split(separator: " ")
+            guard kv.count == 2, let i = Int(kv[0]),
+                  let p = sftpPane(i) else { return "ERR usage" }
+            switch kv[1] {
+            case "mkdir": p.actMkdir()
+            case "rename": p.actRename()
+            case "delete": p.actDelete()
+            case "chmod": p.actChmod()
+            case "copy": p.actCopy()
+            case "open": p.actOpen()
+            case "refresh": p.actRefresh()
+            case "selectall": p.actSelectAll()
+            default: return "ERR op"
+            }
+            return "OK"
+        case "sftp-cancel":                      // <i>：取消连接
+            guard let i = Int(arg), let p = sftpPane(i)
+            else { return "ERR usage" }
+            p.devCancel(); return "OK"
+        case "sftp-xfer":                        // <id>：cancel/retry（按行态）
+            guard let id = Int(arg), let v = win?.sftpTab.sftp
+            else { return "ERR usage" }
+            v.devXfer(id); return "OK"
+        case "sftp-clear":
+            win?.sftpTab.sftp.devClearDone(); return "OK"
         case "quit":     NSApp.terminate(nil); return "OK"
         default: return "ERR unknown"
         }
+    }
+
+    private func sftpPane(_ i: Int) -> SftpPane? {
+        let v = win?.sftpTab.sftp
+        return (i == 0 || i == 1) ? v?.panes[i] : nil
     }
 
     private func cmdSnapshot(_ arg: String) -> String {
