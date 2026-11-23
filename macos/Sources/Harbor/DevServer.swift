@@ -401,6 +401,33 @@ final class DevServer {
             v.devXfer(id); return "OK"
         case "sftp-clear":
             win?.sftpTab.sftp.devClearDone(); return "OK"
+        /* ---- FR-06 端口转发 dev 钩子 ---- */
+        case "fwd":
+            return win?.vaultTab.forwardRef?.devState ?? "ERR no-page"
+        case "fwd-mgr":                          // 运行态（不依赖页面）
+            var s = ""
+            for (id, st) in ForwardMgr.shared.devRuns {
+                s += "\(id) \(st)\n"
+            }
+            return s.isEmpty ? "(none)" : s
+        case "fwd-sw":                           // <id|idx> on|off
+            let kv = arg.split(separator: " ")
+            guard kv.count == 2 else { return "ERR usage" }
+            guard let id = fwdRuleId(String(kv[0]))
+            else { return "ERR no-rule" }
+            win?.vaultTab.forwardRef?.devSwitch(id, kv[1] == "on")
+            return "OK"
+        case "fwd-add":                          // kind baddr bport daddr dport via [start] [auto]
+            return cmdFwdAdd(arg)
+        case "fwd-del":                          // <id|idx>
+            guard let id = fwdRuleId(arg)
+            else { return "ERR no-rule" }
+            Vault.shared.delete(id); return "OK"
+        case "fwd-form":                         // [id|idx]：打开新建/编辑 sheet
+            let id = arg.isEmpty ? nil : fwdRuleId(arg)
+            if !arg.isEmpty && id == nil { return "ERR no-rule" }
+            win?.vaultTab.forwardRef?.devOpenForm(id)
+            return "OK"
         case "quit":     NSApp.terminate(nil); return "OK"
         default: return "ERR unknown"
         }
@@ -812,6 +839,44 @@ final class DevServer {
         Vault.shared.put(o); hb_obj_free(o)
         page(HostsPage.self)?.reload()
         return "OK"
+    }
+    /// `fwd-add <kind> <baddr> <bport> <daddr> <dport> <via> [start] [auto]`
+    /// → "OK <id>"；daddr/dport 用 "-" 表 dynamic 置空。
+    private func cmdFwdAdd(_ arg: String) -> String {
+        let kv = arg.split(separator: " ")
+        guard kv.count >= 6, let bp = Int64(kv[2]),
+              let o = Vault.shared.newObj("forward")
+        else { return "ERR usage" }
+        hb_obj_set_str(o, "kind", String(kv[0]))
+        hb_obj_set_str(o, "bind_addr", String(kv[1]))
+        hb_obj_set_int(o, "bind_port", bp)
+        if kv[0] != "dynamic" {
+            hb_obj_set_str(o, "dest_addr",
+                           kv[3] == "-" ? "" : String(kv[3]))
+            hb_obj_set_int(o, "dest_port", Int64(kv[4]) ?? 0)
+        }
+        if kv[5] != "-" {
+            hb_obj_set_str(o, "via", String(kv[5]))
+        }
+        hb_obj_set_int(o, "order",
+                       Int64(Date().timeIntervalSince1970))
+        hb_obj_set_bool(o, "autostart", kv.count > 7 && kv[7] == "auto")
+        let start = kv.count > 6 && kv[6] == "start"
+        hb_obj_set_bool(o, "enabled", start)
+        Vault.shared.put(o)
+        let id = hb_obj_id(o).str
+        hb_obj_free(o)
+        if start { ForwardMgr.shared.start(id) }
+        return "OK \(id)"
+    }
+    /// <id|显示行号> → 规则 id（行号按列表顺序）。
+    private func fwdRuleId(_ s: String) -> String? {
+        let objs = Vault.shared.list("forward")
+        defer { objs.forEach { hb_obj_free($0) } }
+        if let i = Int(s), i >= 0 && i < objs.count {
+            return hb_obj_id(objs[i]).str
+        }
+        return objs.contains(where: { hb_obj_id($0).str == s }) ? s : nil
     }
     /// `kc-gen <type> <name> [pass-b64]`：生成密钥入 vault（同 KeychainPage 路径）
     private func cmdKcGen(_ arg: String) -> String {
