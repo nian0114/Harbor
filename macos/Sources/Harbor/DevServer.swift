@@ -269,6 +269,15 @@ final class DevServer {
                   let ti = NotifyCenter.shared.items[i].tabIndex,
                   ti >= 0 else { return "ERR" }
             win?.select(ti); return "OK \(ti)"
+        case "tray-menu":
+            return "OK " + MenuBar.shared.devMenuItems
+                .joined(separator: " ;; ")
+        case "tray-count":
+            return "OK \(MenuBar.onlineCount(win))"
+        case "close-win":
+            // 模拟点窗口 ×（走 windowShouldClose → close_to_tray 分支）
+            win?.performClose(nil)
+            return "OK"
         case "watch-badge":
             if let w = selTab as? WsTab,
                let g = w.badgeGlyph { return "badge=\(g.0)" }

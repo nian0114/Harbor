@@ -1437,6 +1437,11 @@ final class DesktopTab: TermTab, ConnDelegate {
 
     // ---------- Tab 生命周期 ----------
     override var running: Bool { connected }
+    /// linux hb_desktop_page_connected 分支：已连桌面 +1。
+    override var onlineCount: Int { connected ? 1 : 0 }
+    /// linux hb_desktop_page_disconnect：hb_rd_close（断开后走
+    /// 已有 backoff 重连流程）。
+    override func disconnect() { rd?.close() }
     override func kill() {
         dead = true
         gen += 1

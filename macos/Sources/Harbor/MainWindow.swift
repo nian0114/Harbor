@@ -614,6 +614,24 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         for t in tabs { t.kill() }
     }
     func windowShouldClose(_ s: NSWindow) -> Bool {
+        // linux on_close_request：close_to_tray 默认开 → 窗口藏起，
+        // 会话与转发继续跑，程序留在菜单栏（一次性提示）。
+        let v = Vault.shared
+        if v.settingsBool("close_to_tray", true) {
+            orderOut(nil)
+            NSApp.setActivationPolicy(.accessory)
+            if !v.settingsBool("tray_hint_shown", false) {
+                v.setSettingsBool("tray_hint_shown", true)
+                let t = L("Harbor 仍在菜单栏运行")
+                let b = L("点击菜单栏图标可恢复窗口。")
+                NotifyCenter.shared.post(
+                    kind: "info", title: t, body: b, tabIndex: nil)
+                NotifyCenter.shared.system.post(
+                    title: t, body: b, tabIndex: nil, priorityHigh: false)
+            }
+            MenuBar.shared.refresh()
+            return false
+        }
         let live = tabs.contains { $0.running }
         if live {
             let a = NSAlert()

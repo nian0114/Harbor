@@ -289,6 +289,11 @@ class TermTab: NSObject {
         start(reuse: v)
     }
     var running: Bool { session?.alive ?? false }
+    /// M8 托盘计数：本 tab 贡献的在线会话数
+    /// （linux hb_window_online_count 的 per-tab 分支）。
+    var onlineCount: Int { (session?.alive ?? false) ? 1 : 0 }
+    /// M8 托盘"全部断开"：hb_session_close（tab 保留、日志收尾）。
+    func disconnect() { session?.close() }
     /// 终止会话并 join 线程（关 tab / 退出时）。
     func kill() {
         for o in shareObs { NotificationCenter.default.removeObserver(o) }
@@ -325,6 +330,16 @@ final class WsTab: TermTab {
 
     override var running: Bool { ws.anyRunning }
     override var allTerms: [TerminalView] { ws.allTerms }
+    /// linux hb_workspace_online：每个存活叶 +1。
+    override var onlineCount: Int {
+        ws.leavesList.reduce(0) {
+            $0 + ($1.session?.alive == true ? 1 : 0)
+        }
+    }
+    /// linux hb_workspace_disconnect_all：逐叶 close（不 free）。
+    override func disconnect() {
+        ws.leavesList.forEach { $0.session?.close() }
+    }
     override func kill() { ws.killAll() }
 
     // ---- ⌘F 转发到 Workspace（焦点 pane 的 find bar） ----

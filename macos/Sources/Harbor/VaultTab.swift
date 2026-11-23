@@ -236,6 +236,12 @@ final class SFTPTab: TermTab {
     private func panesAlive() -> Bool {
         sftp.panes.contains { $0.sess != nil || $0.ctl != nil }
     }
+    /// linux hb_sftp_view_online：每个已连接的远端 pane +1。
+    override var onlineCount: Int {
+        sftp.panes.filter { $0.sess != nil }.count
+    }
+    /// linux hb_sftp_view_disconnect_all：远端 pane 回 select。
+    override func disconnect() { sftp.disconnectAll() }
     override func kill() {
         sftp.teardown()   // 各 pane ConnCtl cancel+join → 日志行收尾
         super.kill()

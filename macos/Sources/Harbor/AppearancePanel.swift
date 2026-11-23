@@ -57,9 +57,27 @@ final class AppearancePanel: NSView {
         meta.frame = NSRect(x: 24, y: y, width: 220, height: 22)
         addSubview(meta)
         y += 40
+
+        // ---- 系统集成（设备本地，不同步）----
+        let sect = NSTextField(labelWithString: L("系统集成"))
+        sect.font = .systemFont(ofSize: 12, weight: .semibold)
+        sect.textColor = Theme.termDim.color
+        sect.frame = NSRect(x: 24, y: y, width: 200, height: 20)
+        addSubview(sect)
+        y += 28
+        let tray = NSButton(checkboxWithTitle:
+            L("关闭窗口时留在菜单栏（会话保持运行）"),
+            target: self, action: #selector(trayChanged))
+        tray.state = v.settingsBool("close_to_tray", true) ? .on : .off
+        tray.frame = NSRect(x: 24, y: y, width: 380, height: 22)
+        addSubview(tray)
+        y += 34
         frame = NSRect(x: 0, y: 0, width: 480, height: y)
     }
     required init?(coder: NSCoder) { nil }
+    @objc private func trayChanged(_ b: NSButton) {
+        v.setSettingsBool("close_to_tray", b.state == .on)
+    }
     @objc private func changed(_ s: NSControl) {
         if let p = s as? NSPopUpButton {
             if p.tag == 1 {

@@ -20,10 +20,19 @@ final class App: NSObject, NSApplicationDelegate {
     }
     func applicationDidFinishLaunching(_ n: Notification) {
         buildMenus()
+        MenuBar.shared.install()
         win = MainWindow()
-        win.center()
-        win.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // --background：登录项/菜单栏后台启动 —— 不显示主窗口
+        // （linux --background 同义；窗口照常创建，随时可唤回）。
+        let bg = ProcessInfo.processInfo.arguments
+            .contains("--background")
+        if !bg {
+            win.center()
+            win.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            NSApp.setActivationPolicy(.accessory)
+        }
         #if DEBUG
         if dev == nil,
            ProcessInfo.processInfo.environment["HARBOR_DEV_ACTIONS"] == "1" {
@@ -40,13 +49,18 @@ final class App: NSObject, NSApplicationDelegate {
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
+    // close_to_tray 开着时窗口只会被 orderOut（不走本回调）；
+    // 真关掉（设置关掉）→ 正常 macOS 语义，末窗关闭即退出。
     func applicationShouldTerminateAfterLastWindowClosed(_ a: NSApplication)
-        -> Bool { true }
+        -> Bool {
+        !Vault.shared.settingsBool("close_to_tray", true)
+    }
 
     // 活动会话存在时，退出也要确认（windowShouldClose 只管点 X，terminate 走这里）
     func applicationShouldTerminate(_ a: NSApplication)
         -> NSApplication.TerminateReply {
         if win.tabs.contains(where: { $0.running }) {
+            showMainWindow()   // 托盘隐藏的窗口挂不了确认 sheet
             let al = NSAlert()
             al.messageText = L("仍有会话在运行")
             al.informativeText = L("退出 Harbor 将终止所有活动会话。")
