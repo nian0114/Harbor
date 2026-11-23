@@ -18,6 +18,8 @@ ALLOWLIST = [
      'secret-prompt detection keyword, matched against terminal text'),
     ('linux/src/hb-settings-view.c', '"中文"',
      'language autonym, shown untranslated like "English"'),
+    ('macos/Sources/Harbor/AppearancePanel.swift', '"简体中文"',
+     'language autonym, shown untranslated like "English"'),
     ('core/src/ssh.c', '"密码"',
      'kbi password-prompt detection keyword, matched against server text'),
     ('macos/Sources/HarborKit/PaletteRank.swift', '"全局"',
@@ -32,6 +34,10 @@ ALLOWLIST = [
      'expected localized output of FwdKit.trafficText'),
     ('macos/Tests/HarborTests/SyncKitTests.swift', '"ＡＢＣ"',
      'fullwidth input data for the NFKC normalisation test'),
+    ('macos/Tests/HarborTests/LangTests.swift', '"主机"',
+     'msgid passthrough assertion compares output to the raw msgid'),
+    ('macos/Tests/HarborTests/LangTests.swift', '"中文"',
+     'msgid passthrough assertion compares output to the raw msgid'),
 ]
 
 def scan(src):
@@ -140,6 +146,94 @@ def main():
               file=sys.stderr)
         return 1
     print('i18n coverage: all CJK literals wrapped or allowlisted')
+    return check_macos_catalog(root)
+
+# --- macOS catalog gate -------------------------------------------------
+# L() is the macOS translation entry point: its argument MUST be a plain
+# string literal (no \(...) interpolation — format through String(format:)
+# instead) and every msgid must have a non-empty msgstr in po/en.po, the
+# single catalog consumed by both the Linux .mo build and the macOS
+# en.strings generation in build-macos-app.sh.
+
+L_CALL = re.compile(r'\bL\(')
+L_LIT  = re.compile(r'\bL\(\s*"((?:[^"\\]|\\.)*)"\s*\)')
+
+def enpo_msgstrs(path):
+    """Parse po/en.po → {msgid: msgstr} honouring continuation lines."""
+    out = {}
+    cur_key = cur_val = None
+    field = None
+    def unq(t):
+        return re.sub(r'\\(.)', lambda m: {'n':'\n','t':'\t','"':'"','\\':'\\'}.get(m.group(1), m.group(1)), t[1:-1])
+    for line in path.read_text().splitlines():
+        if line.startswith('msgid_plural'):
+            field = 'plural'
+        elif line.startswith('msgid '):
+            if cur_key is not None:
+                out[cur_key] = cur_val
+            cur_key, cur_val = unq(line[6:].strip()), None
+            field = 'id'
+        elif line.startswith('msgstr['):
+            if cur_val is None:
+                cur_val = unq(line[line.index(']') + 1:].strip())
+            field = 'str'
+        elif line.startswith('msgstr '):
+            cur_val = unq(line[7:].strip()); field = 'str'
+        elif line.startswith('"') and field == 'str':
+            cur_val = (cur_val or '') + unq(line.strip())
+        elif line.startswith('"') and field == 'id':
+            cur_key += unq(line.strip())
+        elif not line.startswith('#') and line.strip():
+            field = None
+    if cur_key is not None:
+        out[cur_key] = cur_val
+    return out
+
+def check_macos_catalog(root):
+    bad = []
+    for p in sorted((root / 'macos' / 'Sources').rglob('*.swift')):
+        rel = str(p.relative_to(root))
+        src = p.read_text()
+        for m in L_CALL.finditer(src):
+            if src[max(0, m.start() - 5):m.start()] == 'func ':
+                continue  # the func L( declaration itself
+            line_start = src.rfind('\n', 0, m.start()) + 1
+            prev_nl = src.rfind('\n', 0, max(0, line_start - 1)) + 1
+            line_end = src.find('\n', m.end())
+            whole = src[prev_nl:line_end if line_end > 0 else len(src)]
+            rest = src[m.end():].lstrip()
+            if not rest.startswith('"') and 'i18n-dynamic' not in whole:
+                bad.append((rel, lineno(src, m.start()),
+                            'L() argument is not a string literal'))
+    msgids = set()
+    for p in sorted((root / 'macos' / 'Sources').rglob('*.swift')):
+        rel = str(p.relative_to(root))
+        src = p.read_text()
+        for m in L_LIT.finditer(src):
+            lit = m.group(1)
+            if '\\(' in lit:
+                bad.append((rel, lineno(src, m.start()),
+                            'L() argument contains \\(...) interpolation — '
+                            'use String(format: L("…"), …)'))
+                continue
+            msgids.add((rel, lineno(src, m.start()),
+                        lit.replace('\\"', '"').replace('\\\\', '\\')
+                           .replace('\\n', '\n')))
+    en = enpo_msgstrs(root / 'po' / 'en.po')
+    seen = set()
+    for rel, ln, mid in sorted(msgids):
+        if mid in seen:
+            continue
+        seen.add(mid)
+        if mid not in en or not en[mid]:
+            bad.append((rel, ln,
+                        f'macOS msgid untranslated in po/en.po: {mid!r}'))
+    for rel, ln, text in bad:
+        print(f'{rel}:{ln}: {text}')
+    if bad:
+        print(f'{len(bad)} macOS i18n problem(s)', file=sys.stderr)
+        return 1
+    print(f'macOS catalog: {len(seen)} L() msgids all translated in en.po')
     return 0
 
 if __name__ == '__main__':
