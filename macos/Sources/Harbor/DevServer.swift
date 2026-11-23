@@ -428,6 +428,30 @@ final class DevServer {
             if !arg.isEmpty && id == nil { return "ERR no-rule" }
             win?.vaultTab.forwardRef?.devOpenForm(id)
             return "OK"
+        case "rd":                               // 桌面页状态 JSON
+            return "OK " + (selDesktop()?.devState ?? "{}")
+        case "rd-type":                          // <text>：逐字符 keysym
+            selDesktop()?.devType(arg); return "OK"
+        case "rd-click":                         // <x> <y> [btn]：fb 坐标
+            let a = arg.split(separator: " ")
+            guard a.count >= 2, let x = Int(a[0]), let y = Int(a[1])
+            else { return "ERR args" }
+            selDesktop()?.devClick(x, y,
+                a.count > 2 ? UInt32(a[2]) ?? 1 : 1)
+            return "OK"
+        case "rd-move":                          // <x> <y>
+            let a2 = arg.split(separator: " ")
+            guard a2.count == 2, let x = Int(a2[0]), let y = Int(a2[1])
+            else { return "ERR args" }
+            selDesktop()?.devMove(x, y); return "OK"
+        case "rd-key":                           // <keysym-hex>
+            guard let s = UInt32(arg, radix: 16) else { return "ERR" }
+            selDesktop()?.devKey(s); return "OK"
+        case "rd-clip":                          // <text>：本地→远端
+            selDesktop()?.devClip(arg); return "OK"
+        case "rd-fps":                           // [sec]
+            return "OK " + (selDesktop()?
+                .devFps(Double(arg) ?? 0) ?? "no-desktop")
         case "quit":     NSApp.terminate(nil); return "OK"
         default: return "ERR unknown"
         }
@@ -807,6 +831,14 @@ final class DevServer {
         return "OK"
     }
 
+    /// 选中的桌面页（或第一个 DesktopTab）。
+    private func selDesktop() -> DesktopTab? {
+        if let w = win {
+            if let d = w.tabs[w.selTab] as? DesktopTab { return d }
+            return w.tabs.compactMap { $0 as? DesktopTab }.first
+        }
+        return nil
+    }
     /// 关闭任意系统/应用 modal（如崩溃恢复提示）：按默认按钮。
     private func page<T: NSView>(_ t: T.Type) -> T? {
         win?.contentView?.findPage(t)
