@@ -319,6 +319,8 @@ build_freerdp() {
     # Intel 交叉 arm64 时 FreeRDP 的 SIMD 探测按 build host 选 SSE 源，
     # Apple clang 不接受其 -msse3 —— 只给 x86_64 开 SIMD。
     if [ "$ARCH" = x86_64 ]; then simd_flag=-DWITH_SIMD=ON; else simd_flag=-DWITH_SIMD=OFF; fi
+    # WITH_INTERNAL_MD4/RC4：静态 OpenSSL3 没有 legacy provider →
+    # 无 MD4/RC4，CredSSP/NTLM(NLA) 起不来；用 WinPR 内置实现。
     cmake -S "$src" -B "$src/build" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$PREFIX" \
@@ -340,6 +342,7 @@ build_freerdp() {
         -DWITH_JPEG=ON -DJPEG_INCLUDE_DIR="$PREFIX/include" \
         -DJPEG_LIBRARY="$PREFIX/lib/libjpeg.a" \
         -DWITH_OPENSSL=ON -DOPENSSL_ROOT_DIR="$PREFIX" \
+        -DWITH_INTERNAL_MD4=ON -DWITH_INTERNAL_RC4=ON \
         -DWITH_ZLIB=ON -DWITH_WEBVIEW=OFF -DWITH_CLIENT_SDL=OFF \
         -DWITH_INTERWORKING=OFF -DWITH_SHADOW=OFF \
         -DWITH_PROXY=OFF -DWITH_AAD=OFF \
