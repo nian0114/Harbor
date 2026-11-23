@@ -1291,6 +1291,19 @@ static int xfer_next(sfreq *r)
     return ST_WORK;
 }
 
+/* 有传输在飞？期间禁 drain：libssh2 transport 是 session 级共享，
+ * drain 的小包 send 插进 sftp_write 的 EAGAIN 断点之间会触发
+ * SOCKET_SEND(-7) 把整条连接打死（loopback 不背压 → 只在真网复现）。
+ * 传输期间杂散入站包由传输自身的 read 消耗，drain 可缺席。 */
+static int xfer_active(eng *e)
+{
+    sfreq *r;
+    for (r = e->act_h; r; r = r->next)
+        if (r->is_xfer)
+            return 1;
+    return 0;
+}
+
 /* 有元数据请求（LIST/STAT/…）在跑或排队？ */
 static int meta_pending(eng *e)
 {
@@ -2306,7 +2319,7 @@ int hb__sftp_run(void *ctx, hb_session *s)
                  * 槽位会把 LIST 的插空延迟放大（重负载下实测顶爆
                  * 500ms 预算）；传输期间的杂散包本就被各自 read 消耗。 */
                 if (!e->ctl.owner && !e->draining && !e->conn_dead &&
-                    !e->io_owner && !meta_pending(e)) {
+                    !e->io_owner && !meta_pending(e) && !xfer_active(e)) {
                     memset(&e->drain, 0, sizeof e->drain);
                     e->drain.op = RQ_DRAIN;
                     e->draining = true;
