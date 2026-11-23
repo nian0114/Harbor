@@ -39,8 +39,9 @@ final class RecordingSystemNotifier: SystemNotifier {
 
 final class NotifyCenter {
     static let shared = NotifyCenter()
-    /// M8 接缝：默认 no-op（记录调用，dev `sysnotifs` 可读）。
-    var system: SystemNotifier = RecordingSystemNotifier()
+    /// M8 实现：UNUserNotificationCenter（UNSystemNotifier.swift）。
+    /// 仍记录调用，dev `sysnotifs` 可读。
+    var system: SystemNotifier = UNSystemNotifier()
     private(set) var items: [NotifItem] = []
     var onChange: (() -> Void)?
 

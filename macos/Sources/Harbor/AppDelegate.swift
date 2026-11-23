@@ -32,6 +32,14 @@ final class App: NSObject, NSApplicationDelegate {
         dev?.win = win
         #endif
     }
+    /// 显示主窗口（系统通知点击、菜单栏"显示 Harbor"同路）。
+    /// 窗口被关到菜单栏（orderOut）或 accessory 策略下都能唤回。
+    func showMainWindow() {
+        guard let win else { return }
+        NSApp.setActivationPolicy(.regular)
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ a: NSApplication)
         -> Bool { true }
 

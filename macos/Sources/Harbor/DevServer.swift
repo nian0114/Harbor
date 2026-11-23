@@ -237,7 +237,31 @@ final class DevServer {
                 as? RecordingSystemNotifier {
                 return "OK " + r.calls.joined(separator: " ;; ")
             }
+            if let u = NotifyCenter.shared.system
+                as? UNSystemNotifier {
+                return "OK " + u.calls.joined(separator: " ;; ")
+            }
             return "ERR"
+        case "notif-auth":
+            if let u = NotifyCenter.shared.system as? UNSystemNotifier {
+                return "OK \(u.devAuthStatus)"
+            }
+            return "ERR"
+        case "notif-delivered":
+            guard let u = NotifyCenter.shared.system
+                as? UNSystemNotifier else { return "ERR" }
+            var out = "ERR"
+            let sem = DispatchSemaphore(value: 0)
+            u.devDelivered { s in out = "OK " + s; sem.signal() }
+            _ = sem.wait(timeout: .now() + 10)
+            return out
+        case "notif-click":
+            // 用真实投递的 userInfo 走点击路由（无参数→最近一次）。
+            guard let u = NotifyCenter.shared.system
+                as? UNSystemNotifier else { return "ERR" }
+            let ti = Int(arg) ?? u.lastUserInfo?["tab"] ?? -1
+            u.devSimulateClick(ti)
+            return "OK \(ti)"
         case "notif-jump":
             // 与 NotifRow.onClick 同路：item.tabIndex → select
             guard let i = Int(arg), i >= 0,
