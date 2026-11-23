@@ -2286,6 +2286,16 @@ static int eng_sweep(eng *e)
         pp = &r->next;
       }
     }
+
+    /* 出站挂起仍在属主名下：本轮不算进展，交还主循环 poll 等
+     * POLLOUT。否则属主以 CPU 速度连续重试 —— libssh2 的
+     * transport_send 一次调用内 排空残包→组发新包 ，socket 一
+     * 直满就永远以挂起态收尾（实测 dirs 恒定 OUTBOUND、被拦调
+     * 用每秒数十万），非属主的 meta 请求被饿死到分钟级；同时
+     * 空转烧核。等 socket 排水后再让属主续打，残包才有机会发
+     * 干净，下一轮 pass0 的 meta 就能抢到空槽。 */
+    if (e->txo && tx_pend(e))
+        progressed = 0;
     return progressed;
 }
 
