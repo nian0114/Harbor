@@ -101,6 +101,7 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
 
     var onConnect: ((HostRec) -> Void)?
     var onQuick: ((String) -> Void)?
+    var onSftp: ((String) -> Void)?          // M3：host_id → SFTP tab
 
     private let search = NSSearchField()
     private let connBtn = NSButton()
@@ -437,8 +438,8 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
     private func ctxMenu() -> NSMenu {
         let m = NSMenu()
         m.addItem(withTitle: L("连接"), action: #selector(ctxConnect), keyEquivalent: "")
-        let sf = m.addItem(withTitle: "SFTP", action: nil, keyEquivalent: "")
-        sf.isEnabled = false              // M3
+        m.addItem(withTitle: "SFTP", action: #selector(ctxSftp),
+                  keyEquivalent: "")
         m.addItem(withTitle: L("编辑"), action: #selector(ctxEdit), keyEquivalent: "")
         m.addItem(withTitle: L("复制"), action: #selector(ctxDup), keyEquivalent: "")
         m.addItem(.separator())
@@ -458,6 +459,7 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
         return rows[r].host
     }
     @objc private func ctxConnect() { selHost().map { onConnect?($0) } }
+    @objc private func ctxSftp() { selHost().map { onSftp?($0.id) } }
     @objc private func ctxEdit() { selHost().map { editHost($0) } }
     @objc private func ctxInfo() { selHost().map { showDrawer($0) } }
     @objc private func ctxDup() {
@@ -660,9 +662,15 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
         let cb = NSButton(title: L("连接"), target: self,
                           action: #selector(ctxConnect))
         cb.bezelStyle = .rounded
-        cb.frame = NSRect(x: 100, y: y - 28, width: 80, height: 24)
+        cb.frame = NSRect(x: 100, y: y - 28, width: 60, height: 24)
         cb.setAccessibilityIdentifier("drawer-connect")
         d.addSubview(cb)
+        let sb = NSButton(title: "SFTP", target: self,
+                          action: #selector(ctxSftp))
+        sb.bezelStyle = .rounded
+        sb.frame = NSRect(x: 166, y: y - 28, width: 60, height: 24)
+        sb.setAccessibilityIdentifier("drawer-sftp")
+        d.addSubview(sb)
     }
 
     // MARK: 新建/编辑表单

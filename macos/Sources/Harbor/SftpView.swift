@@ -1,0 +1,2479 @@
+import AppKit
+import CHarbor
+import HarborKit
+
+/// SFTP 双栏浏览器（FR-05/FR-19，对齐 linux hb-sftp-view.c）。
+/// SftpTab.view == SftpView；每栏 select → conn → browse 三态。
+
+enum XKind { case up, down, relay, local }
+enum XState { case run, done, fail, cancel }
+
+/// 传输任务（linux Xfer）。
+final class Xfer {
+    var id = 0
+    var kind: XKind = .up
+    var state: XState = .run
+    var skipped = false
+    weak var sp: SftpPane?
+    weak var dp: SftpPane?
+    var name = "", srcPath = "", dstDir = ""
+    var srcLabel = "", dstLabel = ""
+    var policy: Int32 = 0             // hb_sftp_conflict
+    var req: UInt32 = 0
+    weak var sess: Session?
+    // relay
+    var tmpDir: String?, tmpPath: String?
+    var phase = 0                     // 0=download 1=upload
+    // local copy
+    var lcop: LocalCopy?
+    // progress
+    var done: UInt64 = 0, total: UInt64 = 0
+    var acc: UInt64 = 0
+    var t0 = Date()
+    var ema = 0.0
+    var emaT: Date?
+    var emaDone: UInt64 = 0
+    var err: String?
+    var tick: Timer?
+    // row UI
+    var row: NSView?
+    var fill: NSView?
+    var pct: NSTextField?
+    var xbtn: NSButton?
+    var fillW: NSLayoutConstraint?
+}
+
+/// 本地拷贝（lc_walk 等价）：256K 块、递归、不跟随链接、冲突策略、
+/// 取消时清理自建目录/半成品文件。
+final class LocalCopy {
+    let src, dst: String
+    let policy: Int32
+    var cancelled = false
+    var done: UInt64 = 0, total: UInt64 = 0
+    var err: String?
+    var skipped = false
+    private var nskip = 0
+    private var created: String?     // 本次新建的最外层目录
+    private var partial: String?     // 写入中的新建文件
+
+    init(src: String, dst: String, policy: Int32) {
+        self.src = src; self.dst = dst; self.policy = policy
+    }
+    func cancel() { cancelled = true }
+
+    /// 后台线程执行；完成后主线程回调 ok/skip/err/cancelled。
+    func run(_ finish: @escaping () -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let st = SftpKit.statPath(self.src) else {
+                self.err = String(cString: strerror(errno))
+                DispatchQueue.main.async(execute: finish); return
+            }
+            do {
+                var topSkip = false
+                guard let rd = self.resolveDst(self.dst,
+                        isDir: (st.st_mode & S_IFMT) == S_IFDIR,
+                        skipped: &topSkip) else {
+                    if topSkip { self.skipped = true }
+                    else if self.err == nil {
+                        self.err = L("无法解析目标路径")
+                    }
+                    DispatchQueue.main.async(execute: finish); return
+                }
+                self.addTotal(self.src, top: true)
+                if self.walk(self.src, rd, top: true), !self.cancelled,
+                   self.err == nil {
+                    self.done = self.total
+                }
+            }
+            DispatchQueue.main.async(execute: finish)
+        }
+    }
+
+    private func addTotal(_ path: String, top: Bool) {
+        guard let st = SftpKit.statPath(path, follow: top) else {
+            return
+        }
+        if (st.st_mode & S_IFMT) == S_IFDIR {
+            if let ns = try? FileManager.default
+                .contentsOfDirectory(atPath: path) {
+                for n in ns { addTotal(SftpKit.pathJoin(path, n), top: false) }
+            }
+        } else if (st.st_mode & S_IFMT) == S_IFREG {
+            total += UInt64(st.st_size)
+        }
+    }
+
+    /// lc_dst：NULL+skipped=跳过，NULL+err=失败，非 NULL=目标路径。
+    private func resolveDst(_ dst: String, isDir: Bool,
+                            skipped: inout Bool) -> String? {
+        var st = stat()
+        skipped = false
+        if lstat(dst, &st) != 0 { return dst }
+        if isDir && (st.st_mode & S_IFMT) == S_IFDIR { return dst }
+        if policy == Int32(HB_SFTP_SKIP.rawValue) {
+            skipped = true; return nil
+        }
+        if policy == Int32(HB_SFTP_RENAME.rawValue) {
+            let name = URL(fileURLWithPath: dst).lastPathComponent
+            let dir = SftpKit.parentDir(dst)
+            for n in 1..<1000 {
+                let c = SftpKit.pathJoin(dir,
+                    SftpKit.renVariant(name, isDir: isDir, n))
+                var st2 = stat()
+                if lstat(c, &st2) != 0 { return c }
+            }
+            err = L("无法生成重命名目标"); return nil
+        }
+        if (st.st_mode & S_IFMT) == S_IFDIR && !isDir {
+            err = L("目标是目录"); return nil
+        }
+        return dst
+    }
+
+    /// lc_copy_file：256K 块读写，fsync 收尾，取消留痕清理。
+    private func copyFile(_ s: String, _ d: String,
+                          mode: mode_t) -> Bool {
+        var ex = stat()
+        if lstat(d, &ex) != 0 { partial = d }
+        let inp = Darwin.open(s, O_RDONLY)
+        if inp < 0 { err = String(cString: strerror(errno)); return false }
+        let out = Darwin.open(d, O_WRONLY | O_CREAT | O_TRUNC,
+                              mode & 0o777)
+        if out < 0 {
+            err = String(cString: strerror(errno))
+            close(inp); return false
+        }
+        defer { close(inp); close(out) }
+        let bsz = 256 * 1024
+        let buf = UnsafeMutableRawPointer.allocate(byteCount: bsz,
+                                                   alignment: 4096)
+        defer { buf.deallocate() }
+        while true {
+            if cancelled { return false }
+            let n = read(inp, buf, bsz)
+            if n < 0 { err = String(cString: strerror(errno)); return false }
+            if n == 0 { break }
+            var w = 0
+            while w < n {
+                let k = write(out, buf + w, n - w)
+                if k < 0 {
+                    err = String(cString: strerror(errno)); return false
+                }
+                w += k
+            }
+            done += UInt64(n)
+        }
+        fsync(out)
+        return true
+    }
+
+    /// lc_walk：top 跟随符号链接（显式选择），递归内部跳过链接/特殊文件。
+    private func walk(_ s: String, _ d: String, top: Bool) -> Bool {
+        if cancelled { return false }
+        guard let st = SftpKit.statPath(s, follow: top) else {
+            err = String(cString: strerror(errno)); return false
+        }
+        if !top && (st.st_mode & S_IFMT) == S_IFLNK { nskip += 1; return true }
+        if (st.st_mode & S_IFMT) == S_IFDIR {
+            var sk = false
+            guard let rd = resolveDst(d, isDir: true, skipped: &sk) else {
+                if sk { nskip += 1; return true }
+                if err == nil { err = L("无法解析目标路径") }
+                return false
+            }
+            var ex = stat()
+            if lstat(rd, &ex) != 0 {
+                if Darwin.mkdir(rd, st.st_mode & 0o777) != 0 {
+                    err = String(cString: strerror(errno)); return false
+                }
+                if created == nil { created = rd }
+            }
+            guard let ns = try? FileManager.default
+                .contentsOfDirectory(atPath: s) else {
+                err = String(cString: strerror(errno)); return false
+            }
+            for n in ns {
+                if !walk(SftpKit.pathJoin(s, n),
+                         SftpKit.pathJoin(rd, n), top: false) {
+                    return false
+                }
+            }
+            return true
+        }
+        if (st.st_mode & S_IFMT) != S_IFREG { nskip += 1; return true }
+        var sk = false
+        guard let rd = resolveDst(d, isDir: false, skipped: &sk) else {
+            if sk { nskip += 1; return true }
+            return false
+        }
+        return copyFile(s, rd, mode: st.st_mode)
+    }
+
+    /// 取消时清掉自建目录或半成品文件（lc_done 清理路径）。
+    func cleanupPartial() {
+        if let c = created { _ = LocalFs.rmrf(c) }
+        else if let p = partial { unlink(p) }
+    }
+}
+
+// ============================ toast ============================
+
+/// 轻量 toast 条（linux hb_toast_undo_destroy / toast_action2 等价）：
+/// 底部居中，文本 + 可选动作按钮，ttl 秒后自动消失。
+final class SftpToast: NSView {
+    private var timer: Timer?
+    private var onDismiss: (() -> Void)?
+    init(text: String, action: String? = nil,
+         ttl: TimeInterval = 9,
+         onAction: (() -> Void)? = nil,
+         onDismiss: (() -> Void)? = nil) {
+        super.init(frame: .zero)
+        self.onDismiss = onDismiss
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.backgroundColor = NSColor(white: 0.12, alpha: 0.92).cgColor
+        let l = NSTextField(labelWithString: text)
+        l.textColor = .white
+        l.font = .systemFont(ofSize: 12)
+        l.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(l)
+        var cs: [NSLayoutConstraint] = [
+            l.leadingAnchor.constraint(equalTo: leadingAnchor,
+                                       constant: 14),
+            l.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: 34),
+        ]
+        if let action, let onAction {
+            let b = NSButton(title: action, target: nil, action: nil)
+            b.bezelStyle = .rounded
+            b.font = .systemFont(ofSize: 12)
+            b.translatesAutoresizingMaskIntoConstraints = false
+            b.setAccessibilityIdentifier("toast-action")
+            b.target = self
+            b.action = #selector(fire)
+            action_ = onAction
+            addSubview(b)
+            cs += [
+                b.leadingAnchor.constraint(equalTo: l.trailingAnchor,
+                                           constant: 10),
+                b.centerYAnchor.constraint(equalTo: centerYAnchor),
+                b.trailingAnchor.constraint(equalTo: trailingAnchor,
+                                            constant: -10),
+            ]
+        } else {
+            cs.append(l.trailingAnchor.constraint(
+                equalTo: trailingAnchor, constant: -14))
+        }
+        NSLayoutConstraint.activate(cs)
+        timer = Timer.scheduledTimer(withTimeInterval: ttl,
+                                     repeats: false) { [weak self] _ in
+            self?.dismiss()
+        }
+    }
+    required init?(coder: NSCoder) { nil }
+    private var action_: (() -> Void)?
+    @objc private func fire() { action_?(); dismiss() }
+    func dismiss() {
+        timer?.invalidate(); timer = nil
+        let d = onDismiss; onDismiss = nil
+        removeFromSuperview()
+        d?()
+    }
+    deinit { timer?.invalidate() }
+}
+
+// ============================ Pane ============================
+
+final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
+                      NSTableViewDelegate {
+    enum State { case select, conn, browse }
+    unowned let v: SftpView
+    let side: Int
+    private(set) var state: State = .select
+
+    let container = NSView()
+    private let selectView = NSView()
+    private let connView = NSView()
+    private let browseView = NSView()
+
+    // select
+    private var selHostBtns: [NSButton] = []
+    private let selFilter = NSTextField()
+
+    // conn
+    var ctl: ConnCtl?
+    var connHostId: String?
+    private var connHead: [NSView] = []
+    private var nodes: [NSTextField] = []
+    private var bars: [NSView] = []
+    private var logBox: NSStackView?
+    private var logScroll: NSScrollView?
+    private var hideLogBtn: NSButton?
+    private var logHidden = false
+    private var errCard: NSView?
+
+    // browse
+    private(set) var isLocal = false
+    private(set) var hostId: String?
+    private(set) var hname = ""
+    private var osKey = "generic"
+    var fs: Fs?
+    var sess: Session?
+    private(set) var cwd: String?
+    private var back: [String] = []
+    private var fwd: [String] = []
+    private var items: [FsEntry] = []
+    var shown: [FsEntry] = []
+    private var showHidden = false
+    private var loading = false
+    private var listGen: UInt = 0
+    private var gen: UInt = 0
+    private var backB, fwdB, upB: NSButton!
+    private var crumbsBox: NSStackView!
+    private var filterRow: NSView!
+    private let filterEntry = NSTextField()
+    private var headTile: NSView?
+    private var titleL: NSTextField?
+    let table = SftpTable()
+    private var tableScroll: NSScrollView?
+
+    // delete-undo / open
+    private var pendDels: [PendDel] = []
+    private var openCtxs: [OpenCtx] = []
+    private var openReqs: [UInt32: OpenCtx] = [:]
+
+    init(v: SftpView, side: Int) {
+        self.v = v; self.side = side
+        super.init()
+        build()
+        setState(.select)
+        table.pane = self
+    }
+
+    // ---------- 状态 ----------
+    func setState(_ s: State) {
+        state = s
+        selectView.isHidden = s != .select
+        connView.isHidden = s != .conn
+        browseView.isHidden = s != .browse
+    }
+
+    private func build() {
+        [selectView, connView, browseView].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview($0)
+        }
+        NSLayoutConstraint.activate(
+            [selectView, connView, browseView].flatMap { x in
+                [x.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                 x.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                 x.topAnchor.constraint(equalTo: container.topAnchor),
+                 x.bottomAnchor.constraint(equalTo: container.bottomAnchor)]
+            })
+        buildSelect(); buildConn(); buildBrowse()
+    }
+
+    // ---------- select ----------
+    private func buildSelect() {
+        let head = NSTextField(labelWithString:
+            L("选择主机") + " · " + L(side == 0 ? "左栏" : "右栏"))
+        head.font = .systemFont(ofSize: 13.5, weight: .bold)
+        head.translatesAutoresizingMaskIntoConstraints = false
+        selectView.addSubview(head)
+        let lb = NSButton(title: "  " + L("Local"), target: self,
+                          action: #selector(pickLocal))
+        lb.bezelStyle = .rounded
+        lb.image = hbIcon("monitor", size: 12, tint: Theme.text.color)
+        lb.imagePosition = .imageLeading
+        lb.translatesAutoresizingMaskIntoConstraints = false
+        lb.setAccessibilityIdentifier("sftp-local-\(side)")
+        lb.contentTintColor = .white
+        lb.wantsLayer = true
+        lb.layer?.backgroundColor = Theme.blue.color.cgColor
+        lb.layer?.cornerRadius = 5
+        selectView.addSubview(lb)
+        selFilter.placeholderString = L("过滤…")
+        selFilter.translatesAutoresizingMaskIntoConstraints = false
+        selFilter.target = self
+        selFilter.action = #selector(rebuildHosts)
+        selFilter.setAccessibilityIdentifier("sftp-selfilter-\(side)")
+        selectView.addSubview(selFilter)
+        let scr = NSScrollView()
+        scr.translatesAutoresizingMaskIntoConstraints = false
+        scr.hasVerticalScroller = true
+        let box = FlippedStack()
+        box.orientation = .vertical
+        box.spacing = 2
+        box.translatesAutoresizingMaskIntoConstraints = false
+        box.setAccessibilityIdentifier("sftp-hostlist-\(side)")
+        scr.documentView = box
+        hostBox = box
+        selectView.addSubview(scr)
+        NSLayoutConstraint.activate([
+            head.topAnchor.constraint(equalTo: selectView.topAnchor,
+                                      constant: 10),
+            head.leadingAnchor.constraint(equalTo: selectView.leadingAnchor,
+                                          constant: 14),
+            lb.centerYAnchor.constraint(equalTo: head.centerYAnchor),
+            lb.trailingAnchor.constraint(equalTo: selectView.trailingAnchor,
+                                         constant: -14),
+            selFilter.topAnchor.constraint(equalTo: head.bottomAnchor,
+                                           constant: 8),
+            selFilter.leadingAnchor.constraint(
+                equalTo: selectView.leadingAnchor, constant: 14),
+            selFilter.trailingAnchor.constraint(
+                equalTo: selectView.trailingAnchor, constant: -14),
+            scr.topAnchor.constraint(equalTo: selFilter.bottomAnchor,
+                                     constant: 6),
+            scr.leadingAnchor.constraint(equalTo: selectView.leadingAnchor),
+            scr.trailingAnchor.constraint(equalTo: selectView.trailingAnchor),
+            scr.bottomAnchor.constraint(equalTo: selectView.bottomAnchor),
+            box.leadingAnchor.constraint(equalTo: scr.leadingAnchor,
+                                         constant: 6),
+            box.trailingAnchor.constraint(equalTo: scr.trailingAnchor,
+                                          constant: -6),
+            box.topAnchor.constraint(equalTo: scr.topAnchor, constant: 4),
+            box.widthAnchor.constraint(equalTo: scr.widthAnchor,
+                                       constant: -12),
+        ])
+        let hint = NSTextField(labelWithString:
+            L("选择两端后可双栏互传（远端↔远端 / 远端↔本地）· 双击文件即开始传输"))
+        hint.font = .systemFont(ofSize: 11)
+        hint.textColor = .secondaryLabelColor
+        box.addArrangedSubview(hint)
+        rebuildHosts()
+    }
+    private var hostBox: NSStackView!
+
+    @objc private func rebuildHosts() {
+        for b in selHostBtns { b.removeFromSuperview() }
+        selHostBtns.removeAll()
+        // 保留 hint（首项）之后的旧按钮由数组移除
+        let q = selFilter.stringValue
+        for o in Vault.shared.list("host") {
+            defer { hb_obj_free(o) }
+            let pr = hb_obj_get_str(o, "proto").str
+            if !pr.isEmpty && pr != "ssh" { continue }
+            let nm = hb_obj_get_str(o, "name").str
+            let us = hb_obj_get_str(o, "user").str
+            let ad = hb_obj_get_str(o, "address").str
+            let os = hb_obj_get_str(o, "os").str
+            let label = nm.isEmpty ? (ad.isEmpty ? "?" : ad) : nm
+            if !q.isEmpty && !label.contains(q) && !us.contains(q) {
+                continue
+            }
+            let b = NSButton(title: "", target: self,
+                             action: #selector(pickHost(_:)))
+            b.bezelStyle = .regularSquare
+            b.isBordered = false
+            b.setAccessibilityIdentifier("sftp-host-\(side)")
+            let row = NSStackView()
+            row.orientation = .horizontal
+            row.spacing = 10
+            row.edgeInsets = NSEdgeInsets(top: 6, left: 8,
+                                        bottom: 6, right: 8)
+            let tile = Palette.osTileView(
+                os.isEmpty || os == "auto" ? "generic" : os, size: 30)
+            tile.translatesAutoresizingMaskIntoConstraints = false
+            row.addArrangedSubview(tile)
+            let col = NSStackView()
+            col.orientation = .vertical
+            col.spacing = 1
+            col.alignment = .leading
+            let t = NSTextField(labelWithString: label)
+            t.font = .systemFont(ofSize: 13, weight: .medium)
+            let s = NSTextField(labelWithString: "ssh, \(us)")
+            s.font = .systemFont(ofSize: 11)
+            s.textColor = .secondaryLabelColor
+            col.addArrangedSubview(t); col.addArrangedSubview(s)
+            row.addArrangedSubview(col)
+            row.translatesAutoresizingMaskIntoConstraints = false
+            b.addSubview(row)
+            b.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                row.leadingAnchor.constraint(equalTo: b.leadingAnchor),
+                row.trailingAnchor.constraint(equalTo: b.trailingAnchor),
+                row.topAnchor.constraint(equalTo: b.topAnchor),
+                row.bottomAnchor.constraint(equalTo: b.bottomAnchor),
+            ])
+            b.identifier = .init(hb_obj_id(o).str)  // 存 host id
+            b.layer?.cornerRadius = 6
+            selHostBtns.append(b)
+            hostBox.addArrangedSubview(b)
+            b.leadingAnchor.constraint(equalTo: hostBox.leadingAnchor)
+                .isActive = true
+            b.trailingAnchor.constraint(equalTo: hostBox.trailingAnchor)
+                .isActive = true
+        }
+    }
+    @objc private func pickLocal() { pick(nil) }
+    @objc private func pickHost(_ b: NSButton) {
+        pick(b.identifier?.rawValue)
+    }
+
+    // ---------- conn（对齐 hb_connect_view 精简版） ----------
+    private func buildConn() {
+        connView.wantsLayer = true
+        connView.layer?.backgroundColor = Theme.page.color.cgColor
+        // head：os tile + name + "SFTP · SSH addr:port" + 隐藏日志
+        let head = NSView()
+        head.translatesAutoresizingMaskIntoConstraints = false
+        connView.addSubview(head)
+        connHead.append(head)
+        NSLayoutConstraint.activate([
+            head.topAnchor.constraint(equalTo: connView.topAnchor,
+                                      constant: 10),
+            head.leadingAnchor.constraint(equalTo: connView.leadingAnchor,
+                                          constant: 14),
+            head.trailingAnchor.constraint(equalTo: connView.trailingAnchor,
+                                           constant: -14),
+            head.heightAnchor.constraint(equalToConstant: 34),
+        ])
+        // 3 节点
+        let nodesRow = NSStackView()
+        nodesRow.orientation = .horizontal
+        nodesRow.spacing = 4
+        nodesRow.translatesAutoresizingMaskIntoConstraints = false
+        connView.addSubview(nodesRow)
+        let nodeLabels = [L("连接"), L("握手"), L("SFTP")]
+        for i in 0..<3 {
+            let n = NSTextField(labelWithString: "○ " + nodeLabels[i])
+            n.font = .systemFont(ofSize: 11)
+            n.textColor = .secondaryLabelColor
+            nodes.append(n)
+            nodesRow.addArrangedSubview(n)
+            if i < 2 {
+                let bar = NSView()
+                bar.wantsLayer = true
+                bar.layer?.backgroundColor = Theme.line.color.cgColor
+                bar.translatesAutoresizingMaskIntoConstraints = false
+                bar.heightAnchor.constraint(equalToConstant: 2).isActive = true
+                bar.widthAnchor.constraint(greaterThanOrEqualToConstant: 20)
+                    .isActive = true
+                bars.append(bar)
+                nodesRow.addArrangedSubview(bar)
+            }
+        }
+        NSLayoutConstraint.activate([
+            nodesRow.topAnchor.constraint(equalTo: head.bottomAnchor,
+                                          constant: 8),
+            nodesRow.leadingAnchor.constraint(
+                equalTo: connView.leadingAnchor, constant: 16),
+        ])
+        // log
+        let scr = NSScrollView()
+        scr.translatesAutoresizingMaskIntoConstraints = false
+        scr.hasVerticalScroller = true
+        scr.wantsLayer = true
+        scr.layer?.backgroundColor = Theme.card.color.cgColor
+        scr.layer?.cornerRadius = 7
+        scr.layer?.borderWidth = 1
+        scr.layer?.borderColor = Theme.line.color.cgColor
+        connView.addSubview(scr)
+        logScroll = scr
+        let lb = FlippedStack()
+        lb.orientation = .vertical
+        lb.spacing = 3
+        lb.edgeInsets = NSEdgeInsets(top: 8, left: 10,
+                                     bottom: 8, right: 10)
+        lb.translatesAutoresizingMaskIntoConstraints = false
+        scr.documentView = lb
+        logBox = lb
+        NSLayoutConstraint.activate([
+            scr.topAnchor.constraint(equalTo: nodesRow.bottomAnchor,
+                                     constant: 10),
+            scr.leadingAnchor.constraint(
+                equalTo: connView.leadingAnchor, constant: 14),
+            scr.trailingAnchor.constraint(
+                equalTo: connView.trailingAnchor, constant: -14),
+            lb.leadingAnchor.constraint(equalTo: scr.leadingAnchor),
+            lb.trailingAnchor.constraint(equalTo: scr.trailingAnchor),
+            lb.topAnchor.constraint(equalTo: scr.topAnchor),
+            lb.widthAnchor.constraint(equalTo: scr.widthAnchor),
+        ])
+        // foot：隐藏日志 | 关闭 | 重新开始
+        let foot = NSView()
+        foot.translatesAutoresizingMaskIntoConstraints = false
+        connView.addSubview(foot)
+        let hb = NSButton(title: L("隐藏日志"), target: self,
+                          action: #selector(toggleLog))
+        hb.bezelStyle = .rounded
+        hb.font = .systemFont(ofSize: 12)
+        hb.translatesAutoresizingMaskIntoConstraints = false
+        hideLogBtn = hb
+        foot.addSubview(hb)
+        let cb = NSButton(title: L("关闭"), target: self,
+                          action: #selector(connClose))
+        cb.bezelStyle = .rounded
+        cb.font = .systemFont(ofSize: 12)
+        cb.translatesAutoresizingMaskIntoConstraints = false
+        cb.setAccessibilityIdentifier("sftp-close-\(side)")
+        foot.addSubview(cb)
+        let rb = NSButton(title: L("重新开始"), target: self,
+                          action: #selector(connRetry))
+        rb.bezelStyle = .rounded
+        rb.font = .systemFont(ofSize: 12)
+        rb.translatesAutoresizingMaskIntoConstraints = false
+        rb.setAccessibilityIdentifier("sftp-retry-\(side)")
+        foot.addSubview(rb)
+        NSLayoutConstraint.activate([
+            foot.topAnchor.constraint(equalTo: scr.bottomAnchor,
+                                      constant: 10),
+            foot.leadingAnchor.constraint(
+                equalTo: connView.leadingAnchor, constant: 14),
+            foot.trailingAnchor.constraint(
+                equalTo: connView.trailingAnchor, constant: -14),
+            foot.bottomAnchor.constraint(
+                lessThanOrEqualTo: connView.bottomAnchor, constant: -12),
+            foot.heightAnchor.constraint(equalToConstant: 26),
+            hb.leadingAnchor.constraint(equalTo: foot.leadingAnchor),
+            hb.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
+            cb.trailingAnchor.constraint(equalTo: rb.leadingAnchor,
+                                         constant: -8),
+            cb.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
+            rb.trailingAnchor.constraint(equalTo: foot.trailingAnchor),
+            rb.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
+        ])
+    }
+    private func connReset() {
+        errCard?.removeFromSuperview(); errCard = nil
+        logBox?.arrangedSubviews.forEach {
+            logBox?.removeArrangedSubview($0); $0.removeFromSuperview()
+        }
+        for (i, n) in nodes.enumerated() {
+            n.stringValue = "○ " + String(n.stringValue.dropFirst(2))
+            n.textColor = .secondaryLabelColor
+            _ = i
+        }
+        logHidden = false
+        logScroll?.isHidden = false
+        hideLogBtn?.title = L("隐藏日志")
+    }
+    private func stageNodes(_ idx: Int) {
+        // linux node_of：stage 0-1→node0, 2→node1, 3-4→node2
+        let cur = idx <= 1 ? 0 : (idx == 2 ? 1 : 2)
+        for i in 0..<3 {
+            if i < cur {
+                nodes[i].stringValue = "● " + String(nodes[i].stringValue.dropFirst(2))
+                nodes[i].textColor = Theme.green.color
+            } else if i == cur {
+                nodes[i].stringValue = "◐ " + String(nodes[i].stringValue.dropFirst(2))
+                nodes[i].textColor = Theme.blue.color
+            }
+        }
+        for i in 0..<2 {
+            bars[i].layer?.backgroundColor =
+                (i < cur ? Theme.green : Theme.line).color.cgColor
+        }
+    }
+    @objc private func toggleLog() {
+        logHidden.toggle()
+        logScroll?.isHidden = logHidden
+        hideLogBtn?.title = logHidden ? L("显示日志") : L("隐藏日志")
+    }
+    @objc private func connClose() {
+        teardownConn()
+        setState(.select)
+    }
+    @objc private func connRetry() {
+        let id = connHostId
+        pick(id)
+    }
+    private func connError(_ title: String, details: String?, code: Int) {
+        errCard?.removeFromSuperview()
+        let card = NSView()
+        card.wantsLayer = true
+        card.layer?.backgroundColor = Theme.errBg.color.cgColor
+        card.layer?.borderColor = Theme.errLine.color.cgColor
+        card.layer?.borderWidth = 1
+        card.layer?.cornerRadius = 9
+        card.translatesAutoresizingMaskIntoConstraints = false
+        connView.addSubview(card)
+        let t = NSTextField(labelWithString: title)
+        t.font = .systemFont(ofSize: 13, weight: .bold)
+        t.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(t)
+        var y = t
+        if let d = details, !d.isEmpty {
+            let dl = NSTextField(wrappingLabelWithString: d)
+            dl.font = .systemFont(ofSize: 11.5)
+            dl.textColor = .secondaryLabelColor
+            dl.translatesAutoresizingMaskIntoConstraints = false
+            dl.maximumNumberOfLines = 3
+            card.addSubview(dl)
+            NSLayoutConstraint.activate([
+                dl.topAnchor.constraint(equalTo: y.bottomAnchor,
+                                        constant: 6),
+                dl.leadingAnchor.constraint(equalTo: card.leadingAnchor,
+                                            constant: 14),
+                dl.trailingAnchor.constraint(equalTo: card.trailingAnchor,
+                                             constant: -14),
+            ])
+            y = dl
+        }
+        let fb = NSView()
+        fb.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(fb)
+        let cb = NSButton(title: L("关闭"), target: self,
+                          action: #selector(connClose))
+        cb.bezelStyle = .rounded
+        let eb = NSButton(title: L("编辑主机"), target: self,
+                          action: #selector(editHost))
+        eb.bezelStyle = .rounded
+        let rb = NSButton(title: L("重新开始"), target: self,
+                          action: #selector(connRetry))
+        rb.bezelStyle = .rounded
+        rb.wantsLayer = true
+        rb.layer?.backgroundColor = Theme.blue.color.cgColor
+        rb.contentTintColor = .white
+        for b in [cb, eb, rb] {
+            b.translatesAutoresizingMaskIntoConstraints = false
+            fb.addSubview(b)
+        }
+        NSLayoutConstraint.activate([
+            t.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            t.leadingAnchor.constraint(equalTo: card.leadingAnchor,
+                                       constant: 14),
+            fb.topAnchor.constraint(equalTo: y.bottomAnchor, constant: 10),
+            fb.leadingAnchor.constraint(equalTo: card.leadingAnchor,
+                                        constant: 14),
+            fb.trailingAnchor.constraint(equalTo: card.trailingAnchor,
+                                         constant: -14),
+            fb.bottomAnchor.constraint(equalTo: card.bottomAnchor,
+                                       constant: -12),
+            fb.heightAnchor.constraint(equalToConstant: 26),
+            cb.leadingAnchor.constraint(equalTo: fb.leadingAnchor),
+            eb.leadingAnchor.constraint(equalTo: cb.trailingAnchor,
+                                        constant: 8),
+            rb.trailingAnchor.constraint(equalTo: fb.trailingAnchor),
+            card.centerXAnchor.constraint(equalTo: connView.centerXAnchor),
+            card.widthAnchor.constraint(equalToConstant: 380),
+            card.centerYAnchor.constraint(
+                equalTo: connView.centerYAnchor, constant: 40),
+        ])
+        errCard = card
+    }
+    @objc private func editHost() {
+        guard let id = connHostId else { return }
+        v.hostEditor?(id)
+    }
+
+    // ---------- ConnDelegate ----------
+    func conn(_ c: ConnCtl, stage idx: Int, line: String, mark: Character) {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.spacing = 6
+        let ic = NSImageView(image: hbIcon(mark == "e" ? "x" : "user",
+                            size: 11,
+                            tint: mark == "e" ? Theme.red.color
+                                              : Theme.text.color))
+        let l = NSTextField(labelWithString: line)
+        l.font = .systemFont(ofSize: 11.5)
+        if mark == "e" { l.textColor = Theme.red.color }
+        l.lineBreakMode = .byTruncatingTail
+        row.addArrangedSubview(ic); row.addArrangedSubview(l)
+        logBox?.addArrangedSubview(row)
+        if let sv = logScroll {
+            sv.layoutSubtreeIfNeeded()
+            sv.documentView?.scroll(
+                NSPoint(x: 0, y: sv.documentView!.bounds.maxY))
+        }
+        if idx >= 0 { stageNodes(idx) }
+    }
+    func connSession(_ c: ConnCtl, _ s: Session) {
+        sess = s
+        hb_sftp_set_concurrency(s.sess, Int32(v.conc))
+        s.onEvent = { [weak self] ev in
+            guard let self else { return }
+            var e = ev
+            if self.ctl?.handleEvent(&e) == true { return }
+            if let rf = self.fs as? RemoteFs, rf.handleEvent(&e) { return }
+            if ev.type == HB_SESS_EV_SFTP, let r = ev.sftp {
+                // "打开"下载 → openReqs；其余 → 传输队列
+                if let oc = self.openReqs[r.pointee.req] {
+                    self.openDone(oc: oc, r: r.pointee)
+                } else {
+                    self.v.xferDispatch(self, r.pointee)
+                }
+            }
+        }
+        s.drain()
+    }
+    func connConnected(_ c: ConnCtl) {
+        guard sess != nil else { return }
+        fs = RemoteFs(sess: sess!)
+        fs?.realpath(nil) { [weak self] r in
+            guard let self else { return }
+            self.browseTo(r.ok ? (r.path ?? "/") : "/", nav: true)
+        }
+    }
+    func connFailed(_ c: ConnCtl, code: Int, title: String,
+                    details: String?) {
+        connError(title, details: details, code: code)
+        v.xferFailSession(sess, title.isEmpty ? L("连接失败") : title)
+    }
+    func connDisconnected(_ c: ConnCtl) {
+        setState(.conn)
+        connError(L("连接已断开"), details: nil, code: 0)
+        v.xferFailSession(sess, L("连接已断开"))
+        sess = nil
+    }
+    func connExited(_ c: ConnCtl, code: Int, reason: String) {
+        connDisconnected(c)
+    }
+    func connOSInfo(_ c: ConnCtl, id: String, pretty: String) {}
+
+    // ---------- 生命周期 ----------
+    func teardownConn() {
+        sess = nil
+        for (_, oc) in openReqs { oc.free() }
+        openReqs.removeAll()
+        openCtxs.forEach { $0.free() }
+        openCtxs.removeAll()
+        // 待删项：pane 关闭/换主机前立即真删
+        for var pd in pendDels {
+            if !pd.undone, let fs {
+                for p in pd.paths { fs.remove(p, recursive: true) { _ in } }
+            }
+            pd.paths.removeAll()
+        }
+        pendDels.removeAll()
+        fs?.invalidate(); fs = nil
+        if let c = ctl { c.cancel(); c.join(); ctl = nil }
+        gen &+= 1
+    }
+
+    /// pane_pick：nil → Local（直接浏览 home）。
+    func pick(_ hid: String?) {
+        teardownConn()
+        connHostId = hid
+        hostId = hid
+        back.removeAll(); fwd.removeAll()
+        guard let hid else {
+            isLocal = true
+            hname = L("Local"); osKey = "local"
+            fs = LocalFs()
+            fs?.realpath(nil) { [weak self] r in
+                guard let self else { return }
+                self.browseTo(r.ok ? (r.path ?? NSHomeDirectory()) : "/",
+                              nav: true)
+            }
+            return
+        }
+        isLocal = false
+        if let h = Vault.shared.get(hid) {
+            let nm = hb_obj_get_str(h, "name").str
+            let ad = hb_obj_get_str(h, "address").str
+            let po = hb_obj_get_int(h, "port", 22)
+            let os = hb_obj_get_str(h, "os").str
+            hname = nm.isEmpty ? hid : nm
+            osKey = (!os.isEmpty && os != "auto") ? os : "generic"
+            setConnHead(name: hname,
+                        sub: "SFTP · SSH \(ad.isEmpty ? "?" : ad):\(po)")
+            hb_obj_free(h)
+        } else {
+            hname = hid; osKey = "generic"
+            setConnHead(name: hid, sub: "SFTP")
+        }
+        connReset()
+        setState(.conn)
+        if ctl == nil {
+            let c = ConnCtl(mode: .sftp, hostId: hid,
+                            window: container.window)
+            c.delegate = self
+            ctl = c
+        }
+        ctl?.start(rows: 24, cols: 80)
+    }
+    private func setConnHead(name: String, sub: String) {
+        let head = connHead[0]
+        head.subviews.forEach { $0.removeFromSuperview() }
+        let tile = Palette.osTileView(osKey, size: 30)
+        tile.translatesAutoresizingMaskIntoConstraints = false
+        head.addSubview(tile)
+        let col = NSStackView()
+        col.orientation = .vertical
+        col.spacing = 1
+        col.alignment = .leading
+        let t = NSTextField(labelWithString: name)
+        t.font = .systemFont(ofSize: 13, weight: .bold)
+        let s = NSTextField(labelWithString: sub)
+        s.font = .systemFont(ofSize: 11)
+        s.textColor = .secondaryLabelColor
+        col.addArrangedSubview(t); col.addArrangedSubview(s)
+        col.translatesAutoresizingMaskIntoConstraints = false
+        head.addSubview(col)
+        NSLayoutConstraint.activate([
+            tile.leadingAnchor.constraint(equalTo: head.leadingAnchor),
+            tile.centerYAnchor.constraint(equalTo: head.centerYAnchor),
+            col.leadingAnchor.constraint(equalTo: tile.trailingAnchor,
+                                         constant: 8),
+            col.centerYAnchor.constraint(equalTo: head.centerYAnchor),
+        ])
+    }
+
+    // ---------- browse 构建 ----------
+    private func buildBrowse() {
+        // head：tile + title + Filter + Actions▾
+        let head = NSView()
+        head.translatesAutoresizingMaskIntoConstraints = false
+        browseView.addSubview(head)
+        let tile = Palette.osTileView("generic", size: 30)
+        tile.translatesAutoresizingMaskIntoConstraints = false
+        headTile = tile
+        head.addSubview(tile)
+        let t = NSTextField(labelWithString: "")
+        t.font = .systemFont(ofSize: 13.5, weight: .bold)
+        t.translatesAutoresizingMaskIntoConstraints = false
+        titleL = t
+        head.addSubview(t)
+        let fb = NSButton(title: " " + L("Filter"), target: self,
+                          action: #selector(toggleFilter))
+        fb.bezelStyle = .rounded
+        fb.image = hbIcon("search", size: 12, tint: Theme.text.color)
+        fb.imagePosition = .imageLeading
+        fb.font = .systemFont(ofSize: 11.5)
+        fb.translatesAutoresizingMaskIntoConstraints = false
+        fb.setAccessibilityIdentifier("sftp-filter-\(side)")
+        head.addSubview(fb)
+        let mb = NSPopUpButton()
+        mb.pullsDown = true
+        mb.bezelStyle = .rounded
+        mb.font = .systemFont(ofSize: 11.5)
+        mb.translatesAutoresizingMaskIntoConstraints = false
+        mb.setAccessibilityIdentifier("sftp-actions-\(side)")
+        let m = NSMenu()
+        m.addItem(withTitle: L("Actions"), action: nil,
+                  keyEquivalent: "")
+        m.items[0].isEnabled = false
+        for (tt, sel) in [
+            (L("打开"), #selector(actOpen)),
+            (L("复制到对侧栏"), #selector(actCopy)),
+            (L("重命名…"), #selector(actRename)),
+            (L("删除"), #selector(actDelete)),
+            (L("新建文件夹…"), #selector(actMkdir)),
+            (L("修改权限…"), #selector(actChmod)),
+            (L("刷新"), #selector(actRefresh)),
+            (L("全选"), #selector(actSelectAll)),
+            (L("显示隐藏文件"), #selector(actHidden)),
+        ] as [(String, Selector)] {
+            let i = m.addItem(withTitle: tt, action: sel,
+                              keyEquivalent: "")
+            i.target = self
+        }
+        mb.menu = m
+        head.addSubview(mb)
+        NSLayoutConstraint.activate([
+            head.topAnchor.constraint(equalTo: browseView.topAnchor,
+                                      constant: 8),
+            head.leadingAnchor.constraint(equalTo: browseView.leadingAnchor,
+                                          constant: 14),
+            head.trailingAnchor.constraint(
+                equalTo: browseView.trailingAnchor, constant: -14),
+            head.heightAnchor.constraint(equalToConstant: 30),
+            tile.leadingAnchor.constraint(equalTo: head.leadingAnchor),
+            tile.centerYAnchor.constraint(equalTo: head.centerYAnchor),
+            t.leadingAnchor.constraint(equalTo: tile.trailingAnchor,
+                                       constant: 8),
+            t.centerYAnchor.constraint(equalTo: head.centerYAnchor),
+            mb.trailingAnchor.constraint(equalTo: head.trailingAnchor),
+            mb.centerYAnchor.constraint(equalTo: head.centerYAnchor),
+            fb.trailingAnchor.constraint(equalTo: mb.leadingAnchor,
+                                         constant: -6),
+            fb.centerYAnchor.constraint(equalTo: head.centerYAnchor),
+        ])
+        // filter row（默认隐藏）
+        let fr = NSView()
+        fr.translatesAutoresizingMaskIntoConstraints = false
+        browseView.addSubview(fr)
+        filterRow = fr
+        filterEntry.placeholderString = L("过滤文件名…")
+        filterEntry.translatesAutoresizingMaskIntoConstraints = false
+        filterEntry.target = self
+        filterEntry.action = #selector(filterChanged)
+        filterEntry.setAccessibilityIdentifier("sftp-filterfield-\(side)")
+        fr.addSubview(filterEntry)
+        NSLayoutConstraint.activate([
+            fr.topAnchor.constraint(equalTo: head.bottomAnchor,
+                                    constant: 4),
+            fr.leadingAnchor.constraint(equalTo: browseView.leadingAnchor,
+                                        constant: 14),
+            fr.trailingAnchor.constraint(
+                equalTo: browseView.trailingAnchor, constant: -14),
+            fr.heightAnchor.constraint(equalToConstant: 22),
+            filterEntry.leadingAnchor.constraint(equalTo: fr.leadingAnchor),
+            filterEntry.trailingAnchor.constraint(equalTo: fr.trailingAnchor),
+            filterEntry.centerYAnchor.constraint(equalTo: fr.centerYAnchor),
+        ])
+        fr.isHidden = true
+        // nav row：‹ › ↑ + crumbs
+        let nav = NSStackView()
+        nav.orientation = .horizontal
+        nav.spacing = 3
+        nav.translatesAutoresizingMaskIntoConstraints = false
+        browseView.addSubview(nav)
+        func navBtn(_ ic: String, _ sel: Selector, _ id: String) -> NSButton {
+            let b = NSButton(title: "", target: self, action: sel)
+            b.bezelStyle = .rounded
+            b.image = hbIcon(ic, size: 12, tint: Theme.text.color)
+            b.translatesAutoresizingMaskIntoConstraints = false
+            b.widthAnchor.constraint(equalToConstant: 24).isActive = true
+            b.setAccessibilityIdentifier(id)
+            nav.addArrangedSubview(b)
+            return b
+        }
+        backB = navBtn("back", #selector(goBack), "sftp-back-\(side)")
+        fwdB = navBtn("fwd", #selector(goFwd), "sftp-fwd-\(side)")
+        upB = navBtn("up", #selector(goUp), "sftp-up-\(side)")
+        let cb = NSStackView()
+        cb.orientation = .horizontal
+        cb.spacing = 2
+        cb.translatesAutoresizingMaskIntoConstraints = false
+        crumbsBox = cb
+        nav.addArrangedSubview(cb)
+        NSLayoutConstraint.activate([
+            nav.topAnchor.constraint(equalTo: fr.bottomAnchor, constant: 4),
+            nav.leadingAnchor.constraint(equalTo: browseView.leadingAnchor,
+                                         constant: 10),
+            nav.trailingAnchor.constraint(
+                lessThanOrEqualTo: browseView.trailingAnchor, constant: -10),
+            nav.heightAnchor.constraint(equalToConstant: 24),
+        ])
+        // table
+        let scr = NSScrollView()
+        scr.translatesAutoresizingMaskIntoConstraints = false
+        scr.hasVerticalScroller = true
+        tableScroll = scr
+        let cols: [(String, String, CGFloat, Bool)] = [
+            ("name", L("Name"), 220, true),
+            ("mtime", L("修改时间"), 90, false),
+            ("size", L("大小"), 70, false),
+            ("kind", L("类型"), 60, false),
+            ("mode", L("权限"), 80, false),
+        ]
+        for (id, tt, w, grow) in cols {
+            let c = NSTableColumn(identifier: .init(id))
+            c.title = tt
+            c.width = w
+            if !grow { c.resizingMask = .userResizingMask }
+            c.minWidth = min(w, 40)
+            c.sortDescriptorPrototype = NSSortDescriptor(key: id,
+                                                         ascending: true)
+            table.addTableColumn(c)
+        }
+        // name 列随宽度伸展（linux expand=TRUE）
+        table.columnAutoresizingStyle =
+            .firstColumnOnlyAutoresizingStyle
+        table.headerView = NSTableHeaderView()
+        table.dataSource = self
+        table.delegate = self
+        table.rowHeight = 22
+        table.intercellSpacing = NSSize(width: 12, height: 0)
+        table.allowsMultipleSelection = true
+        table.allowsEmptySelection = true
+        table.doubleAction = #selector(rowActivated)
+        table.target = self
+        table.setAccessibilityIdentifier("sftp-table-\(side)")
+        table.registerForDraggedTypes([.string, .fileURL])
+        table.setDraggingSourceOperationMask(.copy, forLocal: false)
+        table.setDraggingSourceOperationMask(.copy, forLocal: true)
+        scr.documentView = table
+        browseView.addSubview(scr)
+        NSLayoutConstraint.activate([
+            scr.topAnchor.constraint(equalTo: nav.bottomAnchor, constant: 4),
+            scr.leadingAnchor.constraint(equalTo: browseView.leadingAnchor),
+            scr.trailingAnchor.constraint(
+                equalTo: browseView.trailingAnchor),
+            scr.bottomAnchor.constraint(equalTo: browseView.bottomAnchor),
+        ])
+        // ctx 菜单
+        let cm = NSMenu()
+        for (tt, sel) in [
+            (L("打开"), #selector(actOpen)),
+            (L("复制到对侧栏"), #selector(actCopy)),
+            (L("重命名…"), #selector(actRename)),
+            (L("删除"), #selector(actDelete)),
+            (L("新建文件夹…"), #selector(actMkdir)),
+            (L("修改权限…"), #selector(actChmod)),
+            (L("刷新"), #selector(actRefresh)),
+            (L("全选"), #selector(actSelectAll)),
+            (L("显示隐藏文件"), #selector(actHidden)),
+        ] as [(String, Selector)] {
+            let i = cm.addItem(withTitle: tt, action: sel,
+                               keyEquivalent: "")
+            i.target = self
+        }
+        table.menu = cm
+    }
+
+    // ---------- 列表模型 ----------
+    /// shown = items 过滤 + 排序（目录恒在前，同 linux dirfirst+cols）。
+    func applyShown() {
+        var f = items
+        if !showHidden { f = f.filter { !$0.name.hasPrefix(".") } }
+        let q = filterEntry.stringValue.trimmingCharacters(
+            in: .whitespaces).lowercased()
+        if !q.isEmpty { f = f.filter { $0.name.lowercased().contains(q) } }
+        let sd = table.sortDescriptors.first
+        let key = SftpKit.SortKey(raw: sd?.key ?? "name")
+        shown = SftpKit.sortEntries(f, key: key,
+            ascending: sd?.ascending ?? true,
+            isDir: { $0.isDir }, name: { $0.name },
+            value: { e in
+                switch key {
+                case .mtime: return e.mtime
+                case .size: return Int64(e.size)
+                case .mode: return Int64(e.mode & 0o777)
+                default: return 0
+                }
+            })
+        table.reloadData()
+    }
+    func refresh() {
+        guard let fs, let cwd else { return }
+        loading = true
+        let g = { () -> UInt in self.gen &+= 1; return self.gen }()
+        let lgen = { () -> UInt in self.listGen &+= 1; return self.listGen }()
+        fs.list(cwd) { [weak self] r in
+            guard let self, self.listGen == lgen else { return }
+            self.loading = false
+            if !r.ok {
+                self.v.toast(L("读取目录失败") + ": " +
+                             (r.message ?? L("未知错误")))
+                return
+            }
+            // 一次性替换（linux splice 大目录修复同义）
+            var out: [FsEntry] = []
+            out.reserveCapacity(r.entries.count)
+            for e in r.entries {
+                if e.name == "." || e.name == ".." ||
+                   e.name.contains("/") { continue }
+                out.append(FsEntry(name: e.name,
+                    path: SftpKit.pathJoin(cwd, e.name),
+                    size: e.size, mtime: e.mtime, mode: e.mode,
+                    isDir: e.isDir, isLink: e.isLink))
+            }
+            self.items = out
+            self.applyShown()
+        }
+        _ = g
+    }
+    private func navSync() {
+        backB.isEnabled = !back.isEmpty
+        fwdB.isEnabled = !fwd.isEmpty
+        upB.isEnabled = cwd != nil && cwd != "/"
+        for s in crumbsBox.arrangedSubviews {
+            crumbsBox.removeArrangedSubview(s)
+            s.removeFromSuperview()
+        }
+        for (i, c) in SftpKit.crumbs(cwd ?? "/").enumerated() {
+            if i > 0 {
+                let sep = NSTextField(labelWithString: "›")
+                sep.textColor = .secondaryLabelColor
+                crumbsBox.addArrangedSubview(sep)
+            }
+            let b = NSButton(title: c.label, target: self,
+                             action: #selector(crumb(_:)))
+            b.bezelStyle = .inline
+            b.font = .systemFont(ofSize: 11.5)
+            b.setAccessibilityIdentifier("sftp-crumb-\(side)")
+            b.identifier = .init(c.path)
+            crumbsBox.addArrangedSubview(b)
+        }
+        titleL?.stringValue = isLocal ? L("Local") : hname
+    }
+    func browseTo(_ path: String, nav: Bool) {
+        if nav, let c = cwd { back.append(c); fwd.removeAll() }
+        cwd = path.isEmpty ? "/" : path
+        setState(.browse)
+        navSync()
+        refresh()
+    }
+    @objc private func crumb(_ b: NSButton) {
+        guard let p = b.identifier?.rawValue, p != cwd else { return }
+        browseTo(p, nav: true)
+    }
+    @objc private func goUp() {
+        guard let c = cwd, c != "/" else { return }
+        browseTo(SftpKit.parentDir(c), nav: true)
+    }
+    @objc private func goBack() {
+        guard let t = back.popLast() else { return }
+        if let c = cwd { fwd.append(c) }
+        cwd = t; navSync(); refresh()
+    }
+    @objc private func goFwd() {
+        guard let t = fwd.popLast() else { return }
+        if let c = cwd { back.append(c) }
+        cwd = t; navSync(); refresh()
+    }
+    @objc private func toggleFilter() {
+        let on = filterRow.isHidden
+        filterRow.isHidden = !on ? false : true
+        if on { container.window?.makeFirstResponder(filterEntry) }
+        else { filterEntry.stringValue = ""; filterChanged() }
+    }
+    @objc private func filterChanged() { applyShown() }
+
+    // ---------- selection ----------
+    func selItems() -> [FsEntry] {
+        table.selectedRowIndexes.compactMap {
+            $0 < shown.count ? shown[$0] : nil
+        }
+    }
+    // ---------- DEBUG dev hooks ----------
+    func devHidden(_ on: Bool) { showHidden = on; applyShown() }
+    func devFilter(_ t: String) {
+        filterRow.isHidden = false
+        filterEntry.stringValue = t
+        container.window?.makeFirstResponder(filterEntry)
+        applyShown()
+    }
+    func devNav(_ op: String) {
+        switch op {
+        case "up": goUp()
+        case "back": goBack()
+        case "fwd": goFwd()
+        default: break
+        }
+    }
+    func devSelect(_ idxs: [Int]) {
+        table.selectRowIndexes(
+            IndexSet(idxs.filter { $0 >= 0 && $0 < shown.count }),
+            byExtendingSelection: false)
+    }
+    func devActivate(_ i: Int) {
+        guard i >= 0, i < shown.count else { return }
+        let e = shown[i]
+        if e.isDir { browseTo(e.path, nav: true) }
+        else {
+            v.xferEnqueue(sp: self, items: [e],
+                          dp: v.panes[side ^ 1])
+        }
+    }
+    /// dev：取消连接/关错误卡 → 回选择页（FR-19.1 cancel 语义）。
+    func devCancel() { connClose() }
+
+    @objc private func rowActivated() {
+        let r = table.clickedRow
+        guard r >= 0, r < shown.count else { return }
+        let i = shown[r]
+        if i.isDir { browseTo(i.path, nav: true) }
+        else {
+            v.xferEnqueue(sp: self, items: [i],
+                          dp: v.panes[side ^ 1])
+        }
+    }
+
+    // ---------- table dataSource/delegate ----------
+    func numberOfRows(in t: NSTableView) -> Int { shown.count }
+    func tableView(_ t: NSTableView, viewFor c: NSTableColumn?,
+                   row: Int) -> NSView? {
+        guard row < shown.count else { return nil }
+        let e = shown[row]
+        switch c?.identifier.rawValue {
+        case "name":
+            let row_ = NSStackView()
+            row_.orientation = .horizontal
+            row_.spacing = 6
+            let ic = NSImageView(image: hbIcon(
+                e.isDir ? "folder" : e.isLink ? "link" : "file",
+                size: 13, tint: e.isDir ? Theme.blue.color
+                                        : Theme.text.color))
+            let l = NSTextField(labelWithString: e.name)
+            l.lineBreakMode = .byTruncatingMiddle
+            row_.addArrangedSubview(ic); row_.addArrangedSubview(l)
+            row_.toolTip = e.path
+            return row_
+        case "mtime":
+            let l = NSTextField(labelWithString: SftpKit.fmtMtime(e.mtime))
+            l.textColor = .secondaryLabelColor
+            return l
+        case "size":
+            return NSTextField(labelWithString:
+                e.isDir ? "—" : SftpKit.fmtSize(e.size))
+        case "kind":
+            let l = NSTextField(labelWithString:
+                e.isDir ? "folder" : e.isLink ? "link" : "file")
+            l.textColor = .secondaryLabelColor
+            return l
+        case "mode":
+            let l = NSTextField(labelWithString: SftpKit.modeString(e.mode))
+            l.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            l.textColor = .secondaryLabelColor
+            return l
+        default: return nil
+        }
+    }
+    func tableView(_ t: NSTableView,
+                   sortDescriptorsDidChange o: [NSSortDescriptor]) {
+        applyShown()
+    }
+
+    // drag source：选中项名写入 "hbsftp|side\nnames"；本地 pane
+    // 同时给 fileURL（可拖给 Finder）。
+    func tableView(_ t: NSTableView, pasteboardWriterForRow row: Int)
+        -> NSPasteboardWriting? {
+        guard row < shown.count else { return nil }
+        let e = shown[row]
+        let item = NSPasteboardItem()
+        if isLocal {
+            item.setString(URL(fileURLWithPath: e.path).absoluteString,
+                           forType: .fileURL)
+        }
+        let names = (table.selectedRowIndexes.contains(row)
+                     ? selItems() : [e]).map { $0.name }
+        item.setString("hbsftp|\(side)\n" + names.joined(separator: "\n"),
+                       forType: .string)
+        return item
+    }
+    // drop：对侧 pane 文本串 → 传输；fileURL → 从 Finder 上传。
+    func tableView(_ t: NSTableView, validateDrop info: NSDraggingInfo,
+                   proposedRow row: Int,
+                   proposedDropOperation op: NSTableView.DropOperation)
+        -> NSDragOperation {
+        .copy
+    }
+    func tableView(_ t: NSTableView, acceptDrop info: NSDraggingInfo,
+                   row: Int, dropOperation: NSTableView.DropOperation)
+        -> Bool {
+        v.acceptDrop(info, on: self)
+    }
+
+    // ---------- 操作 ----------
+    @objc func actRefresh() { refresh() }
+    @objc func actSelectAll() { table.selectAll(nil) }
+    @objc func actHidden() { showHidden.toggle(); applyShown() }
+    @objc func actCopy() {
+        v.xferEnqueue(sp: self, items: selItems(),
+                      dp: v.panes[side ^ 1])
+    }
+    @objc func actDelete() {
+        let items = selItems()
+        guard !items.isEmpty else { return }
+        let ndir = items.filter { $0.isDir }.count
+        if ndir > 0 {
+            let a = NSAlert()
+            a.messageText = L("删除项目")
+            a.informativeText = String(format:
+                L("将递归删除 %d 个项目（含 %d 个目录）。删除后 9 秒内可撤销。"),
+                items.count, ndir)
+            a.addButton(withTitle: L("删除"))
+            a.addButton(withTitle: L("取消"))
+            DialogRegistry.shared.present(alert: a, kind: "sftp-deldir",
+                                          in: container.window) { ok in
+                if ok { self.deleteItems(items) }
+            }
+            return
+        }
+        deleteItems(items)
+    }
+    private struct PendDel {
+        var paths: [String]
+        var items: [FsEntry]
+        var gen: UInt
+        var undone = false
+        var timer: Timer?
+    }
+    private func deleteItems(_ its: [FsEntry]) {
+        let paths = its.map { $0.path }
+        items.removeAll { e in paths.contains(e.path) }
+        applyShown()
+        let pd = PendDel(paths: paths, items: its, gen: gen)
+        pendDels.append(pd)
+        v.toastAction(
+            String(format: L("已删除 %d 个项目"), its.count),
+            action: L("撤销"), ttl: 9,
+            onAction: { [weak self] in
+                guard let self else { return }
+                if let i = self.pendDels.firstIndex(where: {
+                    $0.paths == pd.paths }) {
+                    self.pendDels[i].undone = true
+                    self.pendDels[i].paths.removeAll()
+                    self.items.append(contentsOf: pd.items)
+                    self.applyShown()
+                }
+            },
+            onDismiss: { [weak self] in
+                guard let self else { return }
+                guard let i = self.pendDels.firstIndex(where: {
+                    $0.paths == pd.paths && !$0.undone }) else { return }
+                let d = self.pendDels.remove(at: i)
+                if self.gen == d.gen {
+                    for p in d.paths {
+                        self.fs?.remove(p, recursive: true) { [weak self] r in
+                            self?.opRefresh(r)
+                        }
+                    }
+                }
+            })
+    }
+    func opRefresh(_ r: FsRes) {
+        if !r.ok {
+            v.toast(L("操作失败") + ": " + (r.message ?? ""))
+        }
+        refresh()
+    }
+    @objc func actMkdir() {
+        promptSheet(title: L("新建文件夹"), field: L("名称"),
+                    initial: "", accId: "sftp-mkdir") { [weak self] name in
+            guard let self, let name, !name.isEmpty else { return }
+            let full = SftpKit.pathJoin(self.cwd ?? "/", name)
+            self.fs?.mkdir(full, mode: 0o755) { [weak self] r in
+                self?.opRefresh(r)
+            }
+        }
+    }
+    @objc func actRename() {
+        let items = selItems()
+        guard let i = items.first else { return }
+        promptSheet(title: L("重命名"), field: L("新文件名"),
+                    initial: i.name, accId: "sftp-rename") { [weak self] name in
+            guard let self, let name, !name.isEmpty else { return }
+            let to = SftpKit.pathJoin(SftpKit.parentDir(i.path), name)
+            self.fs?.rename(i.path, to, overwrite: false) { [weak self] r in
+                self?.opRefresh(r)
+            }
+        }
+    }
+    @objc func actChmod() {
+        let items = selItems()
+        guard let first = items.first else { return }
+        v.chmodSheet(paths: items.map { $0.path },
+                     initial: first.mode & 0o777, pane: self)
+    }
+    @objc func actOpen() {
+        let items = selItems()
+        guard let i = items.first else { return }
+        if isLocal {
+            NSWorkspace.shared.open(URL(fileURLWithPath: i.path))
+            return
+        }
+        // 远端：下载到 Caches/harbor/open/<rand>/ → 打开 → 监视改动
+        guard let sess else { return }
+        let base = v.openCacheDir()
+        let dir = base + "/" + UUID().uuidString.prefix(8)
+        do {
+            try FileManager.default.createDirectory(
+                atPath: String(dir), withIntermediateDirectories: true)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: String(dir))
+        } catch {
+            v.toast(L("无法创建缓存目录")); return
+        }
+        let oc = OpenCtx(pane: self, name: i.name, remotePath: i.path,
+                         localPath: String(dir) + "/" + i.name,
+                         dir: String(dir))
+        let req = hb_sftp_download(sess.sess, i.path, oc.localPath,
+                                   HB_SFTP_OVERWRITE)
+        oc.req = req
+        openReqs[req] = oc
+    }
+    private func openDone(oc: OpenCtx, r: hb_sftp_result) {
+        if r.kind == HB_SFTP_R_PROGRESS { return }
+        openReqs.removeValue(forKey: r.req)
+        guard r.status == HB_SFTP_OK else {
+            v.toast(L("下载失败") + ": " + (r.message.map {
+                String(cString: $0) } ?? ""))
+            oc.free(); return
+        }
+        openCtxs.append(oc)
+        let url = URL(fileURLWithPath: oc.localPath)
+        NSWorkspace.shared.open(url)
+        oc.watch { [weak self] in
+            guard let self else { return }
+            self.v.toastAction(
+                String(format: L("已修改 %@ · 上传回远端"), oc.name),
+                action: L("上传"), ttl: 9,
+                onAction: { [weak self] in
+                    guard let s = self?.sess else { return }
+                    _ = hb_sftp_upload(s.sess, oc.localPath,
+                                       oc.remotePath, HB_SFTP_OVERWRITE)
+                }, onDismiss: nil)
+        }
+    }
+
+    // ---------- dialogs ----------
+    /// hb_dialog_prompt 等价：标题 + 单行输入 + 取消/确定。
+    private func promptSheet(title: String, field: String,
+                             initial: String, accId: String,
+                             done: @escaping (String?) -> Void) {
+        let a = NSAlert()
+        a.messageText = title
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
+        f.stringValue = initial
+        f.placeholderString = field
+        f.setAccessibilityIdentifier(accId)
+        a.accessoryView = f
+        a.addButton(withTitle: L("确定"))
+        a.addButton(withTitle: L("取消"))
+        DialogRegistry.shared.present(alert: a, kind: accId,
+                                      in: container.window) { ok in
+            done(ok ? f.stringValue : nil)
+        }
+        container.window?.makeFirstResponder(f)
+    }
+
+    // ---------- key / misc ----------
+    func keyDown(_ ev: NSEvent) -> Bool {
+        let foc = container.window?.firstResponder
+        if let tf = foc as? NSTextView, tf === filterEntry.currentEditor() {
+            if ev.keyCode == 96 { refresh(); return true }
+            return false
+        }
+        switch ev.keyCode {
+        case 96: refresh(); return true                    // F5
+        case 120: actRename(); return true                 // F2
+        case 51, 117: actDelete(); return true             // ⌫/⌦
+        case 126:
+            if ev.modifierFlags.contains(.option) { goUp(); return true }
+            return false
+        case 0:
+            if ev.modifierFlags.contains(.command) {
+                actSelectAll(); return true
+            }
+            return false
+        default: return false
+        }
+    }
+
+    private var isFilterFocused: Bool {
+        guard let ed = filterEntry.currentEditor() else { return false }
+        return (container.window?.firstResponder as? NSTextView) === ed
+    }
+
+    /// dev state（DEBUG hook 用）
+    var devState: String {
+        var sel: [String] = []
+        table.selectedRowIndexes.forEach {
+            if $0 < shown.count { sel.append(shown[$0].name) }
+        }
+        return "state=\(state) local=\(isLocal) cwd=\(cwd ?? "-") "
+             + "items=\(items.count) shown=\(shown.count) "
+             + "hidden=\(showHidden) sel=\(sel.joined(separator: ",")) "
+             + "filter='\(filterEntry.stringValue)'"
+             + (isFilterFocused ? " foc=filter" : "")
+             + (errCard != nil ? " errcard" : "")
+    }
+}
+
+extension SftpKit.SortKey {
+    init(raw: String) {
+        switch raw {
+        case "mtime": self = .mtime
+        case "size": self = .size
+        case "kind": self = .kind
+        case "mode": self = .mode
+        default: self = .name
+        }
+    }
+}
+
+/// 行快捷键：F5 刷新 / F2 重命名 / ⌫ 删除 / ⌥↑ 上级 / ⌘A 全选。
+final class SftpTable: NSTableView {
+    weak var pane: SftpPane?
+    override func keyDown(with event: NSEvent) {
+        if pane?.keyDown(event) == true { return }
+        super.keyDown(with: event)
+    }
+}
+
+/// “打开”下载 → 打开后监视文件改动的上下文（linux OpenCtx）。
+final class OpenCtx {
+    unowned let pane: SftpPane
+    let name, remotePath, localPath, dir: String
+    var req: UInt32 = 0
+    private var src: DispatchSourceFileSystemObject?
+    private var fd: Int32 = -1
+    init(pane: SftpPane, name: String, remotePath: String,
+         localPath: String, dir: String) {
+        self.pane = pane; self.name = name; self.remotePath = remotePath
+        self.localPath = localPath; self.dir = dir
+    }
+    /// 文件被改写 → cb（一次；之后继续监视）。
+    func watch(_ cb: @escaping () -> Void) {
+        fd = open(localPath, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let s = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: [.write, .rename, .delete],
+            queue: .main)
+        s.setEventHandler { cb() }
+        s.setCancelHandler { close(self.fd) }
+        s.resume()
+        src = s
+    }
+    func free() {
+        src?.cancel(); src = nil
+        if fd >= 0 { close(fd); fd = -1 }
+    }
+    deinit { free() }
+}
+
+// ============================ SftpView ============================
+
+/// 双栏 + 传输队列 dock（对齐 linux HbSftpView）。
+final class SftpView: NSView {
+    unowned var tab: SFTPTab?
+    var panes: [SftpPane] = []
+    private(set) var xers: [Xfer] = []
+    private var nextXid = 0
+    private(set) var conc = 3
+    /// 主机编辑器钩子（conn 失败卡 “编辑主机”）——由 tab/host 页注入。
+    var hostEditor: ((String) -> Void)?
+
+    private var xlist: NSStackView!
+    private var xhead: NSTextField!
+    private var xclear: NSButton!
+    private var xwrap: NSView!
+    private var toastBox: NSView!
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        conc = Int(Vault.shared.settingsInt("sftp_concurrency", 3))
+        conc = min(8, max(1, conc))
+        wantsLayer = true
+        layer?.backgroundColor = Theme.page.color.cgColor
+
+        let cols = NSStackView()
+        cols.orientation = .horizontal
+        cols.spacing = 0
+        cols.distribution = .fillEqually
+        cols.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(cols)
+        for k in 0..<2 {
+            let p = SftpPane(v: self, side: k)
+            panes.append(p)
+            let wrap = NSView()
+            wrap.translatesAutoresizingMaskIntoConstraints = false
+            if k == 1 {
+                wrap.wantsLayer = true
+                wrap.layer?.borderWidth = 1
+                wrap.layer?.borderColor = Theme.line.color.cgColor
+            }
+            p.container.translatesAutoresizingMaskIntoConstraints = false
+            wrap.addSubview(p.container)
+            NSLayoutConstraint.activate([
+                p.container.leadingAnchor.constraint(
+                    equalTo: wrap.leadingAnchor),
+                p.container.trailingAnchor.constraint(
+                    equalTo: wrap.trailingAnchor),
+                p.container.topAnchor.constraint(equalTo: wrap.topAnchor),
+                p.container.bottomAnchor.constraint(
+                    equalTo: wrap.bottomAnchor),
+            ])
+            cols.addArrangedSubview(wrap)
+        }
+        // 队列 dock（常驻）
+        xwrap = NSView()
+        xwrap.translatesAutoresizingMaskIntoConstraints = false
+        xwrap.wantsLayer = true
+        xwrap.layer?.backgroundColor = Theme.card.color.cgColor
+        xwrap.layer?.borderWidth = 1
+        xwrap.layer?.borderColor = Theme.line.color.cgColor
+        addSubview(xwrap)
+        let h = NSStackView()
+        h.orientation = .horizontal
+        h.spacing = 8
+        h.edgeInsets = NSEdgeInsets(top: 4, left: 10,
+                                    bottom: 4, right: 10)
+        h.translatesAutoresizingMaskIntoConstraints = false
+        let ic = NSImageView(image: hbIcon("fwd", size: 12,
+                                           tint: Theme.text.color))
+        h.addArrangedSubview(ic)
+        xhead = NSTextField(labelWithString: L("传输队列 · 0 进行中"))
+        xhead.font = .systemFont(ofSize: 11.5)
+        h.addArrangedSubview(xhead)
+        let sp = NSView()
+        h.addArrangedSubview(sp)
+        xclear = NSButton(title: L("清空已完成"), target: self,
+                          action: #selector(clearDone))
+        xclear.bezelStyle = .rounded
+        xclear.font = .systemFont(ofSize: 11.5)
+        xclear.isHidden = true
+        xclear.setAccessibilityIdentifier("xers-clear")
+        h.addArrangedSubview(xclear)
+        xwrap.addSubview(h)
+        let scr = NSScrollView()
+        scr.translatesAutoresizingMaskIntoConstraints = false
+        scr.hasVerticalScroller = true
+        xlist = FlippedStack()
+        xlist.orientation = .vertical
+        xlist.spacing = 2
+        xlist.edgeInsets = NSEdgeInsets(top: 0, left: 10,
+                                        bottom: 6, right: 10)
+        xlist.translatesAutoresizingMaskIntoConstraints = false
+        scr.documentView = xlist
+        xwrap.addSubview(scr)
+        let scrHug = scr.heightAnchor.constraint(equalTo: xlist.heightAnchor)
+        scrHug.priority = .defaultLow
+        NSLayoutConstraint.activate([
+            cols.leadingAnchor.constraint(equalTo: leadingAnchor),
+            cols.trailingAnchor.constraint(equalTo: trailingAnchor),
+            cols.topAnchor.constraint(equalTo: topAnchor),
+            cols.bottomAnchor.constraint(equalTo: xwrap.topAnchor),
+            xwrap.leadingAnchor.constraint(equalTo: leadingAnchor),
+            xwrap.trailingAnchor.constraint(equalTo: trailingAnchor),
+            xwrap.bottomAnchor.constraint(equalTo: bottomAnchor),
+            xwrap.heightAnchor.constraint(lessThanOrEqualToConstant: 160),
+            h.leadingAnchor.constraint(equalTo: xwrap.leadingAnchor),
+            h.trailingAnchor.constraint(equalTo: xwrap.trailingAnchor),
+            h.topAnchor.constraint(equalTo: xwrap.topAnchor),
+            h.heightAnchor.constraint(equalToConstant: 26),
+            scr.topAnchor.constraint(equalTo: h.bottomAnchor),
+            scr.leadingAnchor.constraint(equalTo: xwrap.leadingAnchor),
+            scr.trailingAnchor.constraint(equalTo: xwrap.trailingAnchor),
+            scr.bottomAnchor.constraint(equalTo: xwrap.bottomAnchor),
+            scr.heightAnchor.constraint(lessThanOrEqualToConstant: 130),
+            /* xwrap 仅有 ≤160 上限——无驱动则 scr 塌成 0、队列入不可见。
+             * 低优先级跟随内容高度：短内容贴高，长内容被 ≤130 截断出滚动条。 */
+            xlist.leadingAnchor.constraint(equalTo: scr.leadingAnchor),
+            xlist.trailingAnchor.constraint(equalTo: scr.trailingAnchor),
+            xlist.topAnchor.constraint(equalTo: scr.topAnchor),
+            xlist.widthAnchor.constraint(equalTo: scr.widthAnchor),
+            scrHug,
+            sp.widthAnchor.constraint(greaterThanOrEqualToConstant: 0),
+        ])
+        cleanOpenCache()
+    }
+    required init?(coder: NSCoder) { nil }
+
+    // ---------------- toast ----------------
+    func toast(_ text: String) {
+        let t = SftpToast(text: text)
+        showToast(t)
+    }
+    func toastAction(_ text: String, action: String, ttl: TimeInterval,
+                     onAction: @escaping () -> Void,
+                     onDismiss: (() -> Void)?) {
+        let t = SftpToast(text: text, action: action, ttl: ttl,
+                          onAction: onAction, onDismiss: onDismiss)
+        showToast(t)
+    }
+    private func showToast(_ t: SftpToast) {
+        t.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(t)
+        NSLayoutConstraint.activate([
+            t.centerXAnchor.constraint(equalTo: centerXAnchor),
+            t.bottomAnchor.constraint(equalTo: xwrap.topAnchor,
+                                      constant: -10),
+        ])
+    }
+
+    // ---------------- open 缓存 ----------------
+    func openCacheDir() -> String {
+        let base = FileManager.default.urls(for: .cachesDirectory,
+                        in: .userDomainMask)[0]
+            .appendingPathComponent("harbor/open").path
+        try? FileManager.default.createDirectory(
+            atPath: base, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        return base
+    }
+    /// linux clean_open_cache：启动/释放时清 open 缓存。
+    func cleanOpenCache() {
+        let base = openCacheDir()
+        if let subs = try? FileManager.default
+            .contentsOfDirectory(atPath: base) {
+            for s in subs {
+                _ = LocalFs.rmrf(SftpKit.pathJoin(base, s))
+            }
+        }
+    }
+
+    // ---------------- drop（外源 → 本 pane） ----------------
+    @discardableResult
+    func acceptDrop(_ info: NSDraggingInfo, on dp: SftpPane) -> Bool {
+        guard dp.state == .browse, dp.fs != nil else {
+            toast(L("请先在对侧栏选择主机")); return false
+        }
+        let pb = info.draggingPasteboard
+        // Finder fileURL → 源按 local 处理（同 linux on_drop）
+        if let urls = pb.readObjects(forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !urls.isEmpty {
+            let entries = urls.map { u -> FsEntry in
+                var st = stat()
+                let p = u.path
+                let isD = lstat(p, &st) == 0 &&
+                          (st.st_mode & S_IFMT) == S_IFDIR
+                return FsEntry(name: u.lastPathComponent, path: p,
+                               size: 0, mtime: 0, mode: 0,
+                               isDir: isD, isLink: false)
+            }
+            let sp = panes.first { $0.isLocal && $0.state == .browse }
+            xferEnqueue(sp: sp, items: entries, dp: dp)
+            return true
+        }
+        // 内联文本 "hbsftp|side\nnames" → 对侧传输
+        if let s = pb.string(forType: .string),
+           s.hasPrefix("hbsftp|") {
+            let head = s.dropFirst(7).prefix(while: { $0 != "\n" })
+            guard let sside = Int(head), sside >= 0, sside <= 1 else {
+                return false
+            }
+            let sp = panes[sside]
+            let names = s.split(separator: "\n").dropFirst()
+                .map(String.init)
+            let entries = names.map {
+                FsEntry(name: $0,
+                        path: SftpKit.pathJoin(sp.cwd ?? "/", $0),
+                        size: 0, mtime: 0, mode: 0,
+                        isDir: false, isLink: false)
+            }
+            xferEnqueue(sp: sp, items: entries, dp: dp)
+            return true
+        }
+        return false
+    }
+
+    // ============================ 传输队列 ============================
+
+    /// 目标 stat → 冲突问对话框（policy_all 复用）→ 入队。
+    /// 对齐 linux ConfCtx/stat_cb/conf_ask 流程。
+    private struct ConfCtx {
+        var todo: [FsEntry]
+        var policyAll: Int32   // -1 未选
+        var sp: SftpPane?
+        var dp: SftpPane
+    }
+    private var confQueue: [ConfCtx] = []
+    private var activeConf: ConfCtx?
+
+    func xferEnqueue(sp: SftpPane?, items: [FsEntry], dp: SftpPane) {
+        guard !items.isEmpty else { return }
+        guard dp.state == .browse, dp.fs != nil else {
+            toast(L("请先在对侧栏选择主机")); return
+        }
+        confQueue.append(ConfCtx(todo: items, policyAll: -1,
+                                 sp: sp, dp: dp))
+        confNext()
+    }
+    private func confNext() {
+        if activeConf == nil {
+            guard !confQueue.isEmpty else { return }
+            activeConf = confQueue.removeFirst()
+        }
+        guard var cc = activeConf else { return }
+        guard let it = cc.todo.first else {
+            activeConf = nil
+            confNext()
+            return
+        }
+        cc.todo.removeFirst()
+        activeConf = cc
+        let dst = SftpKit.pathJoin(cc.dp.cwd ?? "/", it.name)
+        cc.dp.fs?.stat(dst) { [weak self] r in
+            guard let self, let cc = self.activeConf else { return }
+            if r.ok && !r.entries.isEmpty {
+                if cc.policyAll >= 0 {
+                    self.enqOne(it, cc: cc, policy: cc.policyAll)
+                    self.confNext()
+                } else {
+                    self.confAsk(it)
+                }
+            } else {
+                self.enqOne(it, cc: cc, policy: HB_SFTP_OVERWRITE_I)
+                self.confNext()
+            }
+        }
+    }
+    /// linux conf_ask：覆盖/跳过/重命名/取消 + “对本次其余项目都适用”。
+    /// DialogRegistry.present 只回 Bool，4 分支用 track + raw response。
+    private func confAsk(_ it: FsEntry) {
+        confCurrent = it
+        let a = NSAlert()
+        a.messageText = L("目标已存在")
+        a.informativeText = it.isDir
+            ? String(format:
+                L("「%@」已存在 — 将合并目录，按所选方式处理同名文件"),
+                it.name)
+            : String(format:
+                L("「%@」在对侧目录已存在。选择处理方式："), it.name)
+        let all = NSButton(checkboxWithTitle: L("对本次其余项目都适用"),
+                           target: nil, action: nil)
+        all.setAccessibilityIdentifier("conf-applyall")
+        a.accessoryView = all
+        a.addButton(withTitle: L("覆盖"))       // first = default
+        a.addButton(withTitle: L("跳过"))
+        a.addButton(withTitle: L("重命名"))
+        a.addButton(withTitle: L("取消传输"))
+        presentConflict4(a, applyAll: all)
+    }
+    /// 4 选项冲突 sheet（保留 dev 可观测 kind）。
+    private func presentConflict4(_ a: NSAlert,
+                                  applyAll all: NSButton) {
+        guard let w = window else {
+            _ = a.runModal(); return
+        }
+        a.beginSheetModal(for: w) { [weak self] resp in
+            DialogRegistry.shared.untrack(alert: a)
+            guard let self, var cc = self.activeConf else { return }
+            let pol: Int32?
+            switch resp {
+            case .alertFirstButtonReturn:
+                pol = Int32(HB_SFTP_OVERWRITE.rawValue)
+            case .alertSecondButtonReturn:
+                pol = Int32(HB_SFTP_SKIP.rawValue)
+            case .alertThirdButtonReturn:
+                pol = Int32(HB_SFTP_RENAME.rawValue)
+            default: pol = nil
+            }
+            guard let p = pol else {
+                // 取消传输：丢弃整个批次（linux conf_decide 同义）
+                self.activeConf = nil
+                self.confQueue.removeAll()
+                return
+            }
+            if all.state == .on { cc.policyAll = p; self.activeConf = cc }
+            guard let it = self.confCurrent else { return }
+            self.confCurrent = nil
+            self.enqOne(it, cc: cc, policy: p)
+            self.confNext()
+        }
+        DialogRegistry.shared.track(alert: a, kind: "sftp-conflict")
+    }
+    /// 当前正在问的 item（confAsk → presentConflict4 链路传参）。
+    private var confCurrent: FsEntry?
+
+    private func enqOne(_ it: FsEntry, cc: ConfCtx,
+                        policy: Int32) {
+        let x = Xfer()
+        nextXid += 1
+        x.id = nextXid
+        x.state = .run
+        x.t0 = Date()
+        x.sp = cc.sp; x.dp = cc.dp
+        x.name = it.name
+        x.srcPath = it.path
+        x.dstDir = cc.dp.cwd ?? "/"
+        x.srcLabel = (cc.sp == nil || cc.sp!.isLocal) ? L("Local") : cc.sp!.hname
+        x.dstLabel = cc.dp.isLocal ? L("Local") : cc.dp.hname
+        x.policy = policy
+        if cc.sp != nil && !cc.sp!.isLocal && !cc.dp.isLocal {
+            x.kind = .relay
+        } else if (cc.sp == nil || cc.sp!.isLocal) && !cc.dp.isLocal {
+            x.kind = .up
+        } else if cc.sp != nil && !cc.sp!.isLocal && cc.dp.isLocal {
+            x.kind = .down
+        } else {
+            x.kind = .local
+        }
+        buildXferRow(x)
+        xers.append(x)
+        xheadSync()
+        updateRow(x)
+        switch x.kind {
+        case .up:
+            guard let ds = x.dp?.sess else {
+                finishXfer(x, .fail, L("连接已断开")); return
+            }
+            let t = SftpKit.pathJoin(x.dstDir, x.name)
+            x.req = hb_sftp_upload(ds.sess, x.srcPath, t,
+                                   hb_sftp_conflict(x.policy))
+            x.sess = ds
+        case .down:
+            guard let ss = x.sp?.sess else {
+                finishXfer(x, .fail, L("连接已断开")); return
+            }
+            let t = SftpKit.pathJoin(x.dstDir, x.name)
+            x.req = hb_sftp_download(ss.sess, x.srcPath, t,
+                                     hb_sftp_conflict(x.policy))
+            x.sess = ss
+        case .relay:
+            guard let ss = x.sp?.sess, x.dp?.sess != nil else {
+                finishXfer(x, .fail, L("连接已断开")); return
+            }
+            let d = NSTemporaryDirectory() + "harbor-relay-\(x.id)"
+            do {
+                try FileManager.default.createDirectory(
+                    atPath: d, withIntermediateDirectories: true,
+                    attributes: [.posixPermissions: 0o700])
+            } catch {
+                finishXfer(x, .fail, L("无法创建临时目录")); return
+            }
+            x.tmpDir = d
+            x.tmpPath = SftpKit.pathJoin(d, x.name)
+            x.phase = 0
+            x.req = hb_sftp_download(ss.sess, x.srcPath,
+                                     x.tmpPath!, HB_SFTP_OVERWRITE)
+            x.sess = ss
+        case .local:
+            startLocal(x)
+        }
+    }
+
+    // ---------------- row UI ----------------
+    private func buildXferRow(_ x: Xfer) {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.spacing = 8
+        row.edgeInsets = NSEdgeInsets(top: 3, left: 0,
+                                      bottom: 3, right: 0)
+        let ic = NSImageView(image: hbIcon(
+            x.kind == .up ? "up" : x.kind == .down ? "down" : "fwd",
+            size: 12, tint: Theme.text.color))
+        row.addArrangedSubview(ic)
+        let nm = NSTextField(labelWithString: x.name)
+        nm.lineBreakMode = .byTruncatingMiddle
+        nm.font = .systemFont(ofSize: 11.5)
+        nm.translatesAutoresizingMaskIntoConstraints = false
+        nm.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        row.addArrangedSubview(nm)
+        let dl = NSTextField(labelWithString:
+                             "\(x.srcLabel) → \(x.dstLabel)")
+        dl.font = .systemFont(ofSize: 11.5)
+        dl.textColor = .secondaryLabelColor
+        dl.lineBreakMode = .byTruncatingTail
+        dl.translatesAutoresizingMaskIntoConstraints = false
+        dl.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        row.addArrangedSubview(dl)
+        let track = NSView()
+        track.wantsLayer = true
+        track.layer?.backgroundColor = Theme.line.color.cgColor
+        track.layer?.cornerRadius = 2
+        track.translatesAutoresizingMaskIntoConstraints = false
+        let fill = NSView()
+        fill.wantsLayer = true
+        fill.layer?.backgroundColor = Theme.blue.color.cgColor
+        fill.layer?.cornerRadius = 2
+        fill.translatesAutoresizingMaskIntoConstraints = false
+        track.addSubview(fill)
+        let fillW = fill.widthAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            track.heightAnchor.constraint(equalToConstant: 4),
+            fill.leadingAnchor.constraint(equalTo: track.leadingAnchor),
+            fill.topAnchor.constraint(equalTo: track.topAnchor),
+            fill.bottomAnchor.constraint(equalTo: track.bottomAnchor),
+            fillW,
+        ])
+        x.fill = fill
+        x.fillW = fillW
+        row.addArrangedSubview(track)
+        let pct = NSTextField(labelWithString: "0%")
+        pct.font = .systemFont(ofSize: 11.5)
+        pct.translatesAutoresizingMaskIntoConstraints = false
+        pct.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        row.addArrangedSubview(pct)
+        x.pct = pct
+        let xb = NSButton(title: "×", target: self,
+                          action: #selector(xferBtn(_:)))
+        xb.bezelStyle = .rounded
+        xb.font = .systemFont(ofSize: 12)
+        xb.translatesAutoresizingMaskIntoConstraints = false
+        xb.tag = x.id
+        xb.setAccessibilityIdentifier("xfer-btn")
+        row.addArrangedSubview(xb)
+        x.xbtn = xb
+        x.row = row
+        xlist.addArrangedSubview(row)
+    }
+
+    private func xferByReq(_ req: UInt32, _ s: Session?) -> Xfer? {
+        xers.first { $0.state == .run && $0.req == req &&
+                   (s == nil || $0.sess === s) }
+    }
+
+    func updateRow(_ x: Xfer) {
+        var pct = x.total > 0 ? Double(x.done) / Double(x.total) * 100
+                            : (x.done > 0 ? 100 : 0)
+        if x.state == .done { pct = 100 }
+        pct = min(100, pct)
+        x.fillW?.constant = pct * 2.2     // track 220px
+        switch x.state {
+        case .run:
+            var t = "\(Int(pct))%"
+            if x.phase == 1 { t += " · " + L("上传") }
+            else if x.kind == .relay { t += " · " + L("下载") }
+            if x.total > 0 && x.ema > 0 && x.done < x.total {
+                let s = Int((Double(x.total - x.done)) / x.ema)
+                t += " · ~\(max(1, s))s"
+            }
+            t += " · " + SftpKit.fmtSpeed(x.ema)
+            x.pct?.stringValue = t
+        case .done:
+            let el = Date().timeIntervalSince(x.t0)
+            if el > 0.05 && x.acc > 0 {
+                x.pct?.stringValue = L("已完成") + " · "
+                    + SftpKit.fmtSpeed(Double(x.acc) / el)
+            } else {
+                x.pct?.stringValue = L("已完成")
+            }
+            if x.skipped { x.pct?.stringValue = L("已跳过") }
+            x.fill?.layer?.backgroundColor = Theme.green.color.cgColor
+        case .fail:
+            x.pct?.stringValue = L("失败") + ": "
+                + (x.err ?? L("未知错误"))
+            x.fill?.layer?.backgroundColor = Theme.red.color.cgColor
+        case .cancel:
+            x.pct?.stringValue = L("已取消")
+            x.fill?.layer?.backgroundColor = Theme.line.color.cgColor
+        }
+    }
+
+    private func xheadSync() {
+        var act = 0, term = 0
+        for x in xers { x.state == .run ? (act += 1) : (term += 1) }
+        xhead.stringValue = String(
+            format: L("传输队列 · %d 进行中"), act)
+        xclear.isHidden = term == 0
+    }
+
+    func cleanupTmp(_ x: Xfer) {
+        if let d = x.tmpDir { _ = LocalFs.rmrf(d) }
+        x.tmpDir = nil; x.tmpPath = nil
+    }
+
+    private func notifyXfer(_ x: Xfer, _ st: XState) {
+        let ok = st == .done
+        let kind = ok ? "ok" : st == .cancel ? "info" : "err"
+        let verb = ok ? L("传输完成")
+                 : st == .cancel ? L("传输已取消") : L("传输失败")
+        let t = "\(verb) · \(x.name)"
+        let b = "\(x.srcLabel) → \(x.dstLabel)"
+        NotifyCenter.shared.post(kind: kind, title: t, body: b,
+                                 tabIndex: sftpTabIndex)
+        if v_tabFocused() {
+            toast(t)
+        } else {
+            NotifyCenter.shared.system.post(
+                title: t, body: b, tabIndex: sftpTabIndex,
+                priorityHigh: !ok)
+        }
+    }
+    private var sftpTabIndex: Int? {
+        (window as? MainWindow)?.tabs.firstIndex { $0 === tab }
+    }
+    private func v_tabFocused() -> Bool {
+        guard let w = window as? MainWindow else { return false }
+        return w.selTab < w.tabs.count && w.tabs[w.selTab] === tab
+    }
+
+    func finishXfer(_ x: Xfer, _ st: XState, _ err: String?) {
+        x.state = st
+        x.req = 0
+        x.sess = nil
+        if let err { x.err = err }
+        if st != .run {
+            cleanupTmp(x)
+            if x.lcop != nil { x.lcop = nil }
+            x.xbtn?.isHidden = st != .fail
+            if st == .fail { x.xbtn?.title = L("重试") }
+            notifyXfer(x, st)
+        }
+        updateRow(x)
+        xheadSync()
+        if st == .done, let dp = x.dp, dp.state == .browse {
+            dp.refresh()
+        }
+    }
+
+    /// SFTP DONE/PROGRESS 分发（pane 事件泵调用）。
+    func xferDispatch(_ p: SftpPane, _ r: hb_sftp_result) {
+        guard let x = xferByReq(r.req, p.sess) else { return }
+        let now = Date()
+        if r.kind == HB_SFTP_R_PROGRESS {
+            let dd = r.done
+            x.acc += dd >= x.done ? dd - x.done : dd
+            x.done = dd
+            if x.emaT == nil { x.emaT = now; x.emaDone = dd }
+            else if dd > x.emaDone {
+                let dt = now.timeIntervalSince(x.emaT!)
+                if dt >= 0.25 {
+                    let inst = Double(dd - x.emaDone) / dt
+                    x.ema = x.ema > 0 ? x.ema * 0.6 + inst * 0.4 : inst
+                    x.emaT = now; x.emaDone = dd
+                }
+            }
+            x.total = r.total
+            updateRow(x)
+            return
+        }
+        // DONE
+        if x.kind == .relay && x.phase == 0 && r.status == HB_SFTP_OK {
+            x.phase = 1
+            x.done = 0; x.total = 0
+            guard let ds = x.dp?.sess else {
+                finishXfer(x, .fail, L("连接已断开")); return
+            }
+            let t = SftpKit.pathJoin(x.dstDir, x.name)
+            x.req = hb_sftp_upload(ds.sess, x.tmpPath!, t,
+                                   hb_sftp_conflict(x.policy))
+            x.sess = ds
+            updateRow(x)
+            return
+        }
+        if r.skipped { x.skipped = true }
+        if r.status == HB_SFTP_OK || r.skipped {
+            finishXfer(x, .done, nil)
+        } else if r.status == HB_SFTP_ERR_CANCELLED {
+            finishXfer(x, .cancel, nil)
+        } else {
+            finishXfer(x, .fail,
+                r.message.map { String(cString: $0) } ?? L("传输失败"))
+        }
+    }
+
+    /// session 断 → 其上所有 run xfer fail。
+    func xferFailSession(_ s: Session?, _ why: String) {
+        guard let s else { return }
+        for x in xers where x.state == .run {
+            if x.sess === s || x.sp?.sess === s || x.dp?.sess === s {
+                finishXfer(x, .fail, why)
+            }
+        }
+    }
+
+    // ---------------- local copy ----------------
+    private func startLocal(_ x: Xfer) {
+        let dst = SftpKit.pathJoin(x.dstDir, x.name)
+        let op = LocalCopy(src: x.srcPath, dst: dst, policy: x.policy)
+        x.lcop = op
+        x.tick = Timer.scheduledTimer(withTimeInterval: 0.12,
+                                      repeats: true) { [weak self, weak x] _ in
+            guard let self, let x, x.state == .run else { return }
+            self.lcTick(x)
+        }
+        op.run { [weak self, weak x] in
+            guard let self, let x else { return }
+            x.tick?.invalidate(); x.tick = nil
+            if x.state != .run || op.cancelled {
+                op.cleanupPartial()
+            }
+            if x.state != .run {
+                // 已被外部置位（取消/断连）
+            } else if let e = op.err {
+                self.finishXfer(x, .fail, e)
+            } else if op.cancelled {
+                self.finishXfer(x, .cancel, nil)
+            } else if op.skipped {
+                x.skipped = true
+                self.finishXfer(x, .done, nil)
+            } else {
+                self.finishXfer(x, .done, nil)
+            }
+        }
+    }
+    private func lcTick(_ x: Xfer) {
+        guard let o = x.lcop else { return }
+        let now = Date()
+        x.acc += o.done >= x.done ? o.done - x.done : o.done
+        x.done = o.done
+        if x.emaT == nil { x.emaT = now; x.emaDone = o.done }
+        else if o.done > x.emaDone {
+            let dt = now.timeIntervalSince(x.emaT!)
+            if dt >= 0.25 {
+                let inst = Double(o.done - x.emaDone) / dt
+                x.ema = x.ema > 0 ? x.ema * 0.6 + inst * 0.4 : inst
+                x.emaT = now; x.emaDone = o.done
+            }
+        }
+        x.total = o.total
+        updateRow(x)
+    }
+
+    // ---------------- queue buttons ----------------
+    @objc private func xferBtn(_ b: NSButton) {
+        guard let x = xers.first(where: { $0.id == b.tag }) else { return }
+        if x.state == .run {
+            if x.req != 0, let s = x.sess {
+                hb_sftp_cancel(s.sess, x.req)
+            }
+            if let o = x.lcop { o.cancel() }
+            if x.kind != .local && !(x.req != 0 && x.sess != nil) {
+                finishXfer(x, .cancel, nil)
+            }
+            if x.kind == .local { finishXfer(x, .cancel, nil) }
+            return
+        }
+        if x.state == .fail {
+            // 重试：同 policy 重入队；移除旧行
+            let it = FsEntry(name: x.name, path: x.srcPath,
+                             size: 0, mtime: 0, mode: 0,
+                             isDir: false, isLink: false)
+            let sp = x.sp, dp = x.dp
+            xers.removeAll { $0 === x }
+            x.row?.removeFromSuperview()
+            xheadSync()
+            guard let dp else { return }
+            confQueue.append(ConfCtx(todo: [it], policyAll: x.policy,
+                                     sp: sp, dp: dp))
+            confNext()
+        }
+    }
+    @objc private func clearDone() {
+        for x in xers where x.state == .done || x.state == .cancel {
+            x.row?.removeFromSuperview()
+        }
+        xers.removeAll { $0.state == .done || $0.state == .cancel }
+        xheadSync()
+    }
+
+    // ---------------- 断开/释放 ----------------
+    /// dev：取消（run）/重试（fail）指定 xfer —— 与 xferBtn 同路径。
+    func devXfer(_ id: Int) {
+        let b = NSButton()
+        b.tag = id
+        xferBtn(b)
+    }
+    func devClearDone() { clearDone() }
+
+    func disconnectAll() {
+        for p in panes {
+            if p.ctl != nil || p.sess != nil {
+                p.teardownConn()
+                p.setState(.select)
+            }
+        }
+    }
+    /// dispose 对齐：未完成删除立即执行；RUN xfer 取消。
+    func teardown() {
+        for p in panes { p.teardownConn() }
+        for x in xers where x.state == .run {
+            if x.req != 0, let s = x.sess { hb_sftp_cancel(s.sess, x.req) }
+            x.lcop?.cancel()
+        }
+        xers.removeAll()
+        cleanOpenCache()
+    }
+
+    // ============================ chmod sheet ============================
+    /// linux act_chmod：3×3 rwx 矩阵 + 八进制，双向同步。
+    func chmodSheet(paths: [String], initial: UInt32, pane: SftpPane) {
+        let a = NSAlert()
+        a.messageText = L("修改权限")
+        let sy = ChmodSync()
+        let grid = NSGridView()
+        grid.rowSpacing = 6
+        grid.columnSpacing = 14
+        let heads = [L("所有者"), L("组"), L("其他")]
+        grid.addRow(with: [NSTextField(labelWithString: "")] +
+            heads.map { h -> NSTextField in
+                let l = NSTextField(labelWithString: h)
+                l.textColor = .secondaryLabelColor
+                return l
+            })
+        let colNames = ["r", "w", "x"]
+        for row in 0..<3 {
+            var cells: [NSView] = []
+            let l = NSTextField(labelWithString: colNames[row])
+            l.textColor = .secondaryLabelColor
+            cells.append(l)
+            for _ in 0..<3 {
+                let cb = NSButton(checkboxWithTitle: "",
+                                  target: nil, action: nil)
+                cb.setAccessibilityIdentifier("chmod-cb")
+                cb.target = sy
+                cb.action = #selector(ChmodSync.cbToggled)
+                sy.cbs.append(cb)
+                cells.append(cb)
+            }
+            grid.addRow(with: cells)
+        }
+        let oct = NSTextField(frame: NSRect(x: 0, y: 0,
+                                            width: 80, height: 22))
+        oct.placeholderString = L("八进制，如 755")
+        oct.setAccessibilityIdentifier("chmod-oct")
+        oct.target = sy
+        oct.action = #selector(ChmodSync.octChanged(_:))
+        sy.oct = oct
+        let box = NSStackView()
+        box.orientation = .vertical
+        box.spacing = 10
+        box.edgeInsets = NSEdgeInsets(top: 4, left: 10,
+                                      bottom: 4, right: 10)
+        box.addArrangedSubview(grid)
+        box.addArrangedSubview(oct)
+        a.accessoryView = box
+        a.addButton(withTitle: L("应用"))
+        a.addButton(withTitle: L("取消"))
+        sy.toMatrix(initial)
+        DialogRegistry.shared.present(alert: a, kind: "sftp-chmod",
+                                      in: window) { ok in
+            _ = sy   // sheet 期间保活
+            guard ok else { return }
+            let m = sy.fromMatrix()
+            for p in paths {
+                pane.fs?.chmod(p, mode: m) { [weak pane] r in
+                    pane?.opRefresh(r)
+                }
+            }
+        }
+    }
+
+
+    // ---------------- dev state ----------------
+    var devState: String {
+        var s = ""
+        for (i, p) in panes.enumerated() {
+            s += "pane\(i): \(p.devState)\n"
+        }
+        s += "xers=\(xers.count)["
+        s += xers.map {
+            "\($0.id):\($0.name):\($0.state):\($0.done)/\($0.total)"
+            + ($0.err.map { ":err=\($0)" } ?? "")
+        }.joined(separator: ",")
+        s += "]"
+        return s
+    }
+}
+extension hb_sftp_conflict {
+    init(_ v: Int32) {
+        self.init(rawValue: UInt32(bitPattern: v))
+    }
+}
+private let HB_SFTP_OVERWRITE_I = Int32(HB_SFTP_OVERWRITE.rawValue)
+extension XState: CustomStringConvertible {
+    var description: String {
+        switch self {
+        case .run: return "run"
+        case .done: return "done"
+        case .fail: return "fail"
+        case .cancel: return "cancel"
+        }
+    }
+}
+
+/// NSScrollView 的 document view 默认非翻转 → 内容吸底；
+/// 翻转栈顶排（linux GtkBox 自上而下同序）。
+private final class FlippedStack: NSStackView {
+    override var isFlipped: Bool { true }
+}
+
+/// chmod sheet 的矩阵↔八进制同步（linux ChmodCtx 等价）。
+private final class ChmodSync: NSObject {
+    var cbs: [NSButton] = []
+    weak var oct: NSTextField?
+    private var updating = false
+    func fromMatrix() -> UInt32 {
+        var m: UInt32 = 0
+        for col in 0..<3 { for row in 0..<3 {
+            if cbs[row * 3 + col].state == .on {
+                m |= 1 << (8 - (col * 3 + row))
+            }
+        } }
+        return m
+    }
+    func toMatrix(_ m: UInt32) {
+        updating = true
+        for col in 0..<3 { for row in 0..<3 {
+            cbs[row * 3 + col].state =
+                (m & (1 << (8 - (col * 3 + row)))) != 0 ? .on : .off
+        } }
+        updating = false
+        oct?.stringValue = String(m, radix: 8)
+    }
+    @objc func cbToggled() {
+        guard !updating else { return }
+        oct?.stringValue = String(fromMatrix(), radix: 8)
+    }
+    @objc func octChanged(_ tf: NSTextField) {
+        guard !updating else { return }
+        var v: UInt64 = 0
+        var ok = !tf.stringValue.isEmpty
+        for ch in tf.stringValue {
+            guard let d = Int(String(ch)), d < 8 else { ok = false; break }
+            v = v * 8 + UInt64(d)
+        }
+        if ok && v <= 0o777 { toMatrix(UInt32(v)) }
+    }
+}

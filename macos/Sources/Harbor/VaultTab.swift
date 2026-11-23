@@ -74,6 +74,9 @@ final class VaultTab: TermTab {
             p.onQuick = { [weak self] s in
                 self?.onSSH?(nil, s, s)
             }
+            p.onSftp = { [weak self] id in
+                (self?.view.window as? MainWindow)?.openSftp(hostId: id)
+            }
             area.addSubview(p)
             hostsPage = p
             return
@@ -137,6 +140,34 @@ final class VaultTab: TermTab {
     var knownRef: KnownPage? { knownPage }
     var logsRef: LogsPage? { logsPage }
     /// dev hook 找页面（page(HostsPage.self) 走 contentCard 子树）
+    /// SFTP 连接失败卡“编辑主机”入口：临时 HostStore 取 rec → 同
+    /// hosts 页的编辑 sheet（HostForm + apply 写回同一对象）。
+    func editHostById(_ id: String) {
+        guard let w = view.window else { return }
+        let store = HostStore()
+        store.reload()
+        guard let h = store.hosts.first(where: { $0.id == id }) else {
+            return
+        }
+        let sheet = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 640),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        sheet.title = L("编辑主机")
+        sheet.isReleasedWhenClosed = false
+        let form = HostForm(frame: sheet.contentView!.bounds)
+        form.fill(h)
+        form.onSave = { rec, pw in
+            let o = store.apply(rec)
+            if let pw {
+                Vault.shared.setSecret(hb_obj_id(o).str, "password", pw)
+            }
+            w.endSheet(sheet)
+        }
+        form.onCancel = { w.endSheet(sheet) }
+        sheet.contentView = form
+        w.beginSheet(sheet) { _ in }
+    }
+
     func page<T: NSView>(_ t: T.Type) -> T? {
         func walk(_ v: NSView) -> T? {
             for s in v.subviews {
@@ -149,22 +180,36 @@ final class VaultTab: TermTab {
     }
 }
 
-/// 固定的 SFTP 占位标签页（pinned，M3 前占位）。
+/// 固定的 SFTP 标签页（pinned）：SftpView 双栏浏览器。
 final class SFTPTab: TermTab {
+    let sftp: SftpView
     init() {
-        super.init(title: "SFTP", view: NSView())
+        let v = SftpView()
+        sftp = v
+        super.init(title: "SFTP", view: v)
         closable = false
         iconName = "folder"
-        let l = NSTextField(labelWithString: L("SFTP（开发中）"))
-        l.font = .systemFont(ofSize: 14)
-        l.textColor = .secondaryLabelColor
-        l.translatesAutoresizingMaskIntoConstraints = false
-        view.wantsLayer = true
-        view.layer?.backgroundColor = Theme.page.color.cgColor
-        view.addSubview(l)
-        NSLayoutConstraint.activate([
-            l.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            l.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-        ])
+        sftp.tab = self
+        sftp.hostEditor = { [weak self] id in
+            (self?.view.window as? MainWindow)?.editHostById(id)
+        }
     }
+    /// linux hb_sftp_view_open_host：左 Local，右该 host。
+    func openHost(_ id: String) {
+        sftp.panes[0].pick(nil)
+        sftp.panes[1].pick(id)
+    }
+    /// 远端 pane 的 ConnCtl 集合（日志行收尾/断开用）
+    var devState: String { sftp.devState }
+    override var running: Bool {
+        panesAlive() || sftp.xers.contains { $0.state == .run }
+    }
+    private func panesAlive() -> Bool {
+        sftp.panes.contains { $0.sess != nil || $0.ctl != nil }
+    }
+    override func kill() {
+        sftp.teardown()   // 各 pane ConnCtl cancel+join → 日志行收尾
+        super.kill()
+    }
+    deinit { sftp.teardown() }
 }

@@ -227,6 +227,17 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     }
 
     /// 由主机页/快速连接起 SSH tab。
+    /// 主机 ctx/抽屉 SFTP（linux hb_host_action_sftp）：
+    /// 左 Local + 右 host，并切到 SFTP tab。
+    func openSftp(hostId: String) {
+        sftpTab.openHost(hostId)
+        select(1)
+    }
+    /// SFTP 连接失败卡的“编辑主机”：复用 hosts 页的编辑表单。
+    func editHostById(_ id: String) {
+        vaultTab.editHostById(id)
+    }
+
     func openSSH(hostId: String?, quickTarget: String?, title: String) {
         let leaf = SSHTab(hostId: hostId, quickTarget: quickTarget,
                           window: self, title: title)

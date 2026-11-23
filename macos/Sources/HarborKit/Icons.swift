@@ -40,6 +40,11 @@ public enum Icons {
         "ubuntu": "<circle cx=\"12\" cy=\"12\" r=\"8.2\" stroke-dasharray=\"11.5 5.7\"/><circle cx=\"12\" cy=\"3.8\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"4.9\" cy=\"16.1\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"19.1\" cy=\"16.1\" r=\"1.9\" fill=\"currentColor\" stroke=\"none\"/>",
         "asterisk": "<path d=\"M12 4.5v15M5.5 8.25l13 7.5M18.5 8.25l-13 7.5\"/>",
         "win": "<path d=\"M4 4h7.4v7.4H4zM12.6 4H20v7.4h-7.4zM4 12.6h7.4V20H4zM12.6 12.6H20V20h-7.4z\" fill=\"currentColor\" stroke=\"none\"/>",
+        "file": "<path d=\"M6 3h7.5L19 8.5V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z\"/><path d=\"M13.5 3v5.5H19\"/>",
+        "link": "<path d=\"M9.5 14.5 14.5 9.5\"/><path d=\"M7 17.5 4.5 20a2.5 2.5 0 0 1-3.5-3.5l4.5-4.5a2.5 2.5 0 0 1 3.5 3.5\"/><path d=\"M17 6.5 19.5 4a2.5 2.5 0 0 1 3.5 3.5l-4.5 4.5a2.5 2.5 0 0 1-3.5-3.5\"/>",
+        "back": "<path d=\"m15 6-6 6 6 6\"/>",
+        "up": "<path d=\"M12 19V5M5 12l7-7 7 7\"/>",
+        "down": "<path d=\"M12 5v14M5 12l7 7 7-7\"/>",
         "gear": "<circle cx=\"12\" cy=\"12\" r=\"3.2\"/><path d=\"M19.4 13.5a7.5 7.5 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-2.6-1.5L14 2.5h-4L9.6 5a7.6 7.6 0 0 0-2.6 1.5l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 2.6 1.5L10 21.5h4l.4-2.5a7.6 7.6 0 0 0 2.6-1.5l2.4 1 2-3.4z\"/>",
     ]
     public static func icon(_ name: String) -> IconPath {

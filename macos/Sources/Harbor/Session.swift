@@ -34,7 +34,11 @@ final class Session {
     /// core 在返回前深拷贝，opts 内的借用指针随后即可擦除。
     init(sshOpts o: UnsafeMutablePointer<hb_ssh_opts>,
          rows: Int32, cols: Int32, scrollback: Int32) {
-        sess = hb_session_new_ssh(o, rows, cols, scrollback)
+        if o.pointee.mode == HB_SSH_MODE_SFTP {
+            sess = hb_session_new_sftp(o)
+        } else {
+            sess = hb_session_new_ssh(o, rows, cols, scrollback)
+        }
         attachFd()
     }
 
