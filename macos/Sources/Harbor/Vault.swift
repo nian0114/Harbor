@@ -116,10 +116,11 @@ final class Vault {
             #if DEBUG
             let fileMode = ProcessInfo.processInfo
                 .environment["HARBOR_DEK_FILE"] == "1"
+            let (st, kd) = fileMode ? (errSecItemNotFound, nil) : keychainRead()
             #else
             let fileMode = false
+            let (st, kd) = keychainRead()
             #endif
-            let (st, kd) = fileMode ? (errSecItemNotFound, nil) : keychainRead()
             let action = DEKPlan.decide(
                 chainStatus: st, chainHasKey: kd != nil,
                 fileKey: fileDEK() != nil,
