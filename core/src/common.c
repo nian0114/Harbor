@@ -19,6 +19,25 @@ const char *hb__tr(const char *s)
 }
 #endif
 
+/* 无 NLS 路径（macOS/测试）的翻译钩子：不可变表指针原子读写。 */
+#include <stdatomic.h>
+static _Atomic(const char *(*)(const char *)) hb_user_tr;
+
+const char *hb__tr_user(const char *s)
+{
+    const char *(*f)(const char *) =
+        atomic_load_explicit(&hb_user_tr, memory_order_acquire);
+    const char *t;
+    if (!f || !(t = f(s)))
+        return s;
+    return t;
+}
+
+void hb_set_translator(const char *(*fn)(const char *msgid))
+{
+    atomic_store_explicit(&hb_user_tr, fn, memory_order_release);
+}
+
 const char *hb_strerror(hb_err e)
 {
     switch (e) {

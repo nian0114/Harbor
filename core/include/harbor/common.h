@@ -33,9 +33,16 @@ const char *hb_strerror(hb_err e);
 const char *hb__tr(const char *s);
 # define HB_TR(s)  hb__tr(s)
 #else
-# define HB_TR(s)  (s)
+const char *hb__tr_user(const char *s);
+# define HB_TR(s)  hb__tr_user(s)
 #endif
 #define HB_N_(s)   (s)
+
+/* 无 NLS 构建（macOS）下的翻译表钩子：fn(msgid) → 译串，返回 NULL/
+ * 原串视为未翻译。平台在启动时装一张不可变只读表；会被会话线程
+ * 并发调用，实现必须无锁。未设置时 HB_TR 原样返回 msgid。
+ * ENABLE_NLS 构建（Linux）不用此钩子，行为不变。 */
+void hb_set_translator(const char *(*fn)(const char *msgid));
 
 /* idempotent；初始化 libsodium 等全局状态。所有会用到随机数/加密的入口都会自动调用。 */
 int hb_core_init(void);

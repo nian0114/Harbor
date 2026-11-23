@@ -91,3 +91,8 @@ test_backup = executable('test_backup', 'test_backup.c',
     dependencies: harbor_core_dep,
 )
 test('backup', test_backup, timeout: 120)
+
+test_common = executable('test_common', 'test_common.c',
+    dependencies: [harbor_core_dep, thread_dep],
+)
+test('common', test_common)
