@@ -18,6 +18,8 @@ ALLOWLIST = [
      'secret-prompt detection keyword, matched against terminal text'),
     ('linux/src/hb-settings-view.c', '"中文"',
      'language autonym, shown untranslated like "English"'),
+    ('core/src/ssh.c', '"密码"',
+     'kbi password-prompt detection keyword, matched against server text'),
 ]
 
 def scan(src):

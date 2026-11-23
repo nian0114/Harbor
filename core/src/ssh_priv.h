@@ -108,6 +108,8 @@ int  hb__ssh_resolve(hb_ssh *h, const char *host, int port,
 /* FORWARD 模式构造：eng 由 pf.c 预创建（local/dynamic 监听器已绑定），
  * 本函数无条件接管所有权（含失败路径）。mode 由调用方设进 opts。 */
 hb_session *hb__ssh_new_forward(const hb_ssh_opts *opts, void *pf_eng);
+/* kbi prompt 是否像密码询问（test_ssh.c 单测）。 */
+int  hb__ssh_kbi_is_pw_prompt(const char *s, size_t len);
 
 /* ---- ssh.c 需要的 sftp.c 导出 ---- */
 void *hb__sftp_eng_new(void);

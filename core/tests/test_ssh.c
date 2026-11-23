@@ -5,6 +5,8 @@
 
 #include "test.h"
 
+#include "ssh_priv.h"          /* hb__ssh_kbi_is_pw_prompt 直接单测 */
+
 #include "harbor/ssh.h"
 #include "harbor/keys.h"
 #include "harbor/vt.h"
@@ -961,6 +963,41 @@ static void test_password_kbi_fallback(void)
     waitpid(pw, NULL, 0);
 }
 
+/* kbi prompt 分类器：密码类 prompt 命中（首轮可静默填已知密码），
+ * OTP 等非密码类不命中（必须抛给用户，防把密码当 OTP 送出去）。 */
+static void test_kbi_pw_prompt(void)
+{
+    static const char *const yes[] = {
+        "Password:", "password:", "PASSWORD:",
+        "nian@127.0.0.1's password: ",
+        "Password", "Enter passphrase for key:",
+        "Passwort:", "Mot de passe :", "Contraseña:",
+        "Senha:", "Wachtwoord:", "Hasło:",
+        "密码:", "пароль:", "パスワード:",
+    };
+    static const char *const no[] = {
+        "Verification code:", "Passcode or option (1-3):",
+        "OTP:", "Enter code:", "TOTP:", "PIN:",
+        "", "Pass", "pass", "ypass", "assword",
+        "Challenge:", "Response:",
+    };
+    size_t i;
+    for (i = 0; i < sizeof yes / sizeof yes[0]; i++) {
+        if (!hb__ssh_kbi_is_pw_prompt(yes[i], strlen(yes[i])))
+            fprintf(stderr, "missed pw prompt: %s\n", yes[i]);
+        CHECK(hb__ssh_kbi_is_pw_prompt(yes[i], strlen(yes[i])));
+    }
+    for (i = 0; i < sizeof no / sizeof no[0]; i++) {
+        if (hb__ssh_kbi_is_pw_prompt(no[i], strlen(no[i])))
+            fprintf(stderr, "non-pw prompt hit: %s\n", no[i]);
+        CHECK(!hb__ssh_kbi_is_pw_prompt(no[i], strlen(no[i])));
+    }
+    CHECK(!hb__ssh_kbi_is_pw_prompt(NULL, 5));
+    /* 非 NUL 结尾也安全（len 截断在词尾前） */
+    CHECK(!hb__ssh_kbi_is_pw_prompt("Passwo", 6));
+    CHECK(hb__ssh_kbi_is_pw_prompt("Passw ord? no. password yes", 24));
+}
+
 /* 7. 关闭端口 → REFUSED；不存在域名 → RESOLVE */
 static void test_refused_resolve(void)
 {
@@ -1544,6 +1581,7 @@ int main(void)
     test_password_retry();
     test_password_cancel();
     test_password_kbi_fallback();
+    test_kbi_pw_prompt();
     test_refused_resolve();
     test_proxyjump();
     test_jump_bulk();

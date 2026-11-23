@@ -935,9 +935,57 @@ typedef struct {
     int     cancelled;     /* 用户在提示上取消 */
 } kbi_ctx;
 
+/* prompt 是否像"密码询问"：子串匹配（ASCII 部分大小写不敏感，
+ * 多字节词按字节精确匹配）。覆盖 OpenSSH/PAM 常见文案；OTP 类
+ * （"Verification code:"、"Passcode"）刻意不在表内——那种 prompt
+ * 首轮也要抛给用户，不能把密码当 OTP 送出去白烧一次尝试。 */
+static const char *const kbi_pw_words[] = {
+    "password", "passphrase",
+    "passwort",            /* de */
+    "mot de passe",        /* fr */
+    "contraseña",          /* es */
+    "senha",               /* pt */
+    "wachtwoord",          /* nl */
+    "hasło",               /* pl */
+    "密码",
+    "пароль",            /* ru */
+    "パスワード",           /* ja */
+};
+
+static int contains_ci(const char *hay, size_t hlen, const char *needle)
+{
+    size_t nlen = strlen(needle), i, j;
+    if (nlen > hlen)
+        return 0;
+    for (i = 0; i + nlen <= hlen; i++) {
+        for (j = 0; j < nlen; j++) {
+            unsigned char a = (unsigned char)hay[i + j];
+            unsigned char b = (unsigned char)needle[j];
+            if (a >= 'A' && a <= 'Z') a += 32;
+            if (b >= 'A' && b <= 'Z') b += 32;
+            if (a != b) break;
+        }
+        if (j == nlen)
+            return 1;
+    }
+    return 0;
+}
+
+int hb__ssh_kbi_is_pw_prompt(const char *s, size_t len)
+{
+    size_t i;
+    if (!s || !len)
+        return 0;
+    for (i = 0; i < sizeof kbi_pw_words / sizeof kbi_pw_words[0]; i++)
+        if (contains_ci(s, len, kbi_pw_words[i]))
+            return 1;
+    return 0;
+}
+
 /* keyboard-interactive 回调：
  * - 零 prompt 轮 → 不答（用于探测"服务器只挂名不真问"）；
- * - 第一个 prompt 轮且已知密码 → echo-off 的项静默填密码；
+ * - 第一个 prompt 轮且已知密码 → echo-off 的项若都长得像密码询问，
+ *   用密码静默应答；出现 OTP 等非密码 prompt 则照常抛给用户；
  * - 其余 → 把服务器的 prompt 原文（instruction 非空则作前缀）抛给用户。 */
 static void kbi_cb(const char *name, int name_len,
                    const char *instruction, int instruction_len,
@@ -954,14 +1002,23 @@ static void kbi_cb(const char *name, int name_len,
         return;
     kx->prompted = 1;
     if (kx->rounds == 0 && kx->pw) {
-        pw = kx->pw;
-        for (i = 0; i < num_prompts; i++) {
-            responses[i].text = strdup(prompts[i].echo ? "" : pw);
-            responses[i].length =
-                (unsigned int)strlen(responses[i].text);
+        int all_pw = 1;
+        for (i = 0; i < num_prompts; i++)
+            if (!prompts[i].echo &&
+                !hb__ssh_kbi_is_pw_prompt(prompts[i].text,
+                                          prompts[i].length))
+                all_pw = 0;
+        if (all_pw) {
+            pw = kx->pw;
+            for (i = 0; i < num_prompts; i++) {
+                responses[i].text = strdup(prompts[i].echo ? "" : pw);
+                responses[i].length =
+                    (unsigned int)strlen(responses[i].text);
+            }
+            kx->rounds++;
+            return;
         }
-        kx->rounds++;
-        return;
+        /* 首轮就有 OTP 等非密码 prompt：落到下面按原文问用户。 */
     }
     if (!kx->cancelled && *kx->tries < 3) {
         char msg[512];

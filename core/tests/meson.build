@@ -25,6 +25,7 @@ test_session = executable('test_session', 'test_session.c',
 test('session', test_session)
 
 test_ssh = executable('test_ssh', 'test_ssh.c',
+    include_directories: include_directories('../src'),
     dependencies: harbor_core_dep,
 )
 test('ssh', test_ssh, timeout: 120)  # macOS 起 sshd fixture 较慢 + 密码重试多轮
