@@ -30,6 +30,8 @@ ALLOWLIST = [
      'expected localized output of FwdKit.bindText (remote)'),
     ('macos/Tests/HarborTests/FwdKitTests.swift', '2 连接',
      'expected localized output of FwdKit.trafficText'),
+    ('macos/Tests/HarborTests/SyncKitTests.swift', '"ＡＢＣ"',
+     'fullwidth input data for the NFKC normalisation test'),
 ]
 
 def scan(src):
