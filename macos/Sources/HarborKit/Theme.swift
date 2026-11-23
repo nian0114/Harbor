@@ -60,6 +60,12 @@ public struct Theme {
     public static let bluePillFg   = RGBA(0x2b6cd4)
     public static let greenPillBg  = RGBA(0xe6f6ee)
     public static let greenPillFg  = RGBA(0x1d7a4f)
+    public static let pillErrBg    = RGBA(0xfdebec)
+    public static let pillErrFg    = RGBA(0xb3373b)
+    public static let pillRunBg    = RGBA(0xe8f1fd)
+    public static let pillRunFg    = RGBA(0x2f66c4)
+    public static let pillWaitBg   = RGBA(0xfdf3e3)
+    public static let pillWaitFg   = RGBA(0xb4761a)
     // -- tab strip / 状态点 --
     public static let dotOk        = RGBA(0x2ecc71)
     public static let dotErr       = RGBA(0xff5f57)

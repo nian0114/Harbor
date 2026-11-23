@@ -170,12 +170,24 @@ final class LogsPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         }
         if cid == "result" {
             let (txt, cls) = LogFormat.result(e.result, durationS: e.dur)
+            // linux pill：居中、圆角、着色文字 + 淡底
+            let holder = NSView()
             let pill = NSTextField(labelWithString: " " + txt + " ")
-            pill.font = .systemFont(ofSize: 10.5)
+            pill.font = .systemFont(ofSize: 10.5, weight: .medium)
+            pill.alignment = .center
             pill.wantsLayer = true
-            pill.layer?.cornerRadius = 4
-            pill.layer?.backgroundColor = pillColor(cls).cgColor
-            return pill
+            pill.layer?.cornerRadius = 8
+            let (bg, fg) = pillColors(cls)
+            pill.layer?.backgroundColor = bg.cgColor
+            pill.textColor = fg
+            pill.translatesAutoresizingMaskIntoConstraints = false
+            holder.addSubview(pill)
+            NSLayoutConstraint.activate([
+                pill.centerXAnchor.constraint(equalTo: holder.centerXAnchor),
+                pill.centerYAnchor.constraint(equalTo: holder.centerYAnchor),
+                pill.heightAnchor.constraint(equalToConstant: 17),
+            ])
+            return holder
         }
         let l = NSTextField(labelWithString: "")
         l.lineBreakMode = .byTruncatingTail
@@ -195,12 +207,13 @@ final class LogsPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         }
         return l
     }
-    private func pillColor(_ cls: String) -> NSColor {
+    private func pillColors(_ cls: String) -> (NSColor, NSColor) {
         switch cls {
-        case "on":  return Theme.dotOk.color.withAlphaComponent(0.25)
-        case "err": return Theme.dotErr.color.withAlphaComponent(0.25)
-        case "off": return Theme.termDim.color.withAlphaComponent(0.18)
-        default:    return Theme.blue.color.withAlphaComponent(0.22)
+        case "on":   return (Theme.greenPillBg.color, Theme.greenPillFg.color)
+        case "err":  return (Theme.pillErrBg.color, Theme.pillErrFg.color)
+        case "wait": return (Theme.pillWaitBg.color, Theme.pillWaitFg.color)
+        case "off":  return (Theme.chip.color, .secondaryLabelColor)
+        default:     return (Theme.pillRunBg.color, Theme.pillRunFg.color)
         }
     }
 
