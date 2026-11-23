@@ -212,6 +212,10 @@ enum WatchCtl {
 
 // ---- 命中路由（对齐 hb_watch_route） ----
 enum WatchRoute {
+#if DEBUG
+    /// dev 钩子：SSH 无 GUI 激活权，isKeyWindow 永远 false —— 用它强制 focused。
+    static var devForceFocused: Bool?
+#endif
     /// "HH:MM-HH:MM"（可跨零点；空=关）→ 当前处于免打扰窗口。
     static func inQuietWindow(_ spec: String?) -> Bool {
         guard let spec, !spec.isEmpty else { return false }
@@ -300,8 +304,13 @@ enum WatchRoute {
                              : (hit.ok ? "ok" : "err")
         leaf.watchBadge = dot
         leaf.onChange?()
+#if DEBUG
+        let focused = devForceFocused
+            ?? (win?.isKeyWindow == true && tabIdx == win?.selTab)
+#else
         let focused = win?.isKeyWindow == true &&
                       tabIdx == win?.selTab
+#endif
         if focused {
             // 正在看的 tab：4s 后清角标（对齐 linux dot_clear_cb）
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) {

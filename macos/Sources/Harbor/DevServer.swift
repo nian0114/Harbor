@@ -196,7 +196,79 @@ final class DevServer {
         case "host-group": return cmdHostGroup(arg)
         case "host-del": return cmdHostDel(arg)
         case "scroll-test": return cmdScrollTest()
+        // ---- M2a dev hooks（split/broadcast/focus 走 action 菜单 id） ----
+        case "pal-open":
+            win?.openPalette(); return "OK"
+        case "pal-type":
+            Palette.devType(arg); return "OK"
+        case "pal-items":
+            return Palette.devItems.enumerated().map {
+                "\($0)|\($1.kind)|\($1.title)|\($1.id)"
+            }.joined(separator: "\n")
+        case "pal-enter":
+            Palette.devExec(Int(arg) ?? Palette.devSel); return "OK"
+        case "pal-close":
+            Palette.closeCurrent(); return "OK"
+        case "pal-state":
+            return "open=\(Palette.isOpen) sel=\(Palette.devSel) " +
+                   "n=\(Palette.devItems.count)"
+        case "find-open":
+            win?.wsFind(); return "OK"
+        case "find-type":
+            selTab?.devFindSet(arg); return "OK"
+        case "find-next":
+            selTab?.devFindStep(1); return "OK"
+        case "find-prev":
+            selTab?.devFindStep(-1); return "OK"
+        case "find-close":
+            selTab?.closeFind(); return "OK"
+        case "find-count":
+            return selTab?.findCountText ?? "ERR no-tab"
+        case "ws-state":
+            return selWs?.devState ?? "ERR no-workspace"
+        case "ws-focus-pane":
+            return cmdWsFocusPane(arg)
+        case "notifs":
+            return NotifyCenter.shared.json
+        case "sysnotifs":
+            // M8 系统通知接缝的实际调用（focus-DND/quiet 验证用）
+            if let r = NotifyCenter.shared.system
+                as? RecordingSystemNotifier {
+                return "OK " + r.calls.joined(separator: " ;; ")
+            }
+            return "ERR"
+        case "notif-jump":
+            // 与 NotifRow.onClick 同路：item.tabIndex → select
+            guard let i = Int(arg), i >= 0,
+                  i < NotifyCenter.shared.items.count,
+                  let ti = NotifyCenter.shared.items[i].tabIndex,
+                  ti >= 0 else { return "ERR" }
+            win?.select(ti); return "OK \(ti)"
+        case "watch-badge":
+            if let w = selTab as? WsTab,
+               let g = w.badgeGlyph { return "badge=\(g.0)" }
+            return "badge=\(selTab?.watchBadge ?? "none")"
+        case "watch-test": return cmdWatchTest(arg)
+        case "watch-install":
+            // 本地 OSC133 集成安装；$HOME 由进程环境决定（测试可换临时 HOME）
+            let (ok, err) = WatchInstaller.installLocal(arg)
+            return ok ? "OK \(WatchInstaller.rcPath(arg))"
+                      : "ERR \(err ?? "?")"
+        case "snippet-new": return cmdSnippetNew(arg)
         case "mode":   return cmdMode(arg)
+        case "activate":
+            // 置为 key window（focus-DND 等 isKeyWindow 语义测试用）
+            NSApp.activate(ignoringOtherApps: true)
+            win?.makeKeyAndOrderFront(nil)
+            return "OK key=\(win?.isKeyWindow == true) active=\(NSApp.isActive) sel=\(win?.selTab ?? -1)"
+        case "force-focus":
+            // SSH 驱动不出真实 key window —— 强制 route 的 focused 判定
+            switch arg {
+            case "on":  WatchRoute.devForceFocused = true
+            case "off": WatchRoute.devForceFocused = false
+            default:    WatchRoute.devForceFocused = nil
+            }
+            return "OK focus=\(WatchRoute.devForceFocused.map { $0 ? "on" : "off" } ?? "auto")"
         case "quit":     NSApp.terminate(nil); return "OK"
         default: return "ERR unknown"
         }
@@ -273,8 +345,9 @@ final class DevServer {
         return "OK"
     }
     private func cmdType(_ arg: String) -> String {
-        guard let t = win?.tabs[win?.selTab ?? 0].session else { return "ERR" }
         guard let data = Data(base64Encoded: arg) else { return "ERR b64" }
+        if let ws = selWs { ws.routeWrite(data); return "OK" }
+        guard let t = win?.tabs[win?.selTab ?? 0].session else { return "ERR" }
         data.withUnsafeBytes { ptr in
             hb_session_write(t.sess, ptr.baseAddress!
                 .assumingMemoryBound(to: CChar.self), data.count)
@@ -283,7 +356,6 @@ final class DevServer {
     }
     private func cmdKey(_ arg: String) -> String {
         // "ctrl+c" | "enter" | "f1" | "up" …
-        guard let t = win?.tabs[win?.selTab ?? 0].session else { return "ERR" }
         var mods: Int32 = 0
         var name = arg.lowercased()
         for (k, m) in [("ctrl+", KeyMap.HB_MOD_CTRL),
@@ -301,24 +373,43 @@ final class DevServer {
             "pageup": KeyMap.HB_KEY_PAGEUP, "pagedown": KeyMap.HB_KEY_PAGEDOWN,
             "del": KeyMap.HB_KEY_DEL,
         ]
+        let ws = selWs
+        func write(_ sess: OpaquePointer?, _ data: Data) {
+            data.withUnsafeBytes { ptr in
+                if let ws { ws.routeWrite(data) }
+                else if let sess {
+                    hb_session_write(sess, ptr.baseAddress!
+                        .assumingMemoryBound(to: CChar.self), data.count)
+                }
+            }
+        }
+        let sess = win?.tabs[win?.selTab ?? 0].session?.sess
         if let kk = named[name] {
-            hb_session_key(t.sess, hb_key(rawValue: UInt32(kk)), mods); return "OK"
+            if let ws { ws.routeKey(kk, mods) }
+            else if let sess {
+                hb_session_key(sess, hb_key(rawValue: UInt32(kk)), mods) }
+            else { return "ERR" }
+            return "OK"
         }
         if name.hasPrefix("f"), let n = Int32(name.dropFirst()),
            n >= 1 && n <= 12 {
-            hb_session_key(t.sess, hb_key(rawValue: UInt32(KeyMap.fkey(n))), mods)
+            if let ws { ws.routeKey(KeyMap.fkey(n), mods) }
+            else if let sess {
+                hb_session_key(sess, hb_key(rawValue: UInt32(KeyMap.fkey(n))),
+                               mods) }
+            else { return "ERR" }
             return "OK"
         }
         if let ch = name.first, name.count == 1 {
             if mods & KeyMap.HB_MOD_CTRL != 0, let a = ch.asciiValue {
                 // 真终端发的是裸控制字节，不是 CSI-u
                 var b = a & 0x1f
-                withUnsafeBytes(of: &b) {
-                    hb_session_write(t.sess, $0.baseAddress!
-                        .assumingMemoryBound(to: CChar.self), 1)
-                }
+                write(sess, Data(bytes: &b, count: 1))
             } else if let u = ch.unicodeScalars.first {
-                hb_session_unichar(t.sess, u.value, mods)
+                if let ws { ws.routeUnichar(u.value, mods) }
+                else if let sess {
+                    hb_session_unichar(sess, u.value, mods) }
+                else { return "ERR" }
             }
             return "OK"
         }
@@ -668,6 +759,65 @@ final class DevServer {
         return p.devDelete(id: arg) ? "OK" : "ERR no host"
     }
     /// `mode card|list`
+    /// 当前 tab 的 workspace（没有 → nil）
+    private var selWs: Workspace? {
+        guard let w = win, w.selTab >= 0, w.selTab < w.tabs.count
+        else { return nil }
+        return (w.tabs[w.selTab] as? WsTab)?.ws
+    }
+    /// 当前选中的 tab（find dev 命令对单 pane/工作区通用）
+    private var selTab: TermTab? {
+        guard let w = win, w.selTab >= 0, w.selTab < w.tabs.count
+        else { return nil }
+        return w.tabs[w.selTab]
+    }
+    private func cmdWsFocusPane(_ arg: String) -> String {
+        guard let ws = selWs, let i = Int(arg) else { return "ERR" }
+        ws.devFocusPane(i)
+        return "OK"
+    }
+    /// `watch-test <sample-b64> [signals]` — 规则测试器同路径（buildCfg + test_text）。
+    private func cmdWatchTest(_ arg: String) -> String {
+        let kv = arg.split(separator: " ")
+        guard let b64 = kv.first,
+              let d = Data(base64Encoded: String(b64)),
+              let s = String(data: d, encoding: .utf8)
+        else { return "ERR usage" }
+        let signals = kv.count > 1
+            ? UInt32(kv[1]) ?? WatchCtl.defaultSignals
+            : WatchCtl.defaultSignals
+        let hostId = win?.focusedHostId ?? selTab?.wsHostId
+        guard let cfg = WatchCtl.buildCfg(hostId: hostId,
+                                          signals: signals)
+        else { return "ERR cfg" }
+        defer { WatchCtl.freeCfg(cfg) }
+        var hit = hb_watch_hit()
+        guard hb_watch_test_text(cfg, s, &hit) else { return "MISS" }
+        defer { hb_watch_hit_clear(&hit) }
+        return "HIT rule=\(hit.rule?.str ?? "?") " +
+               "ok=\(hit.ok ? 1 : 0) code=\(hit.exit_code) " +
+               "line=\(hit.line?.str ?? "") " +
+               "cmd=\(hit.command?.str ?? "")"
+    }
+    /// `snippet-new <title-b64> <body-b64> [scope]` — 建 snippet 对象。
+    private func cmdSnippetNew(_ arg: String) -> String {
+        let kv = arg.split(separator: " ")
+        guard kv.count >= 2,
+              let td = Data(base64Encoded: String(kv[0])),
+              let bd = Data(base64Encoded: String(kv[1])),
+              let title = String(data: td, encoding: .utf8),
+              let body = String(data: bd, encoding: .utf8)
+        else { return "ERR usage" }
+        guard let o = hb_obj_new("snippet") else { return "ERR" }
+        let sid = hb_obj_id(o).str
+        hb_obj_set_str(o, "title", title)
+        hb_obj_set_str(o, "body", body)
+        hb_obj_set_str(o, "scope",
+                       kv.count > 2 ? String(kv[2]) : "global")
+        Vault.shared.put(o)
+        return "OK \(sid)"
+    }
+
     private func cmdMode(_ arg: String) -> String {
         guard let p = page(HostsPage.self) else { return "ERR no page" }
         p.devMode(list: arg.trimmingCharacters(in: .whitespaces) == "list")
