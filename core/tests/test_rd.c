@@ -244,6 +244,13 @@ static int fx_start(vnc_fx *fx, int w, int h)
     fx->scr = rfbGetScreen(&argc, argv, w, h, 8, 3, 4);
     if (!fx->scr)
         return -1;
+    /* pattern() 写的是 LE u32 0xFFRRGGBB（字节 B,G,R,A）。服务端默认
+     * serverFormat 的 rshift=0 会把它读成 R=byte0——与客户端请求格式
+     * 一致时碰巧原样透传，一旦客户端请求 BGRX（rshift=16）就会按错误
+     * 语义做通道转换。显式声明服务端真实布局。 */
+    fx->scr->serverFormat.redShift = 16;
+    fx->scr->serverFormat.greenShift = 8;
+    fx->scr->serverFormat.blueShift = 0;
     fx->scr->frameBuffer = malloc((size_t)w * h * 4);
     fx->scr->desktopName = "hb-rd-test";
     static char *pwlist[] = { "pw123", NULL };

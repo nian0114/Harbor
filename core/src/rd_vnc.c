@@ -304,6 +304,13 @@ void hb__rd_vnc_run(hb_rd *rd)
     rfbClientLog = vnc_log_quiet;
     rfbClientErr = vnc_log_quiet;
     rfbClient *cl = rfbGetClient(8, 3, 4);
+    /* rd.h 帧缓冲契约是 BGRX（内存字节 B,G,R,X）。rfbGetClient(8,3,4)
+     * 在 LE 主机上给 redShift=0 → 实际产出 RGBX（0.9.14/0.9.15 相同），
+     * 显式指定位移，让 SetPixelFormat 请求 BGRX，与 RDP 后端一致。
+     * 必须在 rfbInitClient 前设置——像素格式随初始化发给服务器。 */
+    cl->format.redShift = 16;
+    cl->format.greenShift = 8;
+    cl->format.blueShift = 0;
     cl->programName = "harbor";
     cl->serverHost = strdup(rd->o.host);
     cl->serverPort = rd->o.port;
