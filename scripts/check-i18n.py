@@ -26,6 +26,10 @@ ALLOWLIST = [
      'test data mirroring the vault snippet scope value'),
     ('macos/Tests/HarborTests/M2bVaultTests.swift', '"管理员"',
      'CSV test data verifying Chinese UTF-8 round-trips through core'),
+    ('macos/Tests/HarborTests/FwdKitTests.swift', '服务器 0.0.0.0:40001',
+     'expected localized output of FwdKit.bindText (remote)'),
+    ('macos/Tests/HarborTests/FwdKitTests.swift', '2 连接',
+     'expected localized output of FwdKit.trafficText'),
 ]
 
 def scan(src):
