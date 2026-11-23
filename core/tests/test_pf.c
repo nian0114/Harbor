@@ -1298,6 +1298,83 @@ out:
     hb_sshd_stop(&fx2);
 }
 
+
+/* 9c. 目标已死并发拒绝（dead-conn 回收回归）：N 个并发本地连接
+ * 各自应快速看到关闭（sshd 立即回 OPEN_FAILURE）。修复前 open 失败
+ * 的连接 dead 后仍停在 CS_OPENING，sweep 尾部按 st 跳过永不摘除，
+ * fd 不关、对端挂死直至整会话拆除。 */
+typedef struct {
+    int     port;
+    int64_t ms;
+} rjob;
+
+static void *refused_client(void *arg)
+{
+    rjob *j = arg;
+    int64_t t0 = now_ms();
+    int fd = tcp_conn(j->port);
+    if (fd >= 0) {
+        struct pollfd pf = { .fd = fd, .events = POLLIN, .revents = 0 };
+        char b;
+        /* 连接被 engine 关闭 → POLLIN + read EOF/错误 */
+        (void)poll(&pf, 1, 40000);
+        (void)read(fd, &b, 1);
+        close(fd);
+    }
+    j->ms = now_ms() - t0;
+    return NULL;
+}
+
+static void t_refused_flood(void)
+{
+    enum { N = 20 };
+    hb_pf_rule r;
+    hb_ssh_opts o;
+    drv d;
+    hb_session *s;
+    int bp = 0, i, dead;
+    rjob jobs[N];
+    pthread_t ths[N];
+    int64_t worst = 0;
+
+    dead = free_port();
+    drv_init(&d);
+    memset(&r, 0, sizeof r);
+    r.kind = HB_PF_LOCAL;
+    r.bind_addr = "127.0.0.1";
+    r.bind_port = 0;
+    r.dest_addr = "127.0.0.1";
+    r.dest_port = dead;
+    o = base_opts();
+    s = fwd_conn(&d, &o, &r, &bp);
+    CHECK(s != NULL);
+    CHECK(bp > 0);
+    if (!s || bp <= 0)
+        goto out;
+
+    for (i = 0; i < N; i++) {
+        jobs[i].port = bp;
+        jobs[i].ms = -1;
+        CHECK(pthread_create(&ths[i], NULL, refused_client,
+                             &jobs[i]) == 0);
+    }
+    for (i = 0; i < N; i++)
+        pthread_join(ths[i], NULL);
+    for (i = 0; i < N; i++) {
+        if (jobs[i].ms > worst)
+            worst = jobs[i].ms;
+        fprintf(stderr, "    refused[%d] %lldms\n", i,
+                (long long)jobs[i].ms);
+    }
+    /* 每个连接应 ≤3s 见到关闭（open 失败即时 conn_kill） */
+    for (i = 0; i < N; i++) {
+        CHECK(jobs[i].ms >= 0 && jobs[i].ms < 3000);
+    }
+out:
+    if (s)
+        hb_session_free(s);
+}
+
 static void t_disconnect(void)
 {
     srv es;
@@ -1527,6 +1604,8 @@ int main(void)
     printf("  t_idle_cpu_nosess done\n");
     t_disconnect_fin();      /* 优雅 FIN 断线（独立 fixture） */
     printf("  t_disconnect_fin done\n");
+    t_refused_flood();       /* 死目标并发拒绝（open 失败回收回归） */
+    printf("  t_refused_flood done\n");
     t_disconnect();          /* 杀掉 fixture sshd —— 必须最后跑 */
     printf("  t_disconnect done\n");
 

@@ -1388,9 +1388,11 @@ static int eng_sweep(pfeng *e)
         next = c->next;
         if (!c->dead)
             conn_step(e, c, &prog);
-        /* dead 且在飞 open 的连接留给 open_step 收；其余 dead/done 即摘 */
+        /* dead 且 open 仍在飞的连接留给 open_step 收；其余 dead/done 即摘。
+         * 判定用 e->opening 而非 st：open 失败后 st 仍停在 CS_OPENING，
+         * 若按 st 跳过会永不回收（fd 不关，对端挂死）。 */
         if (c->dead) {
-            if (c->st != CS_OPENING) {
+            if (c != e->opening) {
                 conn_remove(e, c);
                 prog++;
             }
