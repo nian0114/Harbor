@@ -8,7 +8,7 @@ import socket, sys
 sock, args = sys.argv[1], sys.argv[2:]
 import base64
 args = list(args)
-if args and args[0] in ("type", "ime-mark", "ime-commit"):
+if args and args[0] in ("type", "ime-mark", "ime-commit", "share-input"):
     payload = " ".join(args[1:]).replace("\\n", "\n").replace("\\t", "\t")
     args[1:] = [base64.b64encode(payload.encode()).decode()]
 line = " ".join(args) + "\n"

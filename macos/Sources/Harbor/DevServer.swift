@@ -462,6 +462,37 @@ final class DevServer {
         case "dev-words":                        // <24 words> → 恢复码网格
             win?.vaultTab.accountRef?.devWords(arg)
             return "OK"
+        /* ---- M7 共享 dev 钩子（对齐 linux app.share-*） ---- */
+        case "share-start":                      // <0|1> view|collab
+            return cmdShareStart(arg)
+        case "share-start-result":
+            return lastShareStart
+        case "share-stop":
+            return cmdShareStop()
+        case "share-mode":                       // <0|1>
+            return cmdShareMode(arg)
+        case "share-regen":
+            return cmdShareRegen()
+        case "share-kick":                       // <pid>
+            return cmdShareKick(arg)
+        case "share-info":
+            return cmdShareInfo()
+        case "share-list":
+            return cmdShareList()
+        case "share-list-result":
+            return lastShareList
+        case "share-join":                       // member <sid>|guest <link> <code>
+            return cmdShareJoin(arg)
+        case "share-join-result":
+            return lastShareJoin
+        case "share-input":                      // <text> → viewer peer_input
+            return cmdShareInput(arg)
+        case "share-screen":                     // <path> → viewer 屏文本
+            return cmdShareScreen(arg)
+        case "share-state":
+            return cmdShareState()
+        case "share-dialog":                     // 打开 owner 对话框
+            return cmdShareDialog()
         case "objcount":                         // <type> → 范围内对象数
             return "OK \(Vault.shared.list(arg).count)"
         case "mkobj":                            // type|k=v|k=v…（#i=int）
@@ -525,7 +556,8 @@ final class DevServer {
         catch { return "ERR write" }
         // 有 sheet/alert 也渲染出来（<path>.sheet.png）
         var extra = ""
-        if let sh = win?.attachedSheet, let cv = sh.contentView {
+        if let sh = win?.attachedSheet,
+           let cv = sh.contentView?.superview ?? sh.contentView {
             if let r2 = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) {
                 cv.cacheDisplay(in: cv.bounds, to: r2)
                 if let p2 = r2.representation(using: .png,
@@ -952,6 +984,9 @@ final class DevServer {
     }
     // ---- M6 sync dev ----
     private var lastSyncAuthResult = "(none)"
+    var lastShareStart = "(none)"
+    var lastShareJoin = "(none)"
+    var lastShareList = "(none)"
     /// `sync-auth op|server|email|pw|totp|words|newpw|extra` —
     /// 对齐 linux app.sync-auth；结果异步落 lastSyncAuthResult。
     private func cmdSyncAuth(_ arg: String) -> String {
@@ -1277,4 +1312,174 @@ final class DevServer {
         return "OK"
     }
 }
+// ================= M7 share dev =================
+
+extension DevServer {
+    /// dev_active_sess：当前 tab 焦点叶 session。
+    private func devActiveLeaf() -> TermTab? {
+        guard let w = win, w.selTab < w.tabs.count,
+              let wst = w.tabs[w.selTab] as? WsTab else { return nil }
+        return wst.ws.focusedLeaf
+    }
+    private func devShareTab() -> ShareTab? {
+        guard let w = win, w.selTab < w.tabs.count else { return nil }
+        return w.tabs[w.selTab] as? ShareTab
+    }
+    private func devShareId() -> String? {
+        devActiveLeaf()?.session.flatMap {
+            ShareService.shared.shareForSession($0) }
+    }
+
+
+
+    func cmdShareStart(_ arg: String) -> String {
+        guard let s = devActiveLeaf()?.session
+        else { return "SHARE-START-FAIL no-session" }
+        let mode = Int(arg) == 1
+            ? HB_SHARE_COLLAB : HB_SHARE_VIEW
+        ShareService.shared.start(sess: s, title: "dev-share",
+                                  host: "dev-host", mode: mode) {
+            [weak self] sid, err in
+            guard let self else { return }
+            if let err {
+                self.lastShareStart = "SHARE-START-FAIL \(err)"
+            } else {
+                let svc = ShareService.shared
+                self.lastShareStart =
+                    "SHARE-START-OK id=\(sid ?? "-") " +
+                    "link=\(sid.flatMap { svc.link($0) } ?? "-") " +
+                    "code=\(sid.flatMap { svc.code($0) } ?? "-")"
+            }
+        }
+        return "OK pending"
+    }
+
+    func cmdShareStop() -> String {
+        guard let sid = devShareId() else {
+            return "SHARE-STOPPED none" }
+        ShareService.shared.stop(sid)
+        return "SHARE-STOPPED"
+    }
+
+    func cmdShareMode(_ arg: String) -> String {
+        guard let sid = devShareId() else { return "SHARE-MODE-SET none" }
+        ShareService.shared.setMode(sid,
+            Int(arg) == 1 ? HB_SHARE_COLLAB
+                          : HB_SHARE_VIEW)
+        return "SHARE-MODE-SET"
+    }
+
+    func cmdShareRegen() -> String {
+        let svc = ShareService.shared
+        guard let sid = devShareId() else { return "SHARE-REGEN none" }
+        svc.regen(sid)
+        return "SHARE-REGEN code=\(svc.code(sid) ?? "-") " +
+               "link=\(svc.link(sid) ?? "-")"
+    }
+
+    func cmdShareKick(_ arg: String) -> String {
+        guard let sid = devShareId(), let pid = UInt32(arg)
+        else { return "SHARE-KICKED none" }
+        ShareService.shared.kick(sid, pid)
+        return "SHARE-KICKED"
+    }
+
+    func cmdShareInfo() -> String {
+        let svc = ShareService.shared
+        guard let sid = devShareId() else { return "SHARE-INFO none" }
+        return "SHARE-INFO id=\(sid) mode=\(svc.mode(sid)) " +
+               "count=\(svc.count(sid)) link=\(svc.link(sid) ?? "-") " +
+               "code=\(svc.code(sid) ?? "-")"
+    }
+
+    func cmdShareList() -> String {
+        ShareService.shared.list { [weak self] items, err in
+            guard let self else { return }
+            if let err {
+                self.lastShareList = "SHARE-LIST-FAIL \(err)"
+                return
+            }
+            var t = "SHARE-LIST n=\(items?.count ?? 0)"
+            for i in items ?? [] {
+                t += "\nSHARE-ITEM id=\(i.shareId) dev=\(i.ownerDevice)"
+            }
+            self.lastShareList = t
+        }
+        return "OK pending"
+    }
+
+    func cmdShareJoin(_ arg: String) -> String {
+        let f = arg.split(separator: " ", maxSplits: 3)
+            .map { String($0) }
+        let done: (ShareService.PeerCtx?, String?) -> Void = {
+            [weak self] ctx, err in
+            guard let self else { return }
+            if let err {
+                self.lastShareJoin = "SHARE-JOIN-FAIL \(err)"
+                return
+            }
+            if let ctx {
+                self.win?.openViewer(
+                    ctx, title: ctx.peerTitle ?? L("共享会话"))
+            }
+            self.lastShareJoin = "SHARE-JOIN-OK"
+        }
+        if f.count == 2 && f[0] == "member" {
+            // 对齐 dev_share_member_list：先 list 拿 meta 再 join
+            let sid = f[1]
+            ShareService.shared.list { items, err in
+                guard err == nil, let items,
+                      let it = items.first(where: {
+                          $0.shareId == sid })
+                else {
+                    done(nil, "share-not-found"); return
+                }
+                ShareService.shared.joinMember(it.shareId, it.metaB64,
+                                               done)
+            }
+            return "OK pending"
+        }
+        if f.count >= 3 && f[0] == "guest" {
+            ShareService.shared.joinGuest(f[1], f[2], done)
+            return "OK pending"
+        }
+        return "ERR usage: share-join member <sid>|guest <link> <code>"
+    }
+
+    func cmdShareInput(_ arg: String) -> String {
+        guard let st = devShareTab(), let ctx = st.ctx,
+              let eng = ctx.eng
+        else { return "SHARE-INPUT not-a-viewer" }
+        guard let d = Data(base64Encoded: arg)
+        else { return "ERR b64" }
+        let e = String(decoding: d, as: UTF8.self).withCString {
+            hb_share_peer_input(eng, $0, strlen($0)) }
+        return "SHARE-INPUT \(e == HB_OK ? "ok" : "rejected")"
+    }
+
+    func cmdShareScreen(_ arg: String) -> String {
+        guard let st = devShareTab() else {
+            return "SHARE-SCREEN not-a-viewer" }
+        try? st.screenText().write(toFile: arg, atomically: true,
+                                   encoding: .utf8)
+        return "SHARE-SCREEN-WROTE"
+    }
+
+    func cmdShareState() -> String {
+        guard let st = devShareTab() else {
+            return "SHARE-STATE not-a-viewer" }
+        return "SHARE-STATE ended=\(st.ended ? 1 : 0) " +
+               "label=\(st.ended ? st.endText : "-")"
+    }
+
+    func cmdShareDialog() -> String {
+        guard let leaf = devActiveLeaf(), let s = leaf.session
+        else { return "ERR no-session" }
+        ShareDialog.present(sess: s, title: leaf.shareTitle,
+                            host: leaf.shareHost, in: win)
+        return "OK"
+    }
+}
+
 #endif
+
