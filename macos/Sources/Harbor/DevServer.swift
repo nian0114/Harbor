@@ -9,8 +9,34 @@ import HarborKit
 final class DevServer {
     private var fd: Int32 = -1
     private var src: DispatchSourceRead?
+    private let ioQueue = DispatchQueue(label: "harbor.dev.io")
+    /// 可在 IO 线程直接执行的命令（仅触 DialogRegistry 的 sheet 控件）。
+    private let offMainSafe: Set<String> = [
+        "postkey", "quit-reply",
+    ]
     weak var win: MainWindow?
     let path: String
+
+    /// 在主 runloop 上执行。dispatch .main 在 NSApp.terminate 的
+    /// _shouldTerminate 嵌套事件循环 / sheet 模态期不会 drain，dev 命令饿死；
+    /// 这里把 block 注册到各常用 runloop mode，先到先执行（主线程单发，flag 去重）。
+    private func runOnMain(_ b: @escaping () -> Void) {
+        final class Box { var done = false }
+        let box = Box()
+        let wrap: () -> Void = {
+            guard !box.done else { return }
+            box.done = true
+            b()
+        }
+        DispatchQueue.main.async(execute: wrap)
+        for m in [RunLoop.Mode.default.rawValue,
+                  RunLoop.Mode.modalPanel.rawValue,
+                  RunLoop.Mode.eventTracking.rawValue,
+                  "NSConnectionReplyMode"] {
+            CFRunLoopPerformBlock(CFRunLoopGetMain(), m as CFString, wrap)
+        }
+        CFRunLoopWakeUp(CFRunLoopGetMain())
+    }
 
     init?(win: MainWindow?) {
         self.win = win
@@ -32,8 +58,11 @@ final class DevServer {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(fd, $0, len) } } == 0 && listen(fd, 4) == 0
         guard ok else { close(fd); return nil }
+        // 读/accept 走后台队列，命令再经 CFRunLoopPerformBlock(AllModes) 上主线程。
+        // 不能用 .main 派发队列：NSApp.terminate 的 _shouldTerminate 嵌套事件循环
+        // 和 sheet 模态期都不 drain 主派发队列，dev 命令会饿死（quit 确认无法驱动）。
         let s = DispatchSource.makeReadSource(fileDescriptor: fd,
-                                              queue: .main)
+                                              queue: ioQueue)
         s.setEventHandler { [weak self] in
             self?.accept()
         }
@@ -50,17 +79,15 @@ final class DevServer {
                 let cfd = c   // 捕获值，不能引用循环变量（结束后为 -1）
                 _ = fcntl(cfd, F_SETFL, fcntl(cfd, F_GETFL) | O_NONBLOCK)
                 let s = DispatchSource.makeReadSource(fileDescriptor: cfd,
-                                                      queue: .main)
+                                                      queue: ioQueue)
                 var buf = ""
                 s.setEventHandler { [weak self] in
                     var chunk = [UInt8](repeating: 0, count: 8192)
                     let n = read(cfd, &chunk, chunk.count)
                     if n <= 0 { s.cancel(); close(cfd); return }
                     buf += String(decoding: chunk[0..<n], as: UTF8.self)
-                    while let eol = buf.firstIndex(of: "\n") {
-                        let line = String(buf[..<eol])
-                        buf.removeSubrange(...eol)
-                        let resp = (self?.handle(line) ?? "ERR") + "\n"
+                    let respond: (String) -> Void = { cmdline in
+                        let resp = (self?.handle(cmdline) ?? "ERR") + "\n"
                         resp.withCString { ptr in
                             var off = 0, n = strlen(ptr)
                             while off < n {
@@ -77,6 +104,20 @@ final class DevServer {
                                 }
                                 break
                             }
+                        }
+                    }
+                    while let eol = buf.firstIndex(of: "\n") {
+                        let line = String(buf[..<eol])
+                        buf.removeSubrange(...eol)
+                        // NSApp.terminate 的 _shouldTerminate 嵌套事件循环会
+                        // 饿死主 runloop 的所有 mode；此期间唯一线程安全的驱动
+                        // 方式是 postEvent（文档允许任意线程调用）。
+                        let first = line.split(separator: " ").first
+                            .map(String.init) ?? ""
+                        if self?.offMainSafe.contains(first) == true {
+                            respond(line)
+                        } else {
+                            self?.runOnMain { respond(line) }
                         }
                     }
                 }
@@ -96,6 +137,14 @@ final class DevServer {
         // type/ime-* 负载为 base64，wire 单行协议零转义歧义
         switch cmd {
         case "ping": return "OK pong"
+        case "postkey": return cmdPostKey(arg)
+        case "quit-reply":
+            // _shouldTerminate 嵌套循环期间主 runloop 全 mode 饿死，
+            // reply() 仅是置旗+唤醒，可安全在 IO 线程调用。
+            DialogRegistry.shared.pendingTerminate = false
+            NSApp.reply(toApplicationShouldTerminate:
+                            arg == "1" || arg == "true" || arg == "quit")
+            return "OK"
         case "snapshot": return cmdSnapshot(arg)
         case "type":    return cmdType(arg)
         case "key":     return cmdKey(arg)
@@ -106,7 +155,8 @@ final class DevServer {
         case "closetab":
             win?.closeTab(win?.selTab ?? 0); return "OK"
         case "select-sidebar":
-            if let i = Int(arg) { win?.sidebar.select(i)
+            if let i = Int(arg) {
+                win?.vaultTab.sidebar.select(i)
                 win?.showSection(i) }
             return "OK"
         case "action": return cmdAction(arg)
@@ -123,8 +173,11 @@ final class DevServer {
                   let d = Data(base64Encoded: String(kv[1])),
                   let txt = String(data: d, encoding: .utf8) else {
                 return "ERR usage: dialog-fill <field> <base64>" }
-            return DialogRegistry.shared.fill(field: String(kv[0]),
-                                              text: txt) ? "OK" : "ERR no field"
+            return (DialogRegistry.shared.fill(field: String(kv[0]),
+                                               text: txt)
+                    || fillInAllWindows(field: String(kv[0]),
+                                        text: txt))
+                ? "OK" : "ERR no field"
         case "dialog-press":
             return DialogRegistry.shared.press(arg) ? "OK" : "ERR no button"
         case "click":    return cmdClick(arg)
@@ -140,6 +193,11 @@ final class DevServer {
         case "kc-del":   return cmdKcDel(arg)
         case "kc-sel":   return cmdKcSel(arg)
         case "host-sel": return cmdHostSel(arg)
+        case "host-group": return cmdHostGroup(arg)
+        case "host-del": return cmdHostDel(arg)
+        case "scroll-test": return cmdScrollTest()
+        case "mode":   return cmdMode(arg)
+        case "quit":     NSApp.terminate(nil); return "OK"
         default: return "ERR unknown"
         }
     }
@@ -184,7 +242,11 @@ final class DevServer {
               let it = find(NSApp.mainMenu ?? NSMenu(), arg)
         else { return "ERR unknown action" }
         guard let act = it.action else { return "ERR no-action" }
-        _ = NSApp.sendAction(act, to: it.target, from: it)
+        // 异步派发：NSApp.terminate → _shouldTerminate 会在主队列开嵌套事件循环
+        // 等待 reply(toApplicationShouldTerminate:)；同步执行会死锁本 dev server。
+        DispatchQueue.main.async {
+            _ = NSApp.sendAction(act, to: it.target, from: it)
+        }
         return "OK"
     }
     private func cmdSet(_ arg: String) -> String {
@@ -323,11 +385,62 @@ final class DevServer {
     }
 
     /// 点击任意带 accessibilityIdentifier 的控件（含对话框按钮）。
+    /// postkey <return|escape> —— 从任意线程 post 真实按键事件，用于驱动
+    /// _shouldTerminate 嵌套循环里的 quit 确认 sheet（Return=默认钮，Esc=取消）。
+    private func cmdPostKey(_ arg: String) -> String {
+        let code: UInt16 = arg == "escape" ? 53 : 36
+        let chars = arg == "escape" ? "\u{1b}" : "\r"
+        for t in [NSEvent.EventType.keyDown, NSEvent.EventType.keyUp] {
+            guard let e = NSEvent.keyEvent(
+                with: t, location: .zero, modifierFlags: [],
+                timestamp: 0, windowNumber: 0, context: nil,
+                characters: chars, charactersIgnoringModifiers: chars,
+                isARepeat: false, keyCode: code)
+            else { return "ERR no-event" }
+            NSApp.postEvent(e, atStart: false)
+        }
+        return "OK"
+    }
+
     private func cmdClick(_ arg: String) -> String {
         if DialogRegistry.shared.press(arg) { return "OK" }
         guard let w = win else { return "ERR no window" }
         if clickIn(w.contentView, arg) { return "OK" }
+        // 非 NSAlert 的 sheet（如主机表单）和独立窗口不在 contentView 下
+        if let s = w.attachedSheet, clickIn(s.contentView, arg) { return "OK" }
+        for ow in NSApp.windows where ow !== w {
+            if clickIn(ow.contentView, arg) { return "OK" }
+        }
         return "ERR no such control"
+    }
+    /// 在所有窗口（含非 NSAlert sheet，如主机表单）中按 id 找输入控件。
+    private func fillInAllWindows(field id: String, text: String) -> Bool {
+        for w in NSApp.windows {
+            if fillIn(w.contentView, id, text) { return true }
+            if let s = w.attachedSheet, fillIn(s.contentView, id, text) {
+                return true
+            }
+        }
+        return false
+    }
+    private func fillIn(_ v: NSView?, _ id: String, _ text: String) -> Bool {
+        guard let v else { return false }
+        for s in v.subviews {
+            if let c = s as? NSControl, c.accessibilityIdentifier() == id {
+                if let b = c as? NSButton {
+                    b.state = (text == "1" || text == "true") ? .on : .off
+                } else {
+                    c.stringValue = text
+                    // 像真实输入一样触发 controlTextDidChange（表单校验）
+                    NotificationCenter.default.post(
+                        name: NSControl.textDidChangeNotification,
+                        object: c)
+                }
+                return true
+            }
+            if fillIn(s, id, text) { return true }
+        }
+        return false
     }
     private func clickIn(_ v: NSView?, _ id: String) -> Bool {
         guard let v else { return false }
@@ -426,6 +539,12 @@ final class DevServer {
         if ["keepalive", "port"].contains(kv[1]),
            let i = Int64(kv[2]) {
             hb_obj_set_int(o, String(kv[1]), i)
+        } else if kv[1] == "tags" {
+            let parts = String(kv[2]).split(separator: ",")
+                .map { strdup(String($0)) }
+            defer { parts.forEach { free($0) } }
+            hb_obj_set_strv(o, "tags",
+                            parts.map { UnsafePointer($0) }, parts.count)
         } else {
             hb_obj_set_str(o, String(kv[1]), String(kv[2]))
         }
@@ -534,6 +653,30 @@ final class DevServer {
         guard let p = page(HostsPage.self)
         else { return "ERR no page" }
         return p.devSelect(id: arg) ? "OK" : "ERR no host"
+    }
+    /// `host-group <id> <group>`：拖到分组（与 acceptDrop 同一路径）
+    private func cmdHostGroup(_ arg: String) -> String {
+        let kv = arg.split(separator: " ", maxSplits: 1)
+        guard let p = page(HostsPage.self), kv.count == 2
+        else { return "ERR" }
+        return p.devSetGroup(id: String(kv[0]),
+                             group: String(kv[1])) ? "OK" : "ERR no host"
+    }
+    /// `host-del <id>`：选中并删除（弹撤销对话框）
+    private func cmdHostDel(_ arg: String) -> String {
+        guard let p = page(HostsPage.self) else { return "ERR no page" }
+        return p.devDelete(id: arg) ? "OK" : "ERR no host"
+    }
+    /// `mode card|list`
+    private func cmdMode(_ arg: String) -> String {
+        guard let p = page(HostsPage.self) else { return "ERR no page" }
+        p.devMode(list: arg.trimmingCharacters(in: .whitespaces) == "list")
+        return "OK"
+    }
+    /// `scroll-test`：40 步滚动平均耗时（ms）
+    private func cmdScrollTest() -> String {
+        guard let p = page(HostsPage.self) else { return "ERR no page" }
+        return "OK \(String(format: "%.2f", p.devScrollTest()))"
     }
     private func cmdDismissModal() -> String {
         for w in NSApp.windows where w !== win && w.isVisible {

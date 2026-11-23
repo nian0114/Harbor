@@ -44,8 +44,14 @@ final class App: NSObject, NSApplicationDelegate {
             al.informativeText = L("退出 Harbor 将终止所有活动会话。")
             al.addButton(withTitle: L("退出"))
             al.addButton(withTitle: L("取消"))
-            return al.runModal() == .alertFirstButtonReturn
-                ? .terminateNow : .terminateCancel
+            DialogRegistry.shared.pendingTerminate = true
+            DialogRegistry.shared.present(alert: al, kind: "quit-confirm",
+                                          in: win) { ok in
+                guard DialogRegistry.shared.pendingTerminate else { return }
+                DialogRegistry.shared.pendingTerminate = false
+                NSApp.reply(toApplicationShouldTerminate: ok)
+            }
+            return .terminateLater
         }
         return .terminateNow
     }

@@ -7,6 +7,8 @@ final class DialogRegistry {
     static let shared = DialogRegistry()
     private var tracked: [(win: NSWindow, kind: String)] = []
     private var fields: [String: NSControl] = [:]
+    /// 待决的 .terminateLater；sheet 完成回调/手动应答后清位，防二次 reply。
+    var pendingTerminate = false
 
     func present(alert: NSAlert, kind: String,
                  in window: NSWindow?,
