@@ -51,6 +51,8 @@ static void result_disp(const hb_log *l, const char **txt,
         *txt = _("成功"); *css = "on";
     } else if (!strcmp(r, "cancelled")) {
         *txt = _("已取消"); *css = "off";
+    } else if (!strcmp(r, "interrupted")) {
+        *txt = _("中断"); *css = "wait";
     } else {
         *txt = _("失败"); *css = "err";
     }
@@ -70,6 +72,8 @@ static const char *reason_disp(const hb_log *l, char *buf, size_t bl)
         { "hostkey_rejected",   _("主机密钥被拒绝") },
         { "timeout",            _("超时")      },
         { "cancelled",          _("已取消")    },
+        { "interrupted",        _("中断")      },
+        { "process exited",     _("进程已退出") },
         { "key confirm denied", _("已取消")    },
         { "ok",                 ""          },
         { "connecting",         _("进行中")    },

@@ -1182,6 +1182,8 @@ static void hb_application_startup(GApplication *app)
     {
         hb_obj *o = NULL;
         hb_vault *v = hb_store_vault(hb_store_default());
+        /* 上次运行被 kill/崩溃留下的“进行中”行 → 标记为中断 */
+        hb_vault_log_sweep(v);
         if (hb_vault_settings(v, &o) == HB_OK && o) {
             hb_vault_log_purge(v, (int)hb_obj_get_int(
                                    o, "log_retention_days", 90));
