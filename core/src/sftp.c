@@ -50,6 +50,16 @@
 #define HB_SFTP_STALL_MS 15000    /* 单个在飞 op 零进展死线：libssh2 的
                                     packet 等待无超时（上游 libssh2#690），
                                     服务器静默时 EAGAIN 会永远续打 */
+#ifndef NDEBUG
+#define CONN_DIE(e, w) do { if (!(e)->conn_dead) { \
+    (e)->conn_dead = true; (e)->dead_why = (w); \
+    if ((e)->dbg) fprintf(stderr, "[sftpdbg] conn_dead why=%d\n", (w)); \
+} } while (0)
+#else
+#define CONN_DIE(e, w) do { if (!(e)->conn_dead) { \
+    (e)->conn_dead = true; (e)->dead_why = (w); } } while (0)
+#endif
+
 #define DEF_CONC   3
 #define MAX_CONC   8
 
@@ -204,6 +214,7 @@ typedef struct {
     /* 出站挂起属主（libssh2 会话级出站 packet 槽，见 tx_pend 注） */
     sfreq          *txo;
     int64_t         tx_orph0;        /* 孤儿挂起首见时刻（死线用） */
+    int             dead_why;        /* conn_dead 首因编号（NDEBUG 诊断） */
     bool           conn_dead;
     bool           shutting;
     int            dbg;              /* HB_SFTP_DBG 环境开关 */
@@ -596,7 +607,7 @@ static int req_fail(eng *e, sfreq *r)
 {
     hb_sftp_status st = last_err(e, e->ctl.sf);
     if (st == HB_SFTP_ERR_CONN)
-        e->conn_dead = true;
+        CONN_DIE(e, 1);
     return req_done(e, r, st, NULL);
 }
 
@@ -671,7 +682,7 @@ static int ctl_blk(eng *e)
         return ST_BLK;
     }
     if (c->sf == e->sf) {
-        e->conn_dead = true;
+        CONN_DIE(e, 2);
         return ST_BLK;
     }
     if (r->is_xfer && r->st < X_Z_CLOSE)
@@ -1316,7 +1327,7 @@ static int xfer_fail(eng *e, sfreq *r, hb_sftp_status st, const char *msg)
         r->nents = 0;
     }
     if (st == HB_SFTP_ERR_CONN)
-        e->conn_dead = true;
+        CONN_DIE(e, 3);
     r->z_dl = hb_now_ms() + HB_SFTP_ZCLEAN_MS;
     r->st = X_Z_CLOSE;
     return ST_WORK;
@@ -2177,7 +2188,7 @@ static int eng_sweep(eng *e)
         if (!e->tx_orph0)
             e->tx_orph0 = hb_now_ms();
         else if (hb_now_ms() - e->tx_orph0 > HB_SFTP_STALL_MS)
-            e->conn_dead = true;      /* 孤儿残包排不动 → 链路判死 */
+            CONN_DIE(e, 4);           /* 孤儿残包排不动 → 链路判死 */
     } else {
         e->tx_orph0 = 0;
     }
@@ -2193,7 +2204,7 @@ static int eng_sweep(eng *e)
             e->draining = false;
             if (e->ctl.rc < 0 &&
                 last_err(e, e->ctl.sf) == HB_SFTP_ERR_CONN)
-                e->conn_dead = true;
+                CONN_DIE(e, 5);
             progressed = 1;
         }
         tx_note(e, &e->drain);
@@ -2313,13 +2324,13 @@ static void eng_dbg_dump(eng *e)
     sfreq *r;
     int dirs = e->hp ? libssh2_session_block_directions(e->hp->sess) : -1;
     fprintf(stderr,
-            "[sftpdbg] idle dirs=%x txo=%u io=%u ctl=%u drain=%d dead=%d"
+            "[sftpdbg] idle dirs=%x txo=%u io=%u ctl=%u drain=%d dead=%d why=%d"
             " sweeps=%llu blocked=%llu\n",
             dirs,
             e->txo ? e->txo->id : 0,
             e->io_owner ? e->io_owner->id : 0,
             e->ctl.owner ? e->ctl.owner->id : 0,
-            (int)e->draining, (int)e->conn_dead,
+            (int)e->draining, (int)e->conn_dead, e->dead_why,
             (unsigned long long)e->dbg_sweeps,
             (unsigned long long)e->dbg_blocked);
     for (r = e->act_h; r; r = r->next)
@@ -2429,7 +2440,7 @@ int hb__sftp_run(void *ctx, hb_session *s)
 
             tmo = hb__ssh_ka_tick(h, !tx_pend(e));
             if (h->disconnected) {
-                    e->conn_dead = true;
+                    CONN_DIE(e, 6);
                 continue;
             }
             dirs = libssh2_session_block_directions(e->hp->sess);
@@ -2460,7 +2471,7 @@ int hb__sftp_run(void *ctx, hb_session *s)
             if (n < 0) {
                 if (errno == EINTR)
                     continue;
-                e->conn_dead = true;
+                CONN_DIE(e, 7);
                 continue;
             }
             if (pf[0].revents & POLLIN) {
@@ -2484,13 +2495,13 @@ int hb__sftp_run(void *ctx, hb_session *s)
                 }
             }
             if (pf[1].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-                e->conn_dead = true;
+                CONN_DIE(e, 8);
                 h->disconnected = true;
             }
         }
         (void)hb__ssh_ka_tick(h, !tx_pend(e));
         if (h->disconnected)
-            e->conn_dead = true;
+            CONN_DIE(e, 9);
     }
 
     /* ---- 收尾 ---- */
