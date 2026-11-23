@@ -663,6 +663,13 @@ static int ctl_blk(eng *e)
     if (hb_now_ms() - c->t0 <= HB_SFTP_STALL_MS)
         return ST_BLK;
     ctl_drop(e, r);
+    /* drain 是探针不是证据：它被 txo 门控饿超时 ≠ meta channel
+     * 死了（发包阶段被挡与在飞无应答是两回事）。丢弃本轮，
+     * 链路好不好由真实请求的超时判定。 */
+    if (r == &e->drain) {
+        e->draining = false;
+        return ST_BLK;
+    }
     if (c->sf == e->sf) {
         e->conn_dead = true;
         return ST_BLK;
