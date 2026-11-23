@@ -1,6 +1,7 @@
 import AppKit
 import CHarbor
 import HarborKit
+import ServiceManagement
 
 // ---------- AppDelegate + 菜单 ----------
 final class App: NSObject, NSApplicationDelegate {
@@ -21,6 +22,8 @@ final class App: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         buildMenus()
         MenuBar.shared.install()
+        SleepPolicy.shared.install()
+        applyLoginItem()
         win = MainWindow()
         // --background：登录项/菜单栏后台启动 —— 不显示主窗口
         // （linux --background 同义；窗口照常创建，随时可唤回）。
@@ -54,6 +57,28 @@ final class App: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ a: NSApplication)
         -> Bool {
         !Vault.shared.settingsBool("close_to_tray", true)
+    }
+
+    /// start_at_login → SMAppService.mainApp 注册/注销（macOS 13+）。
+    /// 启动时对齐一次设置意图（注册表可能被系统重置）；
+    /// 返回错误描述（ad-hoc 签名也可能被系统拒绝 → 设置页显示）。
+    @discardableResult
+    func applyLoginItem() -> String? {
+        let want = Vault.shared.settingsBool("start_at_login", false)
+        let svc = SMAppService.mainApp
+        // 未开启且未注册 → 什么都不做（unregister 未注册会抛错）。
+        guard want || svc.status != .notRegistered else { return nil }
+        do {
+            if want { try svc.register() }
+            else { try svc.unregister() }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+    /// dev 可读：.notRegistered/.enabled/.requiresApproval/.notFound
+    var devLoginStatus: String {
+        "\(SMAppService.mainApp.status.rawValue)"
     }
 
     // 活动会话存在时，退出也要确认（windowShouldClose 只管点 X，terminate 走这里）

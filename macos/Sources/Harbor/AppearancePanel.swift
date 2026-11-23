@@ -71,12 +71,54 @@ final class AppearancePanel: NSView {
         tray.state = v.settingsBool("close_to_tray", true) ? .on : .off
         tray.frame = NSRect(x: 24, y: y, width: 380, height: 22)
         addSubview(tray)
+        y += 30
+        login = NSButton(checkboxWithTitle: L("登录时启动 Harbor"),
+                         target: self, action: #selector(loginChanged))
+        login.state = v.settingsBool("start_at_login", false)
+            ? .on : .off
+        login.frame = NSRect(x: 24, y: y, width: 380, height: 22)
+        addSubview(login)
+        y += 24
+        loginNote = NSTextField(wrappingLabelWithString: "")
+        loginNote.font = .systemFont(ofSize: 11)
+        loginNote.textColor = Theme.amber.color
+        loginNote.frame = NSRect(x: 44, y: y, width: 400, height: 30)
+        addSubview(loginNote)
+        y += 36
+        let keep = NSButton(checkboxWithTitle:
+            L("保持连接（防止休眠断言）"),
+            target: self, action: #selector(keepChanged))
+        keep.state = v.settingsBool("keep_connected", false) ? .on : .off
+        keep.frame = NSRect(x: 24, y: y, width: 380, height: 22)
+        addSubview(keep)
         y += 34
         frame = NSRect(x: 0, y: 0, width: 480, height: y)
     }
     required init?(coder: NSCoder) { nil }
+    private var login: NSButton!
+    private var loginNote: NSTextField!
     @objc private func trayChanged(_ b: NSButton) {
         v.setSettingsBool("close_to_tray", b.state == .on)
+    }
+    @objc private func loginChanged(_ b: NSButton) {
+        v.setSettingsBool("start_at_login", b.state == .on)
+        if let err = (NSApp.delegate as? App)?.applyLoginItem() {
+            // 注册被系统拒绝（如签名不被接受）→ 回退开关 + 说明
+            v.setSettingsBool("start_at_login", false)
+            b.state = .off
+            loginNote.stringValue = String(
+                format: L("无法注册登录项：%@"), err)
+        } else if b.state == .on,
+                  (NSApp.delegate as? App)?.devLoginStatus == "2" {
+            loginNote.stringValue = L(
+                "需在「系统设置 › 通用 › 登录项」里批准一次 Harbor。")
+        } else {
+            loginNote.stringValue = ""
+        }
+    }
+    @objc private func keepChanged(_ b: NSButton) {
+        v.setSettingsBool("keep_connected", b.state == .on)
+        SleepPolicy.shared.refreshAssertion()
     }
     @objc private func changed(_ s: NSControl) {
         if let p = s as? NSPopUpButton {

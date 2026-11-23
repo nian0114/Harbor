@@ -294,6 +294,9 @@ class TermTab: NSObject {
     var onlineCount: Int { (session?.alive ?? false) ? 1 : 0 }
     /// M8 托盘"全部断开"：hb_session_close（tab 保留、日志收尾）。
     func disconnect() { session?.close() }
+    /// M8 休眠唤醒重连白名单：SSH/Local 页 restart() 即重连；
+    /// pinned/共享/桌面页各有路径（或不可重连）→ 覆盖为 false。
+    var wakeReconnectable: Bool { true }
     /// 终止会话并 join 线程（关 tab / 退出时）。
     func kill() {
         for o in shareObs { NotificationCenter.default.removeObserver(o) }
@@ -340,6 +343,8 @@ final class WsTab: TermTab {
     override func disconnect() {
         ws.leavesList.forEach { $0.session?.close() }
     }
+    /// 唤醒重连按叶处理（SleepPolicy 直接收叶），WsTab 壳不参与。
+    override var wakeReconnectable: Bool { false }
     override func kill() { ws.killAll() }
 
     // ---- ⌘F 转发到 Workspace（焦点 pane 的 find bar） ----

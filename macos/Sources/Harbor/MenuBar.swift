@@ -50,6 +50,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
         let n = Self.onlineCount(
             (NSApp.delegate as? App)?.win)
         countItem?.title = String(format: L("%d 个会话在线"), n)
+        SleepPolicy.shared.refreshAssertion()
     }
     func menuWillOpen(_ m: NSMenu) { refresh() }
 

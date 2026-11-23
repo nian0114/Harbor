@@ -5,6 +5,8 @@ import HarborKit
 /// 固定的 Vault 标签页（prototype：pinned，不可关/不可拖走）。
 /// 视图 = 侧栏 + 分区内容；分区页（主机/密钥/外观…）挂在 sectionArea。
 final class VaultTab: TermTab {
+    override var onlineCount: Int { 0 }
+    override var wakeReconnectable: Bool { false }
     let sidebar = SidebarView()
     let sectionArea = NSView()
     private(set) var sidebarVisible = true
@@ -242,6 +244,8 @@ final class SFTPTab: TermTab {
     }
     /// linux hb_sftp_view_disconnect_all：远端 pane 回 select。
     override func disconnect() { sftp.disconnectAll() }
+    /// 休眠唤醒不走 restart：用户重新挑选远端（linux 同）。
+    override var wakeReconnectable: Bool { false }
     override func kill() {
         sftp.teardown()   // 各 pane ConnCtl cancel+join → 日志行收尾
         super.kill()

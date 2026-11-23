@@ -278,6 +278,19 @@ final class DevServer {
             // 模拟点窗口 ×（走 windowShouldClose → close_to_tray 分支）
             win?.performClose(nil)
             return "OK"
+        case "login-status":
+            return "OK \((NSApp.delegate as? App)?.devLoginStatus ?? "-")"
+        case "login-apply":
+            let e = (NSApp.delegate as? App)?.applyLoginItem()
+            return "OK \(e ?? "nil")"
+        case "sleep-sim":
+            // 模拟系统 willSleep/didWake（同 NSWorkspace 通知路径）。
+            if arg == "wake" { SleepPolicy.shared.devWake() }
+            else { SleepPolicy.shared.devSleep() }
+            return "OK"
+        case "assert-state":
+            return "OK \(SleepPolicy.shared.devAssertionHeld
+                ? "held" : "none")"
         case "watch-badge":
             if let w = selTab as? WsTab,
                let g = w.badgeGlyph { return "badge=\(g.0)" }

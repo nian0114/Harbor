@@ -7,6 +7,10 @@ import HarborKit
 /// 权限 pill · 端到端加密 · 离开）+ 只读提示（rate-limit 3s）+ ended
 /// overlay（保留最后一帧 + 原因 + 关闭）。
 final class ShareTab: TermTab {
+    /// 共享查看页不计在线（linux 无对应 tab 类型），也不做唤醒重连
+    /// （restart() 会错误地起本地 shell）。
+    override var onlineCount: Int { 0 }
+    override var wakeReconnectable: Bool { false }
     /// 引擎 ctx（service peers 拥有；kill 时归还）。
     private(set) var ctx: ShareService.PeerCtx?
     private(set) var ended = false

@@ -1442,6 +1442,8 @@ final class DesktopTab: TermTab, ConnDelegate {
     /// linux hb_desktop_page_disconnect：hb_rd_close（断开后走
     /// 已有 backoff 重连流程）。
     override func disconnect() { rd?.close() }
+    /// 唤醒重连走页内 backoff（linux 同路径），不经 restart()。
+    override var wakeReconnectable: Bool { false }
     override func kill() {
         dead = true
         gen += 1
