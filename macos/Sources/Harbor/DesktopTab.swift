@@ -1168,16 +1168,23 @@ final class DesktopTab: TermTab, ConnDelegate {
         dv.isHidden = true
         buildStageView()
 
-        // 横幅
+        // 横幅（prototype .tunnel-banner：#10233c 底 + #1c3a5e 底边 + #7db8f2 文字）
         let bar = NSView()
         bar.wantsLayer = true
-        bar.layer?.hbBg = "card"
+        bar.layer?.hbBg = "rdBanner"
         bar.translatesAutoresizingMaskIntoConstraints = false
         dv.addSubview(bar)
-        let lockI = NSImageView(image: hbIcon("key", size: 12,
-                                              tint: .secondaryLabelColor))
+        let barLine = NSView()
+        barLine.wantsLayer = true
+        barLine.layer?.hbBg = "rdLine"
+        barLine.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(barLine)
+        let lockI = NSImageView(image: hbIcon("lock", size: 13,
+                                              tint: Theme.dyn("rdBannerFg")))
         lockI.translatesAutoresizingMaskIntoConstraints = false
         bannerLbl = NSTextField(labelWithString: "")
+        bannerLbl.font = .systemFont(ofSize: 12)
+        bannerLbl.hbText = "rdBannerFg"
         bannerLbl.lineBreakMode = .byTruncatingMiddle
         bannerLbl.translatesAutoresizingMaskIntoConstraints = false
         bannerLbl.setContentCompressionResistancePriority(.defaultLow,
@@ -1240,15 +1247,24 @@ final class DesktopTab: TermTab, ConnDelegate {
         moreB.menu = menu
         let discB = NSButton(title: L("断开"), target: self,
                              action: #selector(discClose))
-        discB.bezelStyle = .rounded
+        discB.isBordered = false
+        discB.wantsLayer = true
+        discB.layer?.cornerRadius = 7
+        discB.layer?.borderWidth = 1
+        discB.layer?.backgroundColor = Theme.RGBA(0x1a2338).color.cgColor
+        discB.layer?.borderColor = Theme.RGBA(0x242f4a).color.cgColor
+        discB.attributedTitle = NSAttributedString(
+            string: L("断开"), attributes: [
+                .font: NSFont.systemFont(ofSize: 12),
+                .foregroundColor: Theme.RGBA(0xaebad4).color])
         discB.translatesAutoresizingMaskIntoConstraints = false
         discB.setAccessibilityIdentifier("rd-disconnect")
         [lockI, bannerLbl, passHint, roPill, secLbl, qPop, moreB, discB]
             .forEach { bar.addSubview($0) }
-        // 画布区
+        // 画布区（prototype .desktop-wrap：#10141f + 18px 内边距）
         let wrap = NSView()
         wrap.wantsLayer = true
-        wrap.layer?.backgroundColor = NSColor.black.cgColor
+        wrap.layer?.hbBg = "rdBg"
         wrap.translatesAutoresizingMaskIntoConstraints = false
         dv.addSubview(wrap)
         scroll = NSScrollView()
@@ -1298,12 +1314,16 @@ final class DesktopTab: TermTab, ConnDelegate {
             bar.leadingAnchor.constraint(equalTo: dv.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: dv.trailingAnchor),
             bar.topAnchor.constraint(equalTo: dv.topAnchor),
-            bar.heightAnchor.constraint(equalToConstant: 30),
+            bar.heightAnchor.constraint(equalToConstant: 36),
+            barLine.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            barLine.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            barLine.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+            barLine.heightAnchor.constraint(equalToConstant: 1),
             lockI.leadingAnchor.constraint(equalTo: bar.leadingAnchor,
-                                           constant: 8),
+                                           constant: 14),
             lockI.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             bannerLbl.leadingAnchor.constraint(equalTo:
-                lockI.trailingAnchor, constant: 6),
+                lockI.trailingAnchor, constant: 8),
             bannerLbl.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             passHint.leadingAnchor.constraint(equalTo:
                 bannerLbl.trailingAnchor, constant: 8),
@@ -1315,11 +1335,12 @@ final class DesktopTab: TermTab, ConnDelegate {
                 roPill.trailingAnchor, constant: 8),
             secLbl.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             discB.trailingAnchor.constraint(equalTo: bar.trailingAnchor,
-                                            constant: -8),
+                                            constant: -14),
             discB.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             discB.widthAnchor.constraint(equalToConstant: 52),
+            discB.heightAnchor.constraint(equalToConstant: 24),
             moreB.trailingAnchor.constraint(equalTo:
-                discB.leadingAnchor, constant: -4),
+                discB.leadingAnchor, constant: -6),
             moreB.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             moreB.widthAnchor.constraint(equalToConstant: 30),
             qPop.trailingAnchor.constraint(equalTo:
@@ -1330,10 +1351,10 @@ final class DesktopTab: TermTab, ConnDelegate {
             wrap.trailingAnchor.constraint(equalTo: dv.trailingAnchor),
             wrap.topAnchor.constraint(equalTo: bar.bottomAnchor),
             wrap.bottomAnchor.constraint(equalTo: dv.bottomAnchor),
-            scroll.leadingAnchor.constraint(equalTo: wrap.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: wrap.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: wrap.topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: wrap.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: wrap.leadingAnchor, constant: 18),
+            scroll.trailingAnchor.constraint(equalTo: wrap.trailingAnchor, constant: -18),
+            scroll.topAnchor.constraint(equalTo: wrap.topAnchor, constant: 18),
+            scroll.bottomAnchor.constraint(equalTo: wrap.bottomAnchor, constant: -18),
             dim.leadingAnchor.constraint(equalTo: wrap.leadingAnchor),
             dim.trailingAnchor.constraint(equalTo: wrap.trailingAnchor),
             dim.topAnchor.constraint(equalTo: wrap.topAnchor),

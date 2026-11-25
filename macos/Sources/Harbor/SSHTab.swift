@@ -91,9 +91,8 @@ final class SSHTab: TermTab, ConnDelegate {
         sub.font = .systemFont(ofSize: 11)
         sub.textColor = .secondaryLabelColor
         sub.translatesAutoresizingMaskIntoConstraints = false
-        let hideB = NSButton(title: L("隐藏日志"), target: self,
-                             action: #selector(toggleLog))
-        hideB.bezelStyle = .rounded
+        let hideB = HBtn("Hide logs", style: .gray, sm: true)
+        hideB.target = self; hideB.action = #selector(toggleLog)
         hideB.translatesAutoresizingMaskIntoConstraints = false
         hideB.setAccessibilityIdentifier("conn-hidelog")
         v.addSubview(icon); v.addSubview(nameL); v.addSubview(sub)
@@ -106,19 +105,20 @@ final class SSHTab: TermTab, ConnDelegate {
         for (i, s) in SSHTab.stages.enumerated() {
             let d = NSTextField(labelWithString: "○\n" + s)
             d.alignment = .center
-            d.font = .systemFont(ofSize: 10)
+            d.font = .systemFont(ofSize: 10.5)
             d.setAccessibilityIdentifier("stage-\(i)")
             steps.addSubview(d); dots.append(d)
         }
-        // 日志卡片
+        // 日志卡片（prototype .connect-log：#f4f6f8, radius 10）
         let card = NSView()
         card.wantsLayer = true
-        card.layer?.cornerRadius = 8
-        card.layer?.hbBg = "card"
+        card.layer?.cornerRadius = 10
+        card.layer?.hbBg = "subtle"
         card.translatesAutoresizingMaskIntoConstraints = false
         v.addSubview(card)
         let l = NSTextField(wrappingLabelWithString: "")
-        l.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        l.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        l.hbText = "text"
         l.translatesAutoresizingMaskIntoConstraints = false
         l.setAccessibilityIdentifier("stage-log")
         card.addSubview(l)
@@ -126,12 +126,10 @@ final class SSHTab: TermTab, ConnDelegate {
         logCard = card
         hideBtn = hideB
         // 底部按钮
-        let close = NSButton(title: L("关闭"), target: self,
-                             action: #selector(closeSelf))
-        close.bezelStyle = .rounded
-        let over = NSButton(title: L("重新开始"), target: self,
-                            action: #selector(retry))
-        over.bezelStyle = .rounded
+        let close = HBtn("Close", style: .gray)
+        close.target = self; close.action = #selector(closeSelf)
+        let over = HBtn("Start over", style: .primary)
+        over.target = self; over.action = #selector(retry)
         over.setAccessibilityIdentifier("conn-restart")
         stageFoot = [close, over]
         [close, over].forEach {
@@ -139,11 +137,13 @@ final class SSHTab: TermTab, ConnDelegate {
             v.addSubview($0)
         }
         NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: v.leadingAnchor,
-                                          constant: 24),
-            icon.topAnchor.constraint(equalTo: v.topAnchor, constant: 24),
-            icon.widthAnchor.constraint(equalToConstant: 40),
-            icon.heightAnchor.constraint(equalToConstant: 40),
+            card.centerXAnchor.constraint(equalTo: v.centerXAnchor),
+            card.widthAnchor.constraint(equalToConstant: 430),
+            card.heightAnchor.constraint(equalToConstant: 180),
+            icon.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            icon.topAnchor.constraint(equalTo: v.topAnchor, constant: 40),
+            icon.widthAnchor.constraint(equalToConstant: 38),
+            icon.heightAnchor.constraint(equalToConstant: 38),
             nameL.leadingAnchor.constraint(equalTo: icon.trailingAnchor,
                                            constant: 12),
             nameL.centerYAnchor.constraint(equalTo: icon.centerYAnchor,
@@ -151,30 +151,31 @@ final class SSHTab: TermTab, ConnDelegate {
             sub.leadingAnchor.constraint(equalTo: nameL.leadingAnchor),
             sub.topAnchor.constraint(equalTo: nameL.bottomAnchor,
                                      constant: 2),
-            hideB.trailingAnchor.constraint(equalTo: v.trailingAnchor,
-                                            constant: -20),
+            hideB.trailingAnchor.constraint(equalTo: card.trailingAnchor),
             hideB.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
+            hideB.widthAnchor.constraint(equalToConstant: 86),
+            hideB.heightAnchor.constraint(equalToConstant: 26),
             steps.topAnchor.constraint(equalTo: icon.bottomAnchor,
-                                       constant: 18),
+                                       constant: 16),
             steps.centerXAnchor.constraint(equalTo: v.centerXAnchor),
-            steps.widthAnchor.constraint(equalToConstant: 420),
+            steps.widthAnchor.constraint(equalToConstant: 430),
             steps.heightAnchor.constraint(equalToConstant: 36),
             card.topAnchor.constraint(equalTo: steps.bottomAnchor,
-                                      constant: 12),
-            card.centerXAnchor.constraint(equalTo: v.centerXAnchor),
-            card.widthAnchor.constraint(equalToConstant: 460),
-            card.heightAnchor.constraint(equalToConstant: 170),
-            l.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
+                                      constant: 14),
+            l.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
             l.leadingAnchor.constraint(equalTo: card.leadingAnchor,
-                                       constant: 12),
+                                       constant: 16),
             l.trailingAnchor.constraint(equalTo: card.trailingAnchor,
-                                        constant: -12),
+                                        constant: -16),
             close.topAnchor.constraint(equalTo: card.bottomAnchor,
-                                       constant: 14),
-            close.trailingAnchor.constraint(equalTo: over.leadingAnchor,
-                                            constant: -10),
+                                       constant: 18),
+            close.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            close.widthAnchor.constraint(equalToConstant: 76),
+            close.heightAnchor.constraint(equalToConstant: 32),
             over.trailingAnchor.constraint(equalTo: card.trailingAnchor),
             over.centerYAnchor.constraint(equalTo: close.centerYAnchor),
+            over.widthAnchor.constraint(equalToConstant: 98),
+            over.heightAnchor.constraint(equalToConstant: 32),
         ])
         var x: CGFloat = 0
         for (i, d) in dots.enumerated() {
@@ -190,7 +191,13 @@ final class SSHTab: TermTab, ConnDelegate {
         }
         stageView = v
     }
-    @objc private func toggleLog() { logLabel?.isHidden.toggle() }
+    @objc private func toggleLog() {
+        let hide = !(logCard?.isHidden ?? false)
+        logCard?.isHidden = hide
+        if let b = hideBtn as? HBtn {
+            b.titleText = hide ? "Show logs" : "Hide logs"
+        }
+    }
     private func flipErrDetails() {
         guard let det = errDet else { return }
         det.isHidden.toggle()
