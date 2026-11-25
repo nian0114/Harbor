@@ -2,16 +2,17 @@ import AppKit
 import CHarbor
 import HarborKit
 
-/// 新建/编辑主机表单（对齐 linux hb-host-form.c）：
-/// 分节滚动 + 固定底部按钮条；字段级错误紧随其字段；
-/// 跳板有序列表（防环），空时有紧凑占位；密钥内联生成/导入。
+/// 新建/编辑主机表单（对齐 prototype .modal + PRD FR-01/FR-07 全部字段）：
+/// 520px 圆角白底弹窗，顶部标题 + × 关闭；标签在上方、两栏 field-row；
+/// 底部 E2EE hintbox + 取消 / 保存按钮条。
 final class HostForm: NSView, NSTextFieldDelegate {
     var onSave: ((HostRec, String?) -> Void)?   // (rec, password?)
     var onCancel: (() -> Void)?
     private var orig: HostRec?
+    private let modalTitle: String
 
     private let aliasF = NSTextField()
-    private let protoP = NSPopUpButton()          // ssh (+rdp/vnc 占位)
+    private let protoP = NSPopUpButton()          // ssh / rdp / vnc
     private let addrF = NSTextField()
     private let portF = NSTextField()
     private let userF = NSTextField()
@@ -27,16 +28,17 @@ final class HostForm: NSView, NSTextFieldDelegate {
     private let snippetP = NSPopUpButton()
     private let keepF = NSTextField()
     private let colorP = NSPopUpButton()
-    private var saveBtn: NSButton!
-    // 桌面（rdp/vnc）字段：桌面认证 + SSH 隧道（linux hb-host-form.c）
+    private var saveBtn: HBtn!
+    private var titleL: NSTextField!
+    // 桌面（rdp/vnc）字段：桌面认证 + SSH 隧道
     private let dpwF = NSSecureTextField()
-    private let dpwClearB = NSButton(title: "", target: nil, action: nil)
+    private let dpwClearB = HBtn(L("清除已保存密码"), style: .gray, sm: true)
     private var dpwCleared = false
     private let domF = NSTextField()
     private let tunnelSw = NSSwitch()
     private let viaP = NSPopUpButton()
     private var viaIds: [String?] = []
-    private let fwdBtn = NSButton(title: "", target: nil, action: nil)
+    private let fwdBtn = HBtn(L("生成配套转发规则"), style: .gray, sm: true)
     private let tunnelHint = NSTextField(labelWithString: "")
     private var keyIds: [String] = []
     private var hostChoices: [(id: String, name: String)] = []
@@ -46,96 +48,214 @@ final class HostForm: NSView, NSTextFieldDelegate {
     private var errShown: Set<String> = []
     private let content = FlippedView()
 
-    override init(frame: NSRect) {
+    init(frame: NSRect, title: String = "New host") {
+        self.modalTitle = title
         super.init(frame: frame)
         build()
         validate()
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    override func cancelOperation(_ sender: Any?) { cancel() }
+
     /// 内容布局游标
     private var y: CGFloat = 0
-    private let pad: CGFloat = 16
+    private let pad: CGFloat = 22
     private var contentW: CGFloat { content.bounds.width }
 
-    private func heading(_ t: String) {
-        let l = NSTextField(labelWithString: t)
-        l.font = .boldSystemFont(ofSize: 12)
-        l.textColor = .secondaryLabelColor
-        l.frame = NSRect(x: pad, y: y, width: 300, height: 18)
-        content.addSubview(l); y += 26
+    // MARK: - 原型 .field / .field-row / .hintbox 构建器
+
+    /// 原型 .field-box：圆角 8、tableHead 底、line 描边、聚焦蓝框。
+    private func styleInput(_ tf: NSTextField, placeholder: String = "",
+                            h: CGFloat = 36) -> NSView {
+        let box = ModalFieldBox(frame: NSRect(x: 0, y: 0, width: 100, height: h))
+        tf.isBordered = false
+        tf.drawsBackground = false
+        tf.focusRingType = .none
+        tf.font = .systemFont(ofSize: 13)
+        tf.hbText = "text"
+        tf.placeholderString = placeholder
+        tf.lineBreakMode = .byTruncatingTail
+        tf.frame = NSRect(x: 11, y: (h - 18) / 2, width: 78, height: 18)
+        tf.autoresizingMask = [.width]
+        box.addSubview(tf)
+        return box
     }
-    /// 字段行：label + control，可选字段级错误标签紧随其下
-    @discardableResult
-    private func field(_ t: String, _ v: NSView, h: CGFloat = 24,
-                       errKey: String? = nil) -> NSView {
+
+    private func styleSelect(_ pop: NSPopUpButton, h: CGFloat = 36) -> NSView {
+        let box = ModalFieldBox(frame: NSRect(x: 0, y: 0, width: 100, height: h))
+        pop.isBordered = false
+        pop.font = .systemFont(ofSize: 13)
+        pop.frame = NSRect(x: 6, y: (h - 24) / 2, width: 88, height: 24)
+        pop.autoresizingMask = [.width]
+        box.addSubview(pop)
+        return box
+    }
+
+    private func makeLabel(_ t: String) -> NSTextField {
         let l = NSTextField(labelWithString: t)
-        l.frame = NSRect(x: pad, y: y + 2, width: 92, height: 20)
-        l.alignment = .right
+        l.font = .systemFont(ofSize: 12, weight: .semibold)
+        l.hbText = "text2"
+        return l
+    }
+
+    private func heading(_ t: String) {
+        let sep = NSView(frame: NSRect(x: pad, y: y + 2,
+                                       width: contentW - pad * 2, height: 1))
+        sep.wantsLayer = true
+        sep.layer?.hbBg = "rowLine"
+        content.addSubview(sep)
+        let l = NSTextField(labelWithString: t)
+        l.font = .systemFont(ofSize: 11.5, weight: .bold)
+        l.hbText = "text3"
+        l.frame = NSRect(x: pad, y: y + 10, width: 300, height: 16)
         content.addSubview(l)
-        v.frame = NSRect(x: pad + 100, y: y,
-                         width: contentW - pad * 2 - 100, height: h)
+        y += 32
+    }
+
+    /// 单列字段（标签在上方，可选错误行紧随其下）。
+    private func field(_ t: String, _ v: NSView, h: CGFloat = 36,
+                       errKey: String? = nil) {
+        let w = contentW - pad * 2
+        if !t.isEmpty {
+            let l = makeLabel(t)
+            l.frame = NSRect(x: pad, y: y, width: w, height: 16)
+            content.addSubview(l)
+            y += 21
+        }
+        v.frame = NSRect(x: pad, y: y, width: w, height: h)
         content.addSubview(v)
-        y += h + 2
+        y += h
         if let k = errKey {
             let e = NSTextField(labelWithString: "")
-            e.textColor = .systemRed
-            e.font = .systemFont(ofSize: 10)
+            e.textColor = Theme.red.color
+            e.font = .systemFont(ofSize: 10.5)
             let show = errShown.contains(k)
             e.isHidden = !show
-            e.frame = NSRect(x: pad + 100, y: y,
-                             width: contentW - pad * 2 - 100, height: 14)
+            e.frame = NSRect(x: pad, y: y + 2, width: w, height: 14)
             content.addSubview(e)
             errFor[k] = e
-            if show { y += 14 }
+            if show { y += 16 }
         }
-        y += 6
-        return v
+        y += 12
+    }
+
+    /// 原型 .field-row：两栏并排，支持自定义比例（如 2:1）。
+    private func fieldRow(
+        _ left: (label: String, view: NSView, weight: CGFloat, errKey: String?),
+        _ right: (label: String, view: NSView, weight: CGFloat, errKey: String?),
+        h: CGFloat = 36
+    ) {
+        let gap: CGFloat = 12
+        let totalW = contentW - pad * 2 - gap
+        let sum = left.weight + right.weight
+        let lw = floor(totalW * left.weight / sum)
+        let rw = totalW - lw
+        let rx = pad + lw + gap
+
+        let ll = makeLabel(left.label)
+        ll.frame = NSRect(x: pad, y: y, width: lw, height: 16)
+        content.addSubview(ll)
+        let rl = makeLabel(right.label)
+        rl.frame = NSRect(x: rx, y: y, width: rw, height: 16)
+        content.addSubview(rl)
+        y += 21
+
+        left.view.frame = NSRect(x: pad, y: y, width: lw, height: h)
+        content.addSubview(left.view)
+        right.view.frame = NSRect(x: rx, y: y, width: rw, height: h)
+        content.addSubview(right.view)
+        y += h
+
+        var hasErr = false
+        for (item, x, w) in [(left, pad, lw), (right, rx, rw)] {
+            if let k = item.errKey {
+                let e = NSTextField(labelWithString: "")
+                e.textColor = Theme.red.color
+                e.font = .systemFont(ofSize: 10.5)
+                let show = errShown.contains(k)
+                e.isHidden = !show
+                e.frame = NSRect(x: x, y: y + 2, width: w, height: 14)
+                content.addSubview(e)
+                errFor[k] = e
+                if show { hasErr = true }
+            }
+        }
+        if hasErr { y += 16 }
+        y += 12
     }
 
     private func build() {
+        wantsLayer = true
+        layer?.cornerRadius = 14
+        layer?.masksToBounds = true
+        layer?.hbBg = "card"
+
         hostChoices = Vault.shared.list("host").map { o in
             defer { hb_obj_free(o) }
             return (hb_obj_id(o).str, hb_obj_get_str(o, "name").str)
         }
-        // 滚动区 + 固定底部
-        let scroll = NSScrollView(frame: NSRect(
-            x: 0, y: 48, width: frame.width, height: frame.height - 48))
-        scroll.autoresizingMask = [.width, .height]
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        addSubview(scroll)
+
+        // ── .modal-head：标题 + × 关闭 ──
+        let head = NSView(frame: NSRect(x: 0, y: frame.height - 52,
+                                        width: frame.width, height: 52))
+        head.autoresizingMask = [.width, .minYMargin]
+        titleL = NSTextField(labelWithString: modalTitle)
+        titleL.font = .boldSystemFont(ofSize: 16)
+        titleL.hbText = "text"
+        titleL.frame = NSRect(x: pad, y: 14, width: frame.width - pad * 2 - 36, height: 22)
+        titleL.autoresizingMask = [.width]
+        head.addSubview(titleL)
+        let closeBtn = NSButton(title: "", target: self, action: #selector(cancel))
+        closeBtn.isBordered = false
+        closeBtn.image = hbIcon("x", size: 13, tint: Theme.dyn("text3"))
+        closeBtn.frame = NSRect(x: frame.width - pad - 28, y: 12, width: 28, height: 28)
+        closeBtn.autoresizingMask = [.minXMargin]
+        closeBtn.wantsLayer = true
+        closeBtn.layer?.cornerRadius = 6
+        head.addSubview(closeBtn)
+        addSubview(head)
+
+        // ── .modal-foot：右对齐 取消 + 保存 ──
         let foot = NSView(frame: NSRect(x: 0, y: 0,
-                                        width: frame.width, height: 48))
+                                        width: frame.width, height: 60))
         foot.autoresizingMask = [.width]
         foot.wantsLayer = true
         foot.layer?.hbBg = "card"
-        let sep = NSView(frame: NSRect(x: 0, y: 47,
+        let sep = NSView(frame: NSRect(x: 0, y: 59,
                                        width: frame.width, height: 1))
         sep.wantsLayer = true
         sep.layer?.hbBg = "line"
         foot.addSubview(sep)
         addSubview(foot)
-        saveBtn = NSButton(title: L("保存"), target: self,
-                           action: #selector(save))
-        saveBtn.bezelStyle = .rounded
-        saveBtn.frame = NSRect(x: frame.width - 100, y: 10,
-                               width: 80, height: 28)
+
+        saveBtn = HBtn(L("保存"), style: .primary)
+        saveBtn.target = self; saveBtn.action = #selector(save)
+        saveBtn.frame = NSRect(x: frame.width - pad - 78, y: 14,
+                               width: 78, height: 32)
+        saveBtn.autoresizingMask = [.minXMargin]
         saveBtn.keyEquivalent = "\r"
         saveBtn.setAccessibilityIdentifier("hf-save")
         foot.addSubview(saveBtn)
-        let cancel = NSButton(title: L("取消"), target: self,
-                              action: #selector(cancel))
-        cancel.bezelStyle = .rounded
-        cancel.frame = NSRect(x: frame.width - 190, y: 10,
-                              width: 80, height: 28)
-        cancel.setAccessibilityIdentifier("hf-cancel")
-        foot.addSubview(cancel)
 
-        content.frame = NSRect(x: 0, y: 0,
-                               width: frame.width, height: 10)
+        let cancelBtn = HBtn(L("取消"), style: .gray)
+        cancelBtn.target = self; cancelBtn.action = #selector(cancel)
+        cancelBtn.frame = NSRect(x: frame.width - pad - 78 - 9 - 78, y: 14,
+                                 width: 78, height: 32)
+        cancelBtn.autoresizingMask = [.minXMargin]
+        cancelBtn.setAccessibilityIdentifier("hf-cancel")
+        foot.addSubview(cancelBtn)
+
+        // ── .modal-body：滚动区 ──
+        let scroll = NSScrollView(frame: NSRect(
+            x: 0, y: 60, width: frame.width, height: frame.height - 112))
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        addSubview(scroll)
+
+        content.frame = NSRect(x: 0, y: 0, width: frame.width, height: 10)
         scroll.documentView = content
-        y = 14
         rebuild()
     }
 
@@ -150,173 +270,252 @@ final class HostForm: NSView, NSTextFieldDelegate {
     private func rebuild() {
         content.subviews.forEach { $0.removeFromSuperview() }
         errFor.removeAll()
-        y = 14
-        heading(L("基本信息"))
+        y = 6
+
+        // 第 1 行：类型 | 别名
         let prevSel = protoP.indexOfSelectedItem
         protoP.removeAllItems()
         protoP.addItems(withTitles: ["SSH", "RDP", "VNC"])
         protoP.selectItem(at: max(0, prevSel))
         protoP.target = self; protoP.action = #selector(protoChanged)
-        field(L("协议"), protoP); protoP.setAccessibilityIdentifier("hf-proto")
-        field(L("别名"), aliasF); aliasF.setAccessibilityIdentifier("hf-alias")
-        field(L("地址"), addrF, errKey: "addr")
+        protoP.setAccessibilityIdentifier("hf-proto")
+        aliasF.setAccessibilityIdentifier("hf-alias")
+        fieldRow(
+            (L("类型"), styleSelect(protoP), 1, nil),
+            (L("别名"), styleInput(aliasF, placeholder: "my-server"), 1, nil)
+        )
+
+        // 第 2 行：地址 (2) | 端口 (1)
         addrF.setAccessibilityIdentifier("hf-address")
-        portF.placeholderString = selProto == "rdp" ? "3389"
-            : selProto == "vnc" ? "5901" : "22"
-        field(L("端口"), portF, errKey: "port")
         portF.setAccessibilityIdentifier("hf-port")
-        field(L("用户名"), userF); userF.setAccessibilityIdentifier("hf-user")
-        field(L("分组"), groupF); groupF.setAccessibilityIdentifier("hf-group")
-        tagsF.placeholderString = L("逗号分隔")
-        field(L("标签"), tagsF); tagsF.setAccessibilityIdentifier("hf-tags")
+        let defPort = selProto == "rdp" ? "3389" : selProto == "vnc" ? "5901" : "22"
+        fieldRow(
+            (L("地址"), styleInput(addrF, placeholder: "10.0.0.5"), 2, "addr"),
+            (L("端口"), styleInput(portF, placeholder: defPort), 1, "port")
+        )
+
+        // 第 3 行：用户名 | 分组
+        userF.setAccessibilityIdentifier("hf-user")
+        groupF.setAccessibilityIdentifier("hf-group")
+        fieldRow(
+            (L("用户名"), styleInput(userF, placeholder: "root"), 1, nil),
+            (L("分组"), styleInput(groupF, placeholder: L("未分组")), 1, nil)
+        )
 
         if isDesktop {
             buildDesktopSections()
         } else {
             buildSshSections()
         }
-        // 颜色 / 标签已在基本信息内？保持原顺序：高级段收尾
+
         if !isDesktop {
             buildAdvanced()
         } else {
             buildAdvancedDesktop()
         }
+
+        // ── 原型 .hintbox：E2EE 同步提示 ──
+        let w = contentW - pad * 2
+        let hb = NSView(frame: NSRect(x: pad, y: y + 4, width: w, height: 38))
+        hb.wantsLayer = true
+        hb.layer?.cornerRadius = 9
+        hb.layer?.borderWidth = 1
+        hb.layer?.hbBg = "hintBlueBg"
+        hb.layer?.hbBorder = "hintBlueLine"
+        let hl = NSTextField(labelWithString: L("保存后凭据将经 E2EE 同步到你的所有设备（FR-11）。"))
+        hl.font = .systemFont(ofSize: 12)
+        hl.hbText = "hintBlueFg"
+        hl.frame = NSRect(x: 13, y: 10, width: w - 26, height: 18)
+        hb.addSubview(hl)
+        content.addSubview(hb)
+        y += 54
+
         content.frame = NSRect(x: 0, y: 0,
                                width: content.bounds.width, height: y + 8)
         rebuildJumpRows()
-        for f in [addrF, portF, keepF, aliasF, userF] where f.delegate == nil {
+        for f in [addrF, portF, keepF, aliasF, userF, groupF, tagsF, idFileF]
+            where f.delegate == nil {
             f.delegate = self
         }
         authChanged()
     }
 
-    /// ssh 专属：认证 + 跳板（linux sec_auth / sec_jump）。
+    /// ssh 专属：跳板（ProxyJump）+ 认证。
     private func buildSshSections() {
-        heading(L("认证"))
-        authP.removeAllItems()
-        authP.addItems(withTitles: [L("自动"), L("密码"), L("密钥"),
-                                    L("Agent"), L("无")])
-        authP.target = self; authP.action = #selector(authChanged)
-        field(L("认证"), authP); authP.setAccessibilityIdentifier("hf-auth")
-        pwF.placeholderString = L("连接密码（加密保存）")
-        field(L("密码"), pwF); pwF.setAccessibilityIdentifier("hf-password")
-        reloadKeys()
-        field(L("密钥"), keyP); keyP.setAccessibilityIdentifier("hf-key")
-        let kb = NSStackView()
-        kb.orientation = .horizontal; kb.spacing = 6
-        let gen = NSButton(title: L("生成"), target: self,
-                           action: #selector(genKeyInline))
-        gen.setAccessibilityIdentifier("hf-keygen")
-        let imp = NSButton(title: L("导入"), target: self,
-                           action: #selector(importKeyInline))
-        imp.setAccessibilityIdentifier("hf-keyimport")
-        [gen, imp].forEach { $0.bezelStyle = .rounded;
-                             kb.addArrangedSubview($0) }
-        kb.frame = NSRect(x: pad + 100, y: y,
-                          width: contentW - pad * 2 - 100, height: 24)
-        content.addSubview(kb); y += 30
-        idFileF.placeholderString = "~/.ssh/id_ed25519"
-        field(L("密钥文件"), idFileF)
-        idFileF.setAccessibilityIdentifier("hf-idfile")
-        let fb = NSButton(title: L("选择…"), target: self,
-                          action: #selector(chooseFile))
-        fb.bezelStyle = .rounded
-        fb.frame = NSRect(x: contentW - pad - 74, y: y - 30,
-                          width: 74, height: 22)
-        content.addSubview(fb)
+        // 跳板机 (ProxyJump)
+        let w = contentW - pad * 2
+        let jl = makeLabel(L("跳板机 (ProxyJump)"))
+        jl.frame = NSRect(x: pad, y: y, width: w, height: 16)
+        content.addSubview(jl); y += 21
 
-        heading(L("跳板（外→内，按顺序）"))
         let jh = max(CGFloat(jumpIds.count), 1) * 26 + 4
         jumpList.orientation = .vertical; jumpList.spacing = 4
-        jumpList.frame = NSRect(x: pad + 100, y: y,
-                                width: contentW - pad * 2 - 100, height: jh)
+        jumpList.frame = NSRect(x: pad, y: y, width: w, height: jh)
         content.addSubview(jumpList)
-        y += jh + 6
+        y += jh + 4
+
         jumpAddP.removeAllItems()
         jumpAddP.addItem(withTitle: L("+ 添加跳板…"))
         for hc in hostChoices where hc.id != orig?.id {
             jumpAddP.addItem(withTitle: hc.name.isEmpty ? hc.id : hc.name)
         }
         jumpAddP.target = self; jumpAddP.action = #selector(addJump)
-        jumpAddP.frame = NSRect(x: pad + 100, y: y, width: 200, height: 24)
         jumpAddP.setAccessibilityIdentifier("hf-jump-add")
-        content.addSubview(jumpAddP); y += 30
+        let jumpSel = styleSelect(jumpAddP, h: 34)
+        jumpSel.frame = NSRect(x: pad, y: y, width: w, height: 34)
+        content.addSubview(jumpSel); y += 36
+
         let je = NSTextField(labelWithString: "")
-        je.textColor = .systemRed; je.font = .systemFont(ofSize: 10)
+        je.textColor = Theme.red.color; je.font = .systemFont(ofSize: 10.5)
         let jshow = errShown.contains("jump")
         je.isHidden = !jshow
-        je.frame = NSRect(x: pad + 100, y: y,
-                          width: contentW - pad * 2 - 100, height: 14)
+        je.frame = NSRect(x: pad, y: y, width: w, height: 14)
         content.addSubview(je); errFor["jump"] = je
-        y += jshow ? 18 : 4
+        y += jshow ? 22 : 10
 
+        // 认证
+        heading(L("认证"))
+        authP.removeAllItems()
+        authP.addItems(withTitles: [L("自动"), L("密码"), L("密钥"),
+                                    L("Agent"), L("无")])
+        authP.target = self; authP.action = #selector(authChanged)
+        authP.setAccessibilityIdentifier("hf-auth")
+        pwF.setAccessibilityIdentifier("hf-password")
+        fieldRow(
+            (L("认证方式"), styleSelect(authP), 1, nil),
+            (L("密码"), styleInput(pwF, placeholder: L("连接密码（加密保存）")), 1, nil)
+        )
+
+        reloadKeys()
+        keyP.setAccessibilityIdentifier("hf-key")
+        let keyLabel = makeLabel(L("密钥"))
+        keyLabel.frame = NSRect(x: pad, y: y, width: w, height: 16)
+        content.addSubview(keyLabel); y += 21
+        let keyBox = styleSelect(keyP)
+        keyBox.frame = NSRect(x: pad, y: y, width: w - 136, height: 36)
+        content.addSubview(keyBox)
+        let gen = HBtn(L("生成"), style: .gray, sm: true)
+        gen.target = self; gen.action = #selector(genKeyInline)
+        gen.frame = NSRect(x: contentW - pad - 128, y: y + 2, width: 60, height: 32)
+        gen.setAccessibilityIdentifier("hf-keygen")
+        content.addSubview(gen)
+        let imp = HBtn(L("导入"), style: .gray, sm: true)
+        imp.target = self; imp.action = #selector(importKeyInline)
+        imp.frame = NSRect(x: contentW - pad - 60, y: y + 2, width: 60, height: 32)
+        imp.setAccessibilityIdentifier("hf-keyimport")
+        content.addSubview(imp)
+        y += 48
+
+        idFileF.setAccessibilityIdentifier("hf-idfile")
+        let idLabel = makeLabel(L("密钥文件"))
+        idLabel.frame = NSRect(x: pad, y: y, width: w, height: 16)
+        content.addSubview(idLabel); y += 21
+        let idBox = styleInput(idFileF, placeholder: "~/.ssh/id_ed25519")
+        idBox.frame = NSRect(x: pad, y: y, width: w - 82, height: 36)
+        content.addSubview(idBox)
+        let fb = HBtn(L("选择…"), style: .gray, sm: true)
+        fb.target = self; fb.action = #selector(chooseFile)
+        fb.frame = NSRect(x: contentW - pad - 74, y: y + 2, width: 74, height: 32)
+        content.addSubview(fb)
+        y += 48
     }
+
     private func buildAdvanced() {
         heading(L("高级"))
         reloadSnippets()
-        field(L("启动片段"), snippetP)
         snippetP.setAccessibilityIdentifier("hf-snippet")
-        keepF.placeholderString = L("30（0=关闭）")
-        field(L("保活(秒)"), keepF, errKey: "keep")
         keepF.setAccessibilityIdentifier("hf-keepalive")
-        buildColor()
+        fieldRow(
+            (L("启动片段"), styleSelect(snippetP), 1, nil),
+            (L("保活(秒)"), styleInput(keepF, placeholder: L("30（0=关闭）")), 1, "keep")
+        )
+        buildColorAndTags()
     }
-    /// 桌面主机的高级段：颜色（Linux 桌面主机也显示颜色/分组/OS 段，
-    /// 此处颜色行与 ssh 共用）。
+
     private func buildAdvancedDesktop() {
         heading(L("高级"))
-        buildColor()
+        buildColorAndTags()
     }
-    private func buildColor() {
+
+    private func buildColorAndTags() {
         colorP.removeAllItems()
         colorP.addItems(withTitles: [L("无"), "red", "orange", "amber",
                                      "green", "blue", "pink", "purple"])
-        field(L("颜色"), colorP); colorP.setAccessibilityIdentifier("hf-color")
+        colorP.setAccessibilityIdentifier("hf-color")
+        tagsF.setAccessibilityIdentifier("hf-tags")
+        fieldRow(
+            (L("颜色标签"), styleSelect(colorP), 1, nil),
+            (L("标签"), styleInput(tagsF, placeholder: L("逗号分隔")), 1, nil)
+        )
     }
 
-    /// rdp/vnc 专属：桌面认证 + SSH 隧道（linux sec_dauth / sec_tunnel）。
+    /// rdp/vnc 专属：原型 .check-row 隧道开关 + 经由 SSH 主机 + 桌面认证。
     private func buildDesktopSections() {
+        let w = contentW - pad * 2
+        // 原型 .check-row：通过 SSH 隧道连接（回环穿透）
+        let cr = NSView(frame: NSRect(x: pad, y: y, width: w, height: 42))
+        let ct = NSTextField(labelWithString: L("通过 SSH 隧道连接（回环穿透）"))
+        ct.font = .systemFont(ofSize: 13, weight: .semibold)
+        ct.hbText = "text"
+        ct.frame = NSRect(x: 0, y: 20, width: w - 54, height: 18)
+        cr.addSubview(ct)
+        let cs = NSTextField(labelWithString: L("目标只监听 127.0.0.1 时，借下方 SSH 主机自动建立 Local 转发"))
+        cs.font = .systemFont(ofSize: 11.5)
+        cs.hbText = "text3"
+        cs.lineBreakMode = .byTruncatingTail
+        cs.frame = NSRect(x: 0, y: 2, width: w - 54, height: 16)
+        cr.addSubview(cs)
+        tunnelSw.target = self; tunnelSw.action = #selector(tunnelChanged)
+        tunnelSw.setAccessibilityIdentifier("hf-tunnel")
+        tunnelSw.frame = NSRect(x: w - 42, y: 9, width: 42, height: 24)
+        cr.addSubview(tunnelSw)
+        content.addSubview(cr)
+        y += 52
+
+        reloadVia()
+        viaP.setAccessibilityIdentifier("hf-via")
+        viaP.target = self; viaP.action = #selector(tunnelChanged)
+        let viaLabel = makeLabel(L("经由 SSH 主机"))
+        viaLabel.frame = NSRect(x: pad, y: y, width: w, height: 16)
+        content.addSubview(viaLabel); y += 21
+        let viaBox = styleSelect(viaP)
+        viaBox.frame = NSRect(x: pad, y: y, width: w - 134, height: 36)
+        content.addSubview(viaBox)
+        fwdBtn.target = self; fwdBtn.action = #selector(genFwd)
+        fwdBtn.toolTip = L("创建本机端口 → 此主机端口的 Local 转发，经所选 SSH 主机")
+        fwdBtn.frame = NSRect(x: contentW - pad - 126, y: y + 2, width: 126, height: 32)
+        fwdBtn.setAccessibilityIdentifier("hf-genfwd")
+        content.addSubview(fwdBtn)
+        y += 40
+        tunnelHint.textColor = Theme.green.color
+        tunnelHint.font = .systemFont(ofSize: 11)
+        tunnelHint.setAccessibilityIdentifier("hf-genfwd-hint")
+        tunnelHint.frame = NSRect(x: pad, y: y, width: w, height: 16)
+        content.addSubview(tunnelHint)
+        y += 22
+
         heading(L("桌面认证"))
-        // 用户名复用「基本信息」user 字段；密码可存 Vault secret
-        dpwF.placeholderString = L("密码（可空，连接时询问）")
-        let pr = NSStackView()
-        pr.orientation = .horizontal; pr.spacing = 6
         dpwF.setAccessibilityIdentifier("hf-dpassword")
-        pr.addArrangedSubview(dpwF)
-        dpwClearB.title = L("清除已保存密码")
-        dpwClearB.bezelStyle = .inline
         dpwClearB.target = self; dpwClearB.action = #selector(dpwClear)
         dpwClearB.setAccessibilityIdentifier("hf-dpw-clear")
         dpwClearB.isHidden = !hadDsecret || dpwCleared
-        pr.addArrangedSubview(dpwClearB)
-        field("", pr)
-        if selProto == "rdp" {
-            domF.placeholderString = L("留空 = 本机域")
-            field(L("域（RDP）"), domF)
-            domF.setAccessibilityIdentifier("hf-domain")
+        let pwW = dpwClearB.isHidden ? w : (w - 118)
+        let pwLabel = makeLabel(L("密码"))
+        pwLabel.frame = NSRect(x: pad, y: y, width: w, height: 16)
+        content.addSubview(pwLabel); y += 21
+        let dpwBox = styleInput(dpwF, placeholder: L("密码（可空，连接时询问）"))
+        dpwBox.frame = NSRect(x: pad, y: y, width: pwW, height: 36)
+        content.addSubview(dpwBox)
+        if !dpwClearB.isHidden {
+            dpwClearB.frame = NSRect(x: contentW - pad - 110, y: y + 2, width: 110, height: 32)
+            content.addSubview(dpwClearB)
         }
-        heading(L("隧道"))
-        tunnelSw.target = self; tunnelSw.action = #selector(tunnelChanged)
-        field(L("通过 SSH 隧道"), tunnelSw)
-        tunnelSw.setAccessibilityIdentifier("hf-tunnel")
-        reloadVia()
-        field(L("经由 SSH 主机"), viaP)
-        viaP.setAccessibilityIdentifier("hf-via")
-        viaP.target = self; viaP.action = #selector(tunnelChanged)
-        fwdBtn.title = L("生成配套转发规则")
-        fwdBtn.bezelStyle = .rounded
-        fwdBtn.target = self; fwdBtn.action = #selector(genFwd)
-        fwdBtn.toolTip = L("创建本机端口 → 此主机端口的 Local 转发，经所选 SSH 主机")
-        fwdBtn.setAccessibilityIdentifier("hf-genfwd")
-        let fb = NSStackView()
-        fb.orientation = .vertical; fb.spacing = 4
-        fb.alignment = .left
-        fb.addArrangedSubview(fwdBtn)
-        tunnelHint.textColor = .systemGreen
-        tunnelHint.font = .systemFont(ofSize: 10)
-        tunnelHint.setAccessibilityIdentifier("hf-genfwd-hint")
-        fb.addArrangedSubview(tunnelHint)
-        field("", fb)
+        y += 48
+
+        if selProto == "rdp" {
+            domF.setAccessibilityIdentifier("hf-domain")
+            field(L("域（RDP）"), styleInput(domF, placeholder: L("留空 = 本机域")))
+        }
         fwdBtnRefresh()
     }
 
@@ -326,9 +525,9 @@ final class HostForm: NSView, NSTextFieldDelegate {
         dpwClearB.isHidden = true
         dpwF.stringValue = ""
         dpwF.toolTip = L("保存后将清除已保存密码")
+        rebuild()
     }
     @objc private func protoChanged() {
-        /* 端口仍停在某协议的默认值 → 跟随新协议（留空即默认） */
         let p = Int(portF.stringValue)
         if p == nil || [22, 3389, 5901].contains(p ?? 0) {
             portF.stringValue = ""
@@ -445,6 +644,7 @@ final class HostForm: NSView, NSTextFieldDelegate {
         row.orientation = .horizontal; row.spacing = 4
         let name = hostChoices.first { $0.id == id }?.name ?? id
         let l = NSTextField(labelWithString: name)
+        l.hbText = "text"
         l.widthAnchor.constraint(greaterThanOrEqualToConstant: 140)
             .isActive = true
         let up = NSButton(title: "↑", target: self,
@@ -459,8 +659,8 @@ final class HostForm: NSView, NSTextFieldDelegate {
     }
     private func emptyJumpRow() {
         let l = NSTextField(labelWithString: L("无跳板 — 从下方添加"))
-        l.textColor = .tertiaryLabelColor
-        l.font = .systemFont(ofSize: 11)
+        l.hbText = "text3"
+        l.font = .systemFont(ofSize: 11.5)
         jumpList.addArrangedSubview(l)
     }
     @objc private func addJump() {
@@ -521,7 +721,6 @@ final class HostForm: NSView, NSTextFieldDelegate {
             idFileF.stringValue = u.path
         }
     }
-    // 内联生成：与密钥页同对话框，生成后入库并选中
     @objc private func genKeyInline() {
         let a = NSAlert()
         a.messageText = L("生成密钥")
@@ -562,7 +761,6 @@ final class HostForm: NSView, NSTextFieldDelegate {
             }
         }
     }
-    // 内联导入：选文件 → 口令 → 入库并选中
     @objc private func importKeyInline() {
         let op = NSOpenPanel()
         guard op.runModal() == .OK, let u = op.url else { return }
@@ -604,8 +802,6 @@ final class HostForm: NSView, NSTextFieldDelegate {
         if jumpCycle() { errs["jump"] = L("跳板链形成环") }
         for (k, e) in errFor { e.stringValue = errs[k] ?? "" }
         saveBtn.isEnabled = errs.isEmpty
-        // 错误集合变化 → rebuild 折叠/展开对应错误行（不改控件值）；
-        // rebuild 会移除再挂载控件，先记下正在编辑的字段再恢复焦点
         if Set(errs.keys) != errShown {
             errShown = Set(errs.keys)
             let editing: NSTextField? = [addrF, portF, keepF, aliasF, userF,
@@ -625,7 +821,7 @@ final class HostForm: NSView, NSTextFieldDelegate {
         rebuild()
         protoP.selectItem(at: ["ssh", "rdp", "vnc"]
             .firstIndex(of: h.proto) ?? 0)
-        rebuild()               // 按协议铺开对应分区
+        rebuild()
         hadDsecret = Vault.shared.secret(h.id, "password") != nil
         dpwClearB.isHidden = !hadDsecret || dpwCleared
         domF.stringValue = h.domain
@@ -688,7 +884,6 @@ final class HostForm: NSView, NSTextFieldDelegate {
             h.tunnel = tunnelSw.state == .on ? "ssh" : ""
             h.via = tunnelSw.state == .on
                 ? (viaIds[safe: viaP.indexOfSelectedItem] ?? nil) ?? "" : ""
-            /* ssh 专属字段清空 */
             h.auth = "auto"; h.keyId = ""; h.identityFile = ""
             h.jumps = []; h.snippetId = ""; h.keepalive = -1
         } else {
@@ -700,7 +895,6 @@ final class HostForm: NSView, NSTextFieldDelegate {
         let h = rec
         guard !h.address.isEmpty else { NSSound.beep(); return }
         if isDesktop {
-            /* 桌面密码：空 = 保留已保存；dpwCleared = 显式清除 */
             let pw = dpwF.stringValue.isEmpty ? nil : dpwF.stringValue
             dpwF.stringValue = ""
             if dpwCleared, !h.id.isEmpty {
@@ -716,6 +910,19 @@ final class HostForm: NSView, NSTextFieldDelegate {
         }
     }
     @objc private func cancel() { onCancel?() }
+}
+
+/// 原型 .field input/select 容器：圆角 8、#fbfcfd 底、1px 描边。
+private final class ModalFieldBox: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.borderWidth = 1
+        layer?.hbBg = "tableHead"
+        layer?.hbBorder = "line"
+    }
+    required init?(coder: NSCoder) { fatalError() }
 }
 
 /// 顶部锚定的 documentView（isFlipped：y 自顶向下增长）。

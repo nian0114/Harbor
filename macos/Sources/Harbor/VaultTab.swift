@@ -201,11 +201,14 @@ final class VaultTab: TermTab {
             return
         }
         let sheet = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 640),
-            styleMask: [.titled], backing: .buffered, defer: false)
-        sheet.title = L("编辑主机")
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 640),
+            styleMask: [.borderless], backing: .buffered, defer: false)
+        sheet.isOpaque = false
+        sheet.backgroundColor = .clear
+        sheet.hasShadow = true
         sheet.isReleasedWhenClosed = false
-        let form = HostForm(frame: sheet.contentView!.bounds)
+        let form = HostForm(frame: NSRect(x: 0, y: 0, width: 520, height: 640),
+                            title: L("编辑主机"))
         form.fill(h)
         form.onSave = { rec, pw in
             let o = store.apply(rec)

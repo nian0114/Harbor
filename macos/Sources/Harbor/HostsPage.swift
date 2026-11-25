@@ -95,12 +95,16 @@ final class HBtn: NSButton {
     var icon: String? { didSet { restyle() } }
     var titleText = "" { didSet { restyle() } }
     private var hovered = false
+    override var isEnabled: Bool {
+        didSet { alphaValue = isEnabled ? 1 : 0.45 }
+    }
 
     convenience init(_ title: String, style: Style = .gray,
                      sm: Bool = false, icon: String? = nil) {
         self.init(frame: .zero)
         self.style = style; self.sm = sm
         self.icon = icon; titleText = title
+        bezelStyle = .shadowlessSquare
         isBordered = false
         wantsLayer = true
         layer?.cornerRadius = 8
@@ -402,23 +406,23 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
         bar2.autoresizingMask = [.width, .minYMargin]
         addSubview(bar2)
         let tw = bar2.frame.width
-        let nb = HBtn("New host", style: .primary, icon: "plus")
+        let nb = HBtn("New host", style: .gray, icon: "plus")
         nb.target = self; nb.action = #selector(newHost)
         nb.frame = NSRect(x: 0, y: 1, width: 110, height: 30)
         nb.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
         nb.setAccessibilityIdentifier("hosts-new")
         bar2.addSubview(nb)
-        let imp = HBtn("▾", style: .primary)
+        let imp = HBtn("▾", style: .gray)
         imp.target = self; imp.action = #selector(importMenu(_:))
         imp.frame = NSRect(x: 110, y: 1, width: 30, height: 30)
         imp.layer?.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
         imp.setAccessibilityIdentifier("hosts-import")
         bar2.addSubview(imp)
-        let divider = NSView(frame: NSRect(x: 110, y: 5, width: 1,
-                                           height: 22))
+        let divider = NSView(frame: NSRect(x: 110, y: 1, width: 1,
+                                           height: 30))
         divider.wantsLayer = true
         divider.layer?.backgroundColor =
-            NSColor.black.withAlphaComponent(0.12).cgColor
+            NSColor.black.withAlphaComponent(0.08).cgColor
         bar2.addSubview(divider)
         let serial = HBtn("Serial", style: .ghost, icon: "plug")
         serial.target = self; serial.action = #selector(serialInfo)
@@ -1068,11 +1072,14 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
     // MARK: 新建/编辑表单
     func editHost(_ h: HostRec?) {
         guard let w = window else { return }
-        let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 640),
-                             styleMask: [.titled], backing: .buffered, defer: false)
-        sheet.title = h == nil ? "New host" : L("编辑主机")
+        let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 640),
+                             styleMask: [.borderless], backing: .buffered, defer: false)
+        sheet.isOpaque = false
+        sheet.backgroundColor = .clear
+        sheet.hasShadow = true
         sheet.isReleasedWhenClosed = false
-        let form = HostForm(frame: sheet.contentView!.bounds)
+        let form = HostForm(frame: NSRect(x: 0, y: 0, width: 520, height: 640),
+                            title: h == nil ? "New host" : L("编辑主机"))
         if let h { form.fill(h) }
         form.onSave = { [weak self] rec, pw in
             let o = self?.store.apply(rec)
