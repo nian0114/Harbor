@@ -90,7 +90,7 @@ final class KnownPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     private func buildBar() {
-        let imp = HBtn(L("导入 known_hosts"), icon: "plus")
+        let imp = HBtn("Import", icon: "plus")
         imp.onTap = { [weak self] in self?.importBtn() }
         imp.setAccessibilityIdentifier("known-import")
         imp.frame = NSRect(x: 18, y: bounds.height - 45,

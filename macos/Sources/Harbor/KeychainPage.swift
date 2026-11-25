@@ -84,7 +84,7 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     private func buildBar() {
-        let split = VSplit(L("新建密钥"), icon: "plus")
+        let split = VSplit("New key", icon: "plus")
         split.entries = [
             VMenuEntry(L("生成新密钥")) { [weak self] in
                 self?.genKey()
@@ -432,7 +432,7 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
             return wrap
         case "c4":
             return vLabel(it.usedBy > 0
-                ? String(format: L("%d 台主机"), it.usedBy) : "—")
+                ? String(format: L("%d 台主机"), it.usedBy) : L("0 台主机"))
         default:
             let s = NSStackView()
             s.orientation = .horizontal

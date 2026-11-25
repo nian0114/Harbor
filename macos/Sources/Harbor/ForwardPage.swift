@@ -79,7 +79,7 @@ final class ForwardPage: NSView {
 
     // ---------- 工具栏 ----------
     private func buildBar() {
-        let split = VSplit(L("新建转发"), icon: "plus")
+        let split = VSplit("New forwarding", icon: "plus")
         split.entries = [
             VMenuEntry(L("新建规则")) { [weak self] in self?.onNew() },
             VMenuEntry(L("全部启动")) { [weak self] in

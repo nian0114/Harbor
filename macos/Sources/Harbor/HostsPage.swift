@@ -1301,12 +1301,21 @@ final class HostDrawer: NSView {
         addSubview(x)
         sep(62)
 
+        // scrollable body（tags + rows + hintbox）
+        let bodyScroll = NSScrollView(frame: NSRect(x: 0, y: 63, width: W, height: max(0, H - 63 - 61)))
+        bodyScroll.autoresizingMask = [.width, .height]
+        bodyScroll.hasVerticalScroller = true
+        bodyScroll.drawsBackground = false
+        addSubview(bodyScroll)
+        let bodyDoc = FlippedView(frame: NSRect(x: 0, y: 0, width: W, height: 10))
+        bodyScroll.documentView = bodyDoc
+
         // tags
         var tx: CGFloat = 18
         func addTag(_ t: String, green: Bool = false) {
             let tg = hbTagLabel(t, green: green)
-            tg.frame.origin = NSPoint(x: tx, y: 76)
-            addSubview(tg)
+            tg.frame.origin = NSPoint(x: tx, y: 13)
+            bodyDoc.addSubview(tg)
             tx += tg.frame.width + 6
         }
         if !host.via.isEmpty || host.tunnel == "ssh" {
@@ -1317,26 +1326,26 @@ final class HostDrawer: NSView {
         addTag(L("E2EE 已同步"))
 
         // rows
-        var y: CGFloat = 108
+        var y: CGFloat = 45
         func row(_ k: String, _ v: String) {
             let kl = NSTextField(labelWithString: k)
             kl.font = .systemFont(ofSize: 12.5)
             kl.hbText = "text3"
             kl.frame = NSRect(x: 18, y: y + 9, width: 104, height: 16)
-            addSubview(kl)
+            bodyDoc.addSubview(kl)
             let vl = NSTextField(labelWithString: v)
             vl.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
             vl.alignment = .right
             vl.lineBreakMode = .byTruncatingMiddle
             vl.frame = NSRect(x: 130, y: y + 9, width: W - 148, height: 16)
             vl.autoresizingMask = [.width]
-            addSubview(vl)
+            bodyDoc.addSubview(vl)
             let s = NSView(frame: NSRect(x: 18, y: y + 33,
                                          width: W - 36, height: 1))
             s.autoresizingMask = [.width]
             s.wantsLayer = true
-            s.layer?.hbBg = "hover"
-            addSubview(s)
+            s.layer?.hbBg = "rowLine"
+            bodyDoc.addSubview(s)
             y += 34
         }
         row(L("协议"), host.proto.uppercased())
@@ -1379,8 +1388,10 @@ final class HostDrawer: NSView {
             hl.frame = NSRect(x: 13, y: 8, width: W - 62, height: 36)
             hl.autoresizingMask = [.width]
             hb.addSubview(hl)
-            addSubview(hb)
+            bodyDoc.addSubview(hb)
+            y += 72
         }
+        bodyDoc.frame = NSRect(x: 0, y: 0, width: W, height: y + 12)
 
         // foot
         let fs = NSView(frame: NSRect(x: 0, y: H - 61, width: W, height: 1))

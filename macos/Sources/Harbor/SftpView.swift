@@ -2041,6 +2041,7 @@ final class SftpView: NSView {
     private var xhead: NSTextField!
     private var xclear: NSButton!
     private var xwrap: NSView!
+    private var xwrapZeroH: NSLayoutConstraint!
     private var toastBox: NSView!
 
     override init(frame: NSRect) {
@@ -2160,6 +2161,9 @@ final class SftpView: NSView {
             sp.widthAnchor.constraint(greaterThanOrEqualToConstant: 0),
         ])
         cleanOpenCache()
+        xwrapZeroH = xwrap.heightAnchor.constraint(equalToConstant: 0)
+        xwrapZeroH.priority = .required
+        xheadSync()
     }
     required init?(coder: NSCoder) { nil }
 
@@ -2542,6 +2546,9 @@ final class SftpView: NSView {
         xhead.stringValue = String(
             format: L("传输队列 · %d 进行中"), act)
         xclear.isHidden = term == 0
+        let empty = xers.isEmpty
+        xwrap.isHidden = empty
+        xwrapZeroH?.isActive = empty
     }
 
     func cleanupTmp(_ x: Xfer) {
@@ -2761,6 +2768,9 @@ final class SftpView: NSView {
         }
         xers.removeAll()
         cleanOpenCache()
+        xwrapZeroH = xwrap.heightAnchor.constraint(equalToConstant: 0)
+        xwrapZeroH.priority = .required
+        xheadSync()
     }
 
     // ============================ chmod sheet ============================
