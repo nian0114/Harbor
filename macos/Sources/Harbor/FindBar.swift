@@ -10,6 +10,8 @@ final class FindBar: NSView, NSTextFieldDelegate {
     var onClose: (() -> Void)?
     var onChange: ((Int, Int) -> Void)?   // dev hook 用
 
+    private let fieldWrap = NSView()
+    private let searchIco = NSImageView()
     private let field = NSTextField()
     private let count = NSTextField(labelWithString: "0/0")
     private var iconBtns: [NSButton] = []
@@ -17,15 +19,18 @@ final class FindBar: NSView, NSTextFieldDelegate {
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        field.placeholderString = L("在终端中查找…")
-        field.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        fieldWrap.wantsLayer = true
+        fieldWrap.layer?.cornerRadius = 7
+        fieldWrap.layer?.borderWidth = 1
+        field.placeholderString = L("在 scrollback 中搜索…")
+        field.font = .systemFont(ofSize: 12.5)
         field.focusRingType = .none
-        field.isBezeled = true
-        field.bezelStyle = .roundedBezel
-        field.drawsBackground = true
+        field.isBezeled = false
+        field.drawsBackground = false
         field.delegate = self
         field.setAccessibilityIdentifier("find-field")
-        count.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        count.font = .systemFont(ofSize: 11.5)
+        count.alignment = .center
         count.setAccessibilityIdentifier("find-count")
         func iconBtn(_ icon: String, _ act: Selector, _ aid: String,
                      _ tip: String) -> NSButton {
@@ -45,52 +50,56 @@ final class FindBar: NSView, NSTextFieldDelegate {
         let cl = iconBtn("x", #selector(onCloseBtn),
                          "find-close", L("关闭 (Esc)"))
         iconBtns = [pv, nx, cl]
-        [field, count, pv, nx, cl].forEach {
+        [fieldWrap, searchIco, field, count, pv, nx, cl].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
-            addSubview($0)
         }
+        addSubview(fieldWrap); addSubview(count); addSubview(pv); addSubview(nx); addSubview(cl)
+        fieldWrap.addSubview(searchIco); fieldWrap.addSubview(field)
         NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: leadingAnchor,
-                                           constant: 12),
-            field.centerYAnchor.constraint(equalTo: centerYAnchor),
-            field.widthAnchor.constraint(equalToConstant: 220),
-            count.leadingAnchor.constraint(
-                equalTo: field.trailingAnchor, constant: 8),
+            fieldWrap.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            fieldWrap.centerYAnchor.constraint(equalTo: centerYAnchor),
+            fieldWrap.heightAnchor.constraint(equalToConstant: 26),
+            fieldWrap.widthAnchor.constraint(lessThanOrEqualToConstant: 340),
+            fieldWrap.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
+            searchIco.leadingAnchor.constraint(equalTo: fieldWrap.leadingAnchor, constant: 8),
+            searchIco.centerYAnchor.constraint(equalTo: fieldWrap.centerYAnchor),
+            searchIco.widthAnchor.constraint(equalToConstant: 13),
+            searchIco.heightAnchor.constraint(equalToConstant: 13),
+            field.leadingAnchor.constraint(equalTo: searchIco.trailingAnchor, constant: 6),
+            field.trailingAnchor.constraint(equalTo: fieldWrap.trailingAnchor, constant: -8),
+            field.centerYAnchor.constraint(equalTo: fieldWrap.centerYAnchor),
+            count.leadingAnchor.constraint(greaterThanOrEqualTo: fieldWrap.trailingAnchor, constant: 8),
+            count.trailingAnchor.constraint(equalTo: pv.leadingAnchor, constant: -6),
             count.centerYAnchor.constraint(equalTo: centerYAnchor),
-            count.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
-            cl.trailingAnchor.constraint(equalTo: trailingAnchor,
-                                         constant: -8),
+            count.widthAnchor.constraint(greaterThanOrEqualToConstant: 38),
+            cl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             cl.centerYAnchor.constraint(equalTo: centerYAnchor),
-            cl.widthAnchor.constraint(equalToConstant: 18),
-            nx.trailingAnchor.constraint(equalTo: cl.leadingAnchor,
-                                         constant: -4),
+            cl.widthAnchor.constraint(equalToConstant: 22),
+            nx.trailingAnchor.constraint(equalTo: cl.leadingAnchor, constant: -4),
             nx.centerYAnchor.constraint(equalTo: centerYAnchor),
-            nx.widthAnchor.constraint(equalToConstant: 18),
-            pv.trailingAnchor.constraint(equalTo: nx.leadingAnchor,
-                                         constant: -2),
+            nx.widthAnchor.constraint(equalToConstant: 22),
+            pv.trailingAnchor.constraint(equalTo: nx.leadingAnchor, constant: -4),
             pv.centerYAnchor.constraint(equalTo: centerYAnchor),
-            pv.widthAnchor.constraint(equalToConstant: 18),
+            pv.widthAnchor.constraint(equalToConstant: 22),
         ])
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    /// 按终端主题取色（对齐 linux .find-bar 的 --t-bar/--t-line/
-    /// --t-title/--t-fg/--t-muted 变量）。
     private func applyTermTheme(_ t: TermTheme) {
         layer?.backgroundColor = t.bar.color.cgColor
         layer?.borderColor = t.line.color.cgColor
         layer?.borderWidth = 1
+        fieldWrap.layer?.backgroundColor = t.line.color.cgColor
+        fieldWrap.layer?.borderColor = t.border.color.cgColor
+        searchIco.image = hbIcon("search", size: 13, tint: t.dim.color)
         field.textColor = t.fg.color
-        // bezeled 控件按系统外观取色 → 主题明暗决定 field 外观
-        field.appearance = NSAppearance(
-            named: t.id == "light" ? .aqua : .darkAqua)
         field.placeholderAttributedString = NSAttributedString(
-            string: L("在终端中查找…"),
+            string: L("在 scrollback 中搜索…"),
             attributes: [.foregroundColor: t.muted.color])
-        count.textColor = t.title.color
+        count.textColor = t.dim.color
         for b in iconBtns {
             let ic = b.identifier?.rawValue.dropFirst(3) ?? ""
-            b.image = hbIcon(String(ic), size: 11, tint: t.title.color)
+            b.image = hbIcon(String(ic), size: 12, tint: t.title.color)
         }
     }
 

@@ -236,8 +236,9 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         watchBtn = mk(L("监控 关"), "eye", #selector(onWatchBtn), "ws-watch")
         shareBtn = mk(L("共享"), "broadcast", #selector(onShareBtn), "ws-share")
         searchBtn = mk("", "search", #selector(onSearchBtn), "ws-find")
+        searchBtn.toolTip = L("终端内搜索 ⌘F")
         reconnBtn = mk(L("重连"), "refresh", #selector(onReconnBtn), "ws-reconn")
-        bcastBtn = mk(L("Broadcast"), "broadcast",
+        bcastBtn = mk(L("Broadcast 关"), "broadcast",
                       #selector(toggleBroadcast), "ws-broadcast")
         assistBtn = mk(L("助手栏"), "panel", #selector(toggleAssist), "ws-assist")
         focusBtn = mk(L("Focus"), "focus",
@@ -560,7 +561,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     private func applyBroadcast() {
         leavesList.forEach { applyMirror($0) }
         applyBorders()
-        bcastBtn.setContent(broadcast ? L("Broadcast 开") : L("Broadcast"),
+        bcastBtn.setContent(broadcast ? L("Broadcast 开") : L("Broadcast 关"),
                             icon: "broadcast")
         bcastBtn.mode = broadcast ? .on : .plain
     }

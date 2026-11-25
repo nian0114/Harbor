@@ -105,8 +105,8 @@ final class AssistPanel: NSView {
         leftSep.layer?.backgroundColor = t.line.color.cgColor
         searchRow.layer?.backgroundColor = t.line.color.cgColor
         searchRow.layer?.borderColor = t.border.color.cgColor
-        searchLbl.textColor = t.title.color
-        searchKeys.textColor = t.dim.color
+        searchLbl.textColor = theme.dim.color
+        searchKeys.textColor = theme.dim.color
         scroll.appearance = NSAppearance(
             named: t.id == "light" ? .aqua : .darkAqua)
         for b in tabBtns.values { b.applyTheme(t) }
@@ -166,28 +166,37 @@ final class AssistPanel: NSView {
             let lbl = NSTextField(labelWithString: "Autocomplete")
             lbl.font = .systemFont(ofSize: 12)
             lbl.textColor = theme.title.color
+            let betaWrap = NSView()
+            betaWrap.wantsLayer = true
+            betaWrap.layer?.borderWidth = 1
+            betaWrap.layer?.borderColor = Theme.RGBA(0x3a4763).color.cgColor
+            betaWrap.layer?.cornerRadius = 4
             let beta = NSTextField(labelWithString: "BETA")
             beta.font = .systemFont(ofSize: 9.5)
             beta.textColor = Theme.RGBA(0x8b96ad).color
-            beta.wantsLayer = true
-            beta.layer?.borderWidth = 1
-            beta.layer?.borderColor = Theme.RGBA(0x3a4763).color.cgColor
-            beta.layer?.cornerRadius = 4
+            beta.translatesAutoresizingMaskIntoConstraints = false
+            betaWrap.addSubview(beta)
+            NSLayoutConstraint.activate([
+                beta.leadingAnchor.constraint(equalTo: betaWrap.leadingAnchor, constant: 5),
+                beta.trailingAnchor.constraint(equalTo: betaWrap.trailingAnchor, constant: -5),
+                beta.topAnchor.constraint(equalTo: betaWrap.topAnchor, constant: 1),
+                beta.bottomAnchor.constraint(equalTo: betaWrap.bottomAnchor, constant: -1),
+            ])
             let sw = GSwitch()
             sw.isOn = Vault.shared.settingsBool("autocomplete", false)
             sw.onChange = { on in
                 Vault.shared.setSettingsBool("autocomplete", on)
             }
-            [lbl, beta, sw].forEach {
+            [lbl, betaWrap, sw].forEach {
                 $0.translatesAutoresizingMaskIntoConstraints = false
                 row.addSubview($0) }
             NSLayoutConstraint.activate([
                 row.heightAnchor.constraint(equalToConstant: 22),
                 lbl.leadingAnchor.constraint(equalTo: row.leadingAnchor),
                 lbl.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-                beta.leadingAnchor.constraint(equalTo: lbl.trailingAnchor,
-                                              constant: 6),
-                beta.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+                betaWrap.leadingAnchor.constraint(equalTo: lbl.trailingAnchor,
+                                                  constant: 6),
+                betaWrap.centerYAnchor.constraint(equalTo: row.centerYAnchor),
                 sw.trailingAnchor.constraint(equalTo: row.trailingAnchor),
                 sw.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             ])

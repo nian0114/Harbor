@@ -27,9 +27,9 @@ final class TabStrip: NSView {
     private static let minW: CGFloat = 84
     private static let titleFont = NSFont.systemFont(ofSize: 13)
 
-    /// 会话页（term/workspace/connect）激活走绿色；pinned/共享观看走灰蓝。
+    /// 会话页（term/workspace/connect）激活走绿色；pinned/远程桌面/共享观看走灰蓝。
     private func termStyle(_ t: TermTab) -> Bool {
-        t.closable && !(t is ShareTab)
+        t.closable && !(t is ShareTab) && !(t is DesktopTab)
     }
     /// tab 图标：会话页 iconName 缺省回退叶图标（terminal/os tile）。
     private func icon(_ t: TermTab) -> String {
@@ -155,12 +155,12 @@ final class TabStrip: NSView {
             let fg = (sel && term) ? Theme.tabTermFg.color
                                    : Theme.titlebarText.color
             var x = rc.minX + TabStrip.padX
-            // 图标 13px
-            let img = hbIcon(icon(t), size: 13,
+            // 图标 14px
+            let img = hbIcon(icon(t), size: 14,
                              tint: fg.withAlphaComponent(0.9))
-            img.draw(in: NSRect(x: x, y: rc.midY - 6.5,
-                                width: 13, height: 13))
-            x += 13 + TabStrip.innerGap
+            img.draw(in: NSRect(x: x, y: rc.midY - 7,
+                                width: 14, height: 14))
+            x += 14 + TabStrip.innerGap
             // 关闭 ×（右侧固定位）
             let closeW: CGFloat = t.closable ? 15 + TabStrip.innerGap : 0
             let dotW: CGFloat = dot(t) != nil ? 8 + TabStrip.innerGap : 0
@@ -198,11 +198,10 @@ final class TabStrip: NSView {
                     NSBezierPath(roundedRect: cr.insetBy(dx: -2, dy: -1),
                                  xRadius: 4, yRadius: 4).fill()
                 }
-                ("×" as NSString).draw(
-                    in: cr, withAttributes: [
-                        .font: NSFont.systemFont(ofSize: 12),
-                        .foregroundColor: fg.withAlphaComponent(
-                            i == hoverIdx && hoverClose ? 1 : 0.5)])
+                hbIcon("x", size: 11, tint: fg.withAlphaComponent(
+                    i == hoverIdx && hoverClose ? 1 : 0.5)).draw(
+                    in: NSRect(x: cr.midX - 5.5, y: cr.midY - 5.5,
+                               width: 11, height: 11))
             }
         }
         // ＋ 新建
