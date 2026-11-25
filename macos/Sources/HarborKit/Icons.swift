@@ -32,6 +32,7 @@ public enum Icons {
         "refresh": "<path d=\"M20.5 12a8.5 8.5 0 1 1-2.5-6M20.5 3.5V8H16\"/>",
         "plus": "<path d=\"M12 5v14M5 12h14\"/>",
         "shield": "<path d=\"M12 3l7.8 2.9v5.9c0 4.8-3.3 7.7-7.8 8.9-4.5-1.2-7.8-4.1-7.8-8.9V5.9L12 3z\"/><path d=\"m9 11.8 2.1 2.1 4-4.4\"/>",
+        "lock": "<rect x=\"5\" y=\"11\" width=\"14\" height=\"10\" rx=\"2.2\"/><path d=\"M8 11V7.5a4 4 0 0 1 8 0V11\"/>",
         "chevron-d": "<path d=\"m6 9 6 6 6-6\"/>",
         "chevron-r": "<path d=\"m9 6 6 6-6 6\"/>",
         "chevron-u": "<path d=\"m6 15 6-6 6 6\"/>",

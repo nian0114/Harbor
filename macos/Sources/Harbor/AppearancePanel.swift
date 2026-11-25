@@ -7,11 +7,21 @@ final class AppearancePanel: NSView {
     override var isFlipped: Bool { true }
     private let v = Vault.shared
     private let terminal = TerminalView()
+    private let previewWrap = NSView()
+    private let previewBar = NSView()
+    private let previewStatus = NSView()
+    private let previewTitleL = NSTextField(labelWithString: "ssh nian@10.88.2.11")
+    private let previewWatchBtn = NSView()
+    private let previewWatchL = NSTextField(labelWithString: L("监控 开"))
+    private let previewStatusL = NSTextField(labelWithString: "● " + L("已连接"))
+    private let previewTermL = NSTextField(labelWithString: "xterm-256color")
+    private let previewScrollL = NSTextField(labelWithString: L("scrollback 10,000 行"))
     private let settings = AppearanceSettingsView()
     private let fontSize = NSSlider(value: 14, minValue: 10, maxValue: 20, target: nil, action: nil)
     private let lineHeight = NSSlider(value: 1.15, minValue: 1, maxValue: 2.5, target: nil, action: nil)
     private let sizeLabel = vLabel("")
     private let heightLabel = vLabel("")
+    private let autoSw = VSwitch(frame: .zero)
     private var themes: [NSButton] = []
     var onChange: (() -> Void)?
     init() {
@@ -39,6 +49,10 @@ final class AppearancePanel: NSView {
 
         let choices = VPanel()
         choices.append(vPanelTitle(L("终端主题"), icon: "palette"))
+        let csub = NSTextField(wrappingLabelWithString: L("实时应用到所有会话与分屏，经 E2EE 同步到其它设备。"))
+        csub.font = .systemFont(ofSize: 12)
+        csub.hbText = "text3"
+        choices.append(csub)
         themes = TermTheme.all.enumerated().map { index, theme in
             let button = AppearanceThemeButton(theme: theme)
             button.tag = index
@@ -49,14 +63,20 @@ final class AppearancePanel: NSView {
         for pair in stride(from: 0, to: themes.count, by: 2) {
             let row = NSStackView(views: Array(themes[pair..<min(pair + 2, themes.count)]))
             row.distribution = .fillEqually
-            row.spacing = 8
+            row.spacing = 10
             choices.append(row)
         }
         fontSize.numberOfTickMarks = 11
         fontSize.allowsTickMarkValuesOnly = true
+        sizeLabel.font = .monospacedSystemFont(ofSize: 12.5, weight: .bold)
+        sizeLabel.hbText = "blue"
+        heightLabel.font = .monospacedSystemFont(ofSize: 12.5, weight: .bold)
+        heightLabel.hbText = "blue"
         for (title, value, slider) in [(L("字号"), sizeLabel, fontSize),
                                        (L("行高"), heightLabel, lineHeight)] {
-            let row = NSStackView(views: [vLabel(title), NSView(), value])
+            let tl = vLabel(title, head: true)
+            tl.hbText = "text2"
+            let row = NSStackView(views: [tl, NSView(), value])
             row.spacing = 8
             choices.append(row)
             slider.isContinuous = true
@@ -65,6 +85,23 @@ final class AppearancePanel: NSView {
             slider.setAccessibilityLabel(title)
             choices.append(slider)
         }
+        let autoRow = NSStackView()
+        autoRow.orientation = .horizontal; autoRow.spacing = 8; autoRow.alignment = .centerY
+        let autoTxt = NSStackView()
+        autoTxt.orientation = .vertical; autoTxt.spacing = 2; autoTxt.alignment = .leading
+        let autoTitle = vLabel("Autocomplete  BETA")
+        autoTitle.font = .systemFont(ofSize: 13)
+        let autoSub = NSTextField(wrappingLabelWithString: L("基于 Shell History 的本地补全，历史不出设备"))
+        autoSub.font = .systemFont(ofSize: 11.5); autoSub.hbText = "text3"
+        autoTxt.addArrangedSubview(autoTitle); autoTxt.addArrangedSubview(autoSub)
+        autoSw.isOn = v.settingsBool("autocomplete", false)
+        autoSw.target = self; autoSw.action = #selector(toggleAuto)
+        autoSw.translatesAutoresizingMaskIntoConstraints = false
+        autoSw.widthAnchor.constraint(equalToConstant: 38).isActive = true
+        autoSw.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        autoRow.addArrangedSubview(autoTxt); autoRow.addArrangedSubview(NSView()); autoRow.addArrangedSubview(autoSw)
+        choices.append(autoRow)
+
         let reset = HBtn(L("恢复默认"), sm: true, icon: "refresh")
         reset.onTap = { [weak self] in
             guard let self else { return }
@@ -78,10 +115,60 @@ final class AppearancePanel: NSView {
 
         let preview = VPanel()
         preview.append(vPanelTitle(L("实时预览"), icon: "terminal"))
-        terminal.heightAnchor.constraint(equalToConstant: 240).isActive = true
-        terminal.wantsLayer = true
-        terminal.layer?.cornerRadius = 8
-        terminal.layer?.masksToBounds = true
+        let psub = NSTextField(wrappingLabelWithString: L("拖动左侧滑杆 / 切换主题，立即生效。"))
+        psub.font = .systemFont(ofSize: 12); psub.hbText = "text3"
+        preview.append(psub)
+
+        previewWrap.wantsLayer = true
+        previewWrap.layer?.cornerRadius = 11
+        previewWrap.layer?.borderWidth = 1
+        previewWrap.layer?.hbBorder = "line"
+        previewWrap.layer?.masksToBounds = true
+        previewBar.wantsLayer = true
+        let uico = NSImageView(image: hbIcon("ubuntu", size: 13, tint: Theme.ubuntu.color))
+        previewTitleL.font = .systemFont(ofSize: 12)
+        previewWatchBtn.wantsLayer = true
+        previewWatchBtn.layer?.cornerRadius = 6
+        previewWatchBtn.layer?.borderWidth = 1
+        let wico = NSImageView(image: hbIcon("eye", size: 12, tint: Theme.green.color))
+        previewWatchL.font = .systemFont(ofSize: 11.5, weight: .medium)
+        let wstack = NSStackView(views: [wico, previewWatchL])
+        wstack.spacing = 4; wstack.edgeInsets = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
+        wstack.translatesAutoresizingMaskIntoConstraints = false
+        previewWatchBtn.addSubview(wstack)
+        NSLayoutConstraint.activate([
+            wstack.leadingAnchor.constraint(equalTo: previewWatchBtn.leadingAnchor),
+            wstack.trailingAnchor.constraint(equalTo: previewWatchBtn.trailingAnchor),
+            wstack.topAnchor.constraint(equalTo: previewWatchBtn.topAnchor),
+            wstack.bottomAnchor.constraint(equalTo: previewWatchBtn.bottomAnchor),
+        ])
+        let barRow = NSStackView(views: [uico, previewTitleL, NSView(), previewWatchBtn])
+        barRow.spacing = 6; barRow.alignment = .centerY
+        barRow.translatesAutoresizingMaskIntoConstraints = false
+        previewBar.addSubview(barRow)
+        NSLayoutConstraint.activate([
+            barRow.leadingAnchor.constraint(equalTo: previewBar.leadingAnchor, constant: 12),
+            barRow.trailingAnchor.constraint(equalTo: previewBar.trailingAnchor, constant: -12),
+            barRow.topAnchor.constraint(equalTo: previewBar.topAnchor, constant: 6),
+            barRow.bottomAnchor.constraint(equalTo: previewBar.bottomAnchor, constant: -6),
+        ])
+
+        previewStatus.wantsLayer = true
+        previewStatusL.font = .systemFont(ofSize: 11)
+        previewTermL.font = .systemFont(ofSize: 11)
+        previewScrollL.font = .systemFont(ofSize: 11)
+        let stRow = NSStackView(views: [previewStatusL, previewTermL, NSView(), previewScrollL])
+        stRow.spacing = 12; stRow.alignment = .centerY
+        stRow.translatesAutoresizingMaskIntoConstraints = false
+        previewStatus.addSubview(stRow)
+        NSLayoutConstraint.activate([
+            stRow.leadingAnchor.constraint(equalTo: previewStatus.leadingAnchor, constant: 12),
+            stRow.trailingAnchor.constraint(equalTo: previewStatus.trailingAnchor, constant: -12),
+            stRow.topAnchor.constraint(equalTo: previewStatus.topAnchor, constant: 5),
+            stRow.bottomAnchor.constraint(equalTo: previewStatus.bottomAnchor, constant: -5),
+        ])
+
+        terminal.heightAnchor.constraint(equalToConstant: 220).isActive = true
         terminal.setAccessibilityLabel(L("实时预览"))
         if let vt = hb_vt_new(8, 72, 0) {
             let sample = "\u{1b}[2mWelcome to Ubuntu 24.04 LTS\u{1b}[0m\r\n"
@@ -92,7 +179,21 @@ final class AppearancePanel: NSView {
             sample.withCString { hb_vt_feed(vt, $0, sample.utf8.count) }
             terminal.extVt = vt
         }
-        preview.append(terminal)
+        let pstack = VFlippedStack(views: [previewBar, terminal, previewStatus])
+        pstack.orientation = .vertical; pstack.spacing = 0
+        pstack.translatesAutoresizingMaskIntoConstraints = false
+        previewWrap.addSubview(pstack)
+        NSLayoutConstraint.activate([
+            pstack.leadingAnchor.constraint(equalTo: previewWrap.leadingAnchor),
+            pstack.trailingAnchor.constraint(equalTo: previewWrap.trailingAnchor),
+            pstack.topAnchor.constraint(equalTo: previewWrap.topAnchor),
+            pstack.bottomAnchor.constraint(equalTo: previewWrap.bottomAnchor),
+            previewBar.widthAnchor.constraint(equalTo: pstack.widthAnchor),
+            terminal.widthAnchor.constraint(equalTo: pstack.widthAnchor),
+            previewStatus.widthAnchor.constraint(equalTo: pstack.widthAnchor),
+        ])
+        preview.append(previewWrap)
+        preview.append(vHintBox(L("外观设置属于同步范围「外观与设置」（FR-11）；字号 / 行距 / 主题在 macOS · Linux · Android 三端一致。")))
         let panels = VPanelColumns(left: choices, right: preview)
         let more = VPanel()
         more.append(vPanelTitle(L("外观与终端"), icon: "palette"))
@@ -121,6 +222,19 @@ final class AppearancePanel: NSView {
         terminal.lineHeight = CGFloat(Double(v.setting("line_height") ?? "") ?? 1.15)
         terminal.cursorStyle = Int(v.setting("cursor_style") ?? "0") ?? 0
         terminal.theme = theme
+        previewBar.layer?.backgroundColor = theme.bar.color.cgColor
+        previewStatus.layer?.backgroundColor = theme.bar.color.cgColor
+        previewTitleL.textColor = theme.title.color
+        previewTermL.textColor = theme.muted.color
+        previewScrollL.textColor = theme.muted.color
+        previewStatusL.textColor = theme.cursor.color
+        let isLight = theme.id == "light"
+        previewWatchBtn.layer?.backgroundColor =
+            (isLight ? Theme.greenPillBg.color : Theme.tabTermBg.color).cgColor
+        previewWatchBtn.layer?.borderColor =
+            (isLight ? Theme.green.color.withAlphaComponent(0.35) : Theme.tabTermLine.color).cgColor
+        previewWatchL.textColor = isLight ? Theme.green.color : Theme.tabTermFg.color
+        autoSw.isOn = v.settingsBool("autocomplete", false)
         fontSize.doubleValue = Double(terminal.fontSize)
         lineHeight.doubleValue = Double(terminal.lineHeight)
         sizeLabel.stringValue = String(format: "%g px", Double(terminal.fontSize))
@@ -129,6 +243,11 @@ final class AppearancePanel: NSView {
             button.state = theme.id == choice.id ? .on : .off
             button.needsDisplay = true
         }
+    }
+
+    @objc private func toggleAuto() {
+        v.setSettingsBool("autocomplete", autoSw.isOn)
+        onChange?()
     }
 
     @objc private func selectTheme(_ button: NSButton) {
@@ -432,23 +551,32 @@ private final class AppearanceThemeButton: NSButton {
     required init?(coder: NSCoder) { nil }
 
     override func draw(_ dirtyRect: NSRect) {
-        let outline = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+        let on = state == .on
+        let outline = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 11, yRadius: 11)
         Theme.card.color.setFill()
         outline.fill()
-        (state == .on ? Theme.blue : Theme.line).color.setStroke()
+        outline.lineWidth = on ? 1.5 : 1
+        (on ? Theme.blue : Theme.line).color.setStroke()
         outline.stroke()
-        let sample = NSRect(x: 6, y: 24, width: max(0, bounds.width - 12), height: 35)
+        let sample = NSRect(x: 7, y: 26, width: max(0, bounds.width - 14), height: 33)
         theme.bg.color.setFill()
-        NSBezierPath(roundedRect: sample, xRadius: 5, yRadius: 5).fill()
+        NSBezierPath(roundedRect: sample, xRadius: 7, yRadius: 7).fill()
         let mono = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
-        ("demo@host:~$" as NSString).draw(at: NSPoint(x: 12, y: 42),
+        ("demo@host:~$" as NSString).draw(at: NSPoint(x: 13, y: 43),
                                          withAttributes: [.font: mono, .foregroundColor: theme.cursor.color])
-        ("✔ Tests passed" as NSString).draw(at: NSPoint(x: 12, y: 28),
+        ("✔ Tests passed" as NSString).draw(at: NSPoint(x: 13, y: 29),
                                            withAttributes: [.font: mono, .foregroundColor: theme.dim.color])
-        let title = theme.name + (state == .on ? "  ✓" : "")
-        (title as NSString).draw(in: NSRect(x: 9, y: 4, width: max(0, bounds.width - 18), height: 17),
-                                 withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-                                                  .foregroundColor: Theme.text.color])
+        let fg = on ? Theme.blue.color : Theme.text.color
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: fg,
+        ]
+        (theme.name as NSString).draw(at: NSPoint(x: 10, y: 5), withAttributes: attrs)
+        if on {
+            let nw = (theme.name as NSString).size(withAttributes: attrs).width
+            hbIcon("check", size: 12, tint: fg).draw(
+                in: NSRect(x: 14 + nw, y: 7, width: 12, height: 12))
+        }
     }
 }
 
