@@ -249,7 +249,7 @@ final class TableHeadCell: NSTableHeaderCell {
         Theme.dyn("tableHead").setFill()
         cellFrame.fill()
         Theme.dyn("line").setFill()
-        NSRect(x: cellFrame.minX, y: cellFrame.minY,
+        NSRect(x: cellFrame.minX, y: cellFrame.maxY - 1,
                width: cellFrame.width, height: 1).fill()
         let s = NSAttributedString(string: stringValue, attributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),

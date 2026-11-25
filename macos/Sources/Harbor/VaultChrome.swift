@@ -120,6 +120,10 @@ final class VField: NSView, NSTextFieldDelegate {
     }
     func controlTextDidBeginEditing(_ obj: Notification) {
         focused = true
+        layer?.shadowColor = Theme.blue.color.cgColor
+        layer?.shadowOpacity = 0.13
+        layer?.shadowRadius = 3
+        layer?.shadowOffset = .zero
         layer?.hbBorderResolver = { [weak self] in
             guard let self else { return nil }
             return (self.focused ? Theme.blue : Theme.line).color.cgColor
@@ -127,6 +131,7 @@ final class VField: NSView, NSTextFieldDelegate {
     }
     func controlTextDidEndEditing(_ obj: Notification) {
         focused = false
+        layer?.shadowOpacity = 0
         layer?.hbBorderResolver = { [weak self] in
             guard let self else { return nil }
             return (self.focused ? Theme.blue : Theme.line).color.cgColor

@@ -46,40 +46,49 @@ final class Palette: NSView, NSTextFieldDelegate {
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black
-            .withAlphaComponent(0.32).cgColor   // pal-scrim
+        layer?.hbBg = "palScrim"
         // 顶部面板：宽 560，上缘 ~90（对齐 .pal-box）
         let panel = NSView()
         panel.wantsLayer = true
         panel.layer?.hbBg = "card"
-        panel.layer?.cornerRadius = 12
-        panel.layer?.hbBorder = "line"
-        panel.layer?.borderWidth = 1
+        panel.layer?.cornerRadius = 14
+        panel.layer?.shadowOpacity = 0.35
+        panel.layer?.shadowRadius = 24
+        panel.layer?.shadowOffset = CGSize(width: 0, height: -8)
         panel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(panel)
-        // 输入行：search icon + field + esc badge
+        // 输入行（prototype .pal-input：通栏 + 底部分割线 + .kbd esc）
         let row = NSView()
-        row.wantsLayer = true
-        row.layer?.hbBg = "subtle"
-        row.layer?.cornerRadius = 8
         row.translatesAutoresizingMaskIntoConstraints = false
-        let ic = NSImageView(image: hbIcon("search", size: 15,
-                                           tint: Theme.dyn("termDim")))
+        let rowLine = NSView()
+        rowLine.wantsLayer = true
+        rowLine.layer?.hbBg = "line"
+        rowLine.translatesAutoresizingMaskIntoConstraints = false
+        let ic = NSImageView(image: hbIcon("search", size: 16,
+                                           tint: Theme.dyn("text3")))
         ic.translatesAutoresizingMaskIntoConstraints = false
         field.placeholderString =
             L("搜索主机、页面、Snippet 或命令…")
-        field.font = .systemFont(ofSize: 14)
+        field.font = .systemFont(ofSize: 14.5)
         field.isBezeled = false
         field.drawsBackground = false
         field.focusRingType = .none
         field.delegate = self
         field.translatesAutoresizingMaskIntoConstraints = false
         field.setAccessibilityIdentifier("pal-field")
+        let escWrap = NSView()
+        escWrap.wantsLayer = true
+        escWrap.layer?.cornerRadius = 5
+        escWrap.layer?.borderWidth = 1
+        escWrap.layer?.hbBg = "kbdBg"
+        escWrap.layer?.hbBorder = "line"
+        escWrap.translatesAutoresizingMaskIntoConstraints = false
         let esc = NSTextField(labelWithString: "esc")
-        esc.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        esc.hbText = "termDim"
+        esc.font = .systemFont(ofSize: 11)
+        esc.hbText = "text3"
         esc.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(ic); row.addSubview(field); row.addSubview(esc)
+        escWrap.addSubview(esc)
+        row.addSubview(ic); row.addSubview(field); row.addSubview(escWrap); row.addSubview(rowLine)
         listHost.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(row); panel.addSubview(listHost)
         NSLayoutConstraint.activate([
@@ -88,30 +97,35 @@ final class Palette: NSView, NSTextFieldDelegate {
             panel.widthAnchor.constraint(equalToConstant: 560),
             panel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor,
                                           constant: -40),
-            row.leadingAnchor.constraint(equalTo: panel.leadingAnchor,
-                                         constant: 12),
-            row.trailingAnchor.constraint(equalTo: panel.trailingAnchor,
-                                          constant: -12),
-            row.topAnchor.constraint(equalTo: panel.topAnchor,
-                                     constant: 12),
-            row.heightAnchor.constraint(equalToConstant: 34),
+            row.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            row.topAnchor.constraint(equalTo: panel.topAnchor),
+            row.heightAnchor.constraint(equalToConstant: 48),
+            rowLine.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            rowLine.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            rowLine.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+            rowLine.heightAnchor.constraint(equalToConstant: 1),
             ic.leadingAnchor.constraint(equalTo: row.leadingAnchor,
-                                        constant: 10),
+                                        constant: 16),
             ic.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             field.leadingAnchor.constraint(equalTo: ic.trailingAnchor,
-                                           constant: 9),
-            field.trailingAnchor.constraint(equalTo: esc.leadingAnchor,
-                                            constant: -8),
+                                           constant: 10),
+            field.trailingAnchor.constraint(equalTo: escWrap.leadingAnchor,
+                                            constant: -10),
             field.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            esc.trailingAnchor.constraint(equalTo: row.trailingAnchor,
-                                          constant: -10),
-            esc.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            escWrap.trailingAnchor.constraint(equalTo: row.trailingAnchor,
+                                              constant: -16),
+            escWrap.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            esc.leadingAnchor.constraint(equalTo: escWrap.leadingAnchor, constant: 6),
+            esc.trailingAnchor.constraint(equalTo: escWrap.trailingAnchor, constant: -6),
+            esc.topAnchor.constraint(equalTo: escWrap.topAnchor, constant: 2),
+            esc.bottomAnchor.constraint(equalTo: escWrap.bottomAnchor, constant: -2),
             listHost.leadingAnchor.constraint(equalTo: panel.leadingAnchor,
-                                              constant: 8),
+                                              constant: 6),
             listHost.trailingAnchor.constraint(equalTo: panel.trailingAnchor,
-                                               constant: -8),
+                                               constant: -6),
             listHost.topAnchor.constraint(equalTo: row.bottomAnchor,
-                                          constant: 8),
+                                          constant: 6),
             listHost.bottomAnchor.constraint(equalTo: panel.bottomAnchor,
                                              constant: -8),
             listHost.heightAnchor.constraint(lessThanOrEqualToConstant: 340),
@@ -321,45 +335,88 @@ private final class PalRow: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         if on {
-            layer?.hbBg = "sel"
-            layer?.cornerRadius = 7
+            layer?.hbBg = "bluePillBg"
+            layer?.cornerRadius = 9
         }
         let ico: NSView
         if item.kind == .host {
-            ico = Palette.osTileView(item.avatar, size: 22)
+            ico = Palette.osTileView(item.avatar, size: 26)
         } else {
+            let box = NSView()
+            box.wantsLayer = true
+            box.layer?.cornerRadius = 7
+            box.layer?.hbBg = on ? "card" : "chip"
             let iv = NSImageView(image: hbIcon(
                 item.icon.isEmpty ? "terminal" : item.icon,
-                size: 15, tint: Theme.dyn("termDim")))
-            ico = iv
+                size: 14, tint: Theme.dyn(on ? "blue" : "text2")))
+            iv.translatesAutoresizingMaskIntoConstraints = false
+            box.addSubview(iv)
+            NSLayoutConstraint.activate([
+                iv.centerXAnchor.constraint(equalTo: box.centerXAnchor),
+                iv.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+                box.widthAnchor.constraint(equalToConstant: 26),
+                box.heightAnchor.constraint(equalToConstant: 26),
+            ])
+            ico = box
         }
         ico.translatesAutoresizingMaskIntoConstraints = false
         let t = NSTextField(labelWithString: item.title)
-        t.font = .systemFont(ofSize: 13)
+        t.font = .systemFont(ofSize: 13, weight: .semibold)
+        t.hbText = "text"
         t.lineBreakMode = .byTruncatingTail
         t.translatesAutoresizingMaskIntoConstraints = false
         let s = NSTextField(labelWithString: item.sub)
-        s.font = .systemFont(ofSize: 11)
-        s.hbText = "termDim"
+        s.font = .systemFont(ofSize: 11.5)
+        s.hbText = "text3"
         s.alignment = .right
         s.lineBreakMode = .byTruncatingTail
         s.translatesAutoresizingMaskIntoConstraints = false
         addSubview(ico); addSubview(t); addSubview(s)
+        var retBadge: NSView?
+        if on {
+            let kbd = NSView()
+            kbd.wantsLayer = true
+            kbd.layer?.cornerRadius = 5
+            kbd.layer?.borderWidth = 1
+            kbd.layer?.hbBg = "kbdBg"
+            kbd.layer?.hbBorder = "line"
+            kbd.translatesAutoresizingMaskIntoConstraints = false
+            let rl = NSTextField(labelWithString: "⏎")
+            rl.font = .systemFont(ofSize: 10.5)
+            rl.hbText = "text3"
+            rl.translatesAutoresizingMaskIntoConstraints = false
+            kbd.addSubview(rl)
+            NSLayoutConstraint.activate([
+                rl.leadingAnchor.constraint(equalTo: kbd.leadingAnchor, constant: 5),
+                rl.trailingAnchor.constraint(equalTo: kbd.trailingAnchor, constant: -5),
+                rl.topAnchor.constraint(equalTo: kbd.topAnchor, constant: 1),
+                rl.bottomAnchor.constraint(equalTo: kbd.bottomAnchor, constant: -1),
+            ])
+            addSubview(kbd)
+            retBadge = kbd
+        }
         NSLayoutConstraint.activate([
             ico.leadingAnchor.constraint(equalTo: leadingAnchor,
-                                         constant: 10),
+                                         constant: 12),
             ico.centerYAnchor.constraint(equalTo: centerYAnchor),
-            ico.widthAnchor.constraint(equalToConstant: 24),
+            ico.widthAnchor.constraint(equalToConstant: 26),
+            ico.heightAnchor.constraint(equalToConstant: 26),
             t.leadingAnchor.constraint(equalTo: ico.trailingAnchor,
-                                       constant: 10),
+                                       constant: 11),
             t.centerYAnchor.constraint(equalTo: centerYAnchor),
             s.leadingAnchor.constraint(greaterThanOrEqualTo:
                 t.trailingAnchor, constant: 8),
-            s.trailingAnchor.constraint(equalTo: trailingAnchor,
-                                        constant: -10),
+            s.trailingAnchor.constraint(equalTo: retBadge?.leadingAnchor ?? trailingAnchor,
+                                        constant: retBadge == nil ? -12 : -8),
             s.centerYAnchor.constraint(equalTo: centerYAnchor),
             s.widthAnchor.constraint(lessThanOrEqualToConstant: 220),
         ])
+        if let kbd = retBadge {
+            NSLayoutConstraint.activate([
+                kbd.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+                kbd.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
     override func mouseDown(with e: NSEvent) { onClick?() }

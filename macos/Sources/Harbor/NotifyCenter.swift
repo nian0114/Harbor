@@ -89,26 +89,19 @@ final class NotifyPanel: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: 380, height: 460))
         wantsLayer = true
         layer?.hbBg = "card"
-        layer?.cornerRadius = 10
-        layer?.hbBorder = "line"
-        layer?.borderWidth = 1
-        layer?.shadowOpacity = 0.18
-        layer?.shadowRadius = 8
-        layer?.shadowOffset = CGSize(width: 0, height: -3)
+        layer?.cornerRadius = 12
+        layer?.shadowOpacity = 0.25
+        layer?.shadowRadius = 18
+        layer?.shadowOffset = CGSize(width: 0, height: -6)
 
         let head = NSView()
         let t = NSTextField(labelWithString: L("通知中心"))
-        t.font = .systemFont(ofSize: 13, weight: .semibold)
-        let read = NSButton(title: L("全部已读"), target: self,
-                            action: #selector(onReadAll))
-        let clr = NSButton(title: L("清空"), target: self,
-                           action: #selector(onClear))
-        for b in [read, clr] {
-            b.bezelStyle = .texturedRounded
-            b.font = .systemFont(ofSize: 11)
-            b.isBordered = false
-            b.contentTintColor = Theme.blue.color
-        }
+        t.font = .systemFont(ofSize: 13.5, weight: .bold)
+        t.hbText = "text"
+        let read = HBtn(L("全部已读"), style: .ghost, sm: true)
+        read.target = self; read.action = #selector(onReadAll)
+        let clr = HBtn(L("清空"), style: .ghost, sm: true)
+        clr.target = self; clr.action = #selector(onClear)
         read.setAccessibilityIdentifier("notif-readall")
         clr.setAccessibilityIdentifier("notif-clear")
         [head, t, read, clr, listHost].forEach {
@@ -136,13 +129,17 @@ final class NotifyPanel: NSView {
             clr.trailingAnchor.constraint(equalTo: head.trailingAnchor,
                                           constant: -10),
             clr.centerYAnchor.constraint(equalTo: head.centerYAnchor),
+            clr.widthAnchor.constraint(equalToConstant: 46),
+            clr.heightAnchor.constraint(equalToConstant: 24),
             read.trailingAnchor.constraint(equalTo: clr.leadingAnchor,
-                                           constant: -6),
+                                           constant: -4),
             read.centerYAnchor.constraint(equalTo: head.centerYAnchor),
-            listHost.leadingAnchor.constraint(equalTo: leadingAnchor),
-            listHost.trailingAnchor.constraint(equalTo: trailingAnchor),
+            read.widthAnchor.constraint(equalToConstant: 68),
+            read.heightAnchor.constraint(equalToConstant: 24),
+            listHost.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            listHost.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             listHost.topAnchor.constraint(equalTo: head.bottomAnchor),
-            listHost.bottomAnchor.constraint(equalTo: bottomAnchor),
+            listHost.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
             rowsCol.leadingAnchor.constraint(equalTo: doc.leadingAnchor),
             rowsCol.trailingAnchor.constraint(equalTo: doc.trailingAnchor),
             rowsCol.topAnchor.constraint(equalTo: doc.topAnchor),
@@ -168,11 +165,19 @@ final class NotifyPanel: NSView {
             $0.removeFromSuperview() }
         let items = NotifyCenter.shared.items
         if items.isEmpty {
+            let wrap = NSStackView()
+            wrap.orientation = .vertical; wrap.spacing = 4; wrap.alignment = .centerX
             let e = NSTextField(labelWithString: L("暂无通知"))
-            e.hbText = "termDim"
-            e.alignment = .center
-            rowsCol.addArrangedSubview(e)
-            e.heightAnchor.constraint(equalToConstant: 90).isActive = true
+            e.font = .systemFont(ofSize: 13, weight: .semibold)
+            e.hbText = "text2"
+            let sub = NSTextField(labelWithString: L("会话完成提醒会出现在这里（FR-13）"))
+            sub.font = .systemFont(ofSize: 11.5)
+            sub.hbText = "text3"
+            wrap.addArrangedSubview(NSView())
+            wrap.addArrangedSubview(e); wrap.addArrangedSubview(sub)
+            wrap.addArrangedSubview(NSView())
+            rowsCol.addArrangedSubview(wrap)
+            wrap.heightAnchor.constraint(equalToConstant: 110).isActive = true
             return
         }
         for (i, n) in items.enumerated() {
@@ -190,58 +195,79 @@ final class NotifyPanel: NSView {
 
 private final class NotifRow: NSView {
     var onClick: (() -> Void)?
+    private let unread: Bool
+    private var hovered = false { didSet { restyle() } }
     init(item n: NotifItem) {
+        self.unread = n.unread
         super.init(frame: .zero)
         wantsLayer = true
-        if n.unread {
-            layer?.hbBg = "sel"
-        }
+        layer?.cornerRadius = 9
+        restyle()
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+
         let iconName: String
-        let tint: NSColor
+        let bgToken: String
         switch n.kind {
-        case "ok": iconName = "check"; tint = Theme.green.color
-        case "err": iconName = "x"; tint = Theme.red.color
-        case "share": iconName = "broadcast"; tint = Theme.blue.color
-        case "pending": iconName = "info"; tint = Theme.amber.color
-        default: iconName = "info"; tint = Theme.termDim.color
+        case "ok": iconName = "check"; bgToken = "green"
+        case "err": iconName = "x"; bgToken = "red"
+        case "share": iconName = "broadcast"; bgToken = "blue"
+        case "pending": iconName = "info"; bgToken = "amber"
+        default: iconName = "info"; bgToken = "blue"
         }
-        let iv = NSImageView(image: hbIcon(iconName, size: 15, tint: tint))
+        let tile = NSView()
+        tile.wantsLayer = true
+        tile.layer?.cornerRadius = 8
+        tile.layer?.hbBg = bgToken
+        let iv = NSImageView(image: hbIcon(iconName, size: 15, tint: .white))
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        tile.addSubview(iv)
+
         let t = NSTextField(labelWithString: n.title)
-        t.font = .systemFont(ofSize: 12, weight: .medium)
+        t.font = .systemFont(ofSize: 12.5, weight: .semibold)
+        t.hbText = "text"
         t.lineBreakMode = .byTruncatingTail
         let b = NSTextField(wrappingLabelWithString: n.body)
-        b.font = .systemFont(ofSize: 11)
-        b.hbText = "termDim"
+        b.font = .systemFont(ofSize: 12)
+        b.hbText = "text2"
         let tm = NSTextField(labelWithString: n.time)
-        tm.font = .systemFont(ofSize: 10)
-        tm.hbText = "termDim"
-        [iv, t, b, tm].forEach {
+        tm.font = .systemFont(ofSize: 11)
+        tm.hbText = "text3"
+        [tile, t, b, tm].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
         }
         NSLayoutConstraint.activate([
-            iv.leadingAnchor.constraint(equalTo: leadingAnchor,
-                                        constant: 10),
-            iv.topAnchor.constraint(equalTo: topAnchor, constant: 9),
-            iv.widthAnchor.constraint(equalToConstant: 18),
-            t.leadingAnchor.constraint(equalTo: iv.trailingAnchor,
-                                       constant: 8),
-            t.topAnchor.constraint(equalTo: topAnchor, constant: 7),
-            t.trailingAnchor.constraint(lessThanOrEqualTo:
-                tm.leadingAnchor, constant: -6),
+            iv.centerXAnchor.constraint(equalTo: tile.centerXAnchor),
+            iv.centerYAnchor.constraint(equalTo: tile.centerYAnchor),
+            tile.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            tile.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            tile.widthAnchor.constraint(equalToConstant: 30),
+            tile.heightAnchor.constraint(equalToConstant: 30),
+            t.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: 10),
+            t.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            t.topAnchor.constraint(equalTo: topAnchor, constant: 9),
             b.leadingAnchor.constraint(equalTo: t.leadingAnchor),
-            b.trailingAnchor.constraint(equalTo: trailingAnchor,
-                                        constant: -10),
-            b.topAnchor.constraint(equalTo: t.bottomAnchor, constant: 1),
-            b.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor,
-                                      constant: -7),
-            tm.trailingAnchor.constraint(equalTo: trailingAnchor,
-                                         constant: -10),
-            tm.topAnchor.constraint(equalTo: t.topAnchor),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 42),
+            b.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            b.topAnchor.constraint(equalTo: t.bottomAnchor, constant: 2),
+            tm.leadingAnchor.constraint(equalTo: t.leadingAnchor),
+            tm.topAnchor.constraint(equalTo: b.bottomAnchor, constant: 3),
+            tm.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -9),
         ])
         setAccessibilityIdentifier("notif-item")
     }
     required init?(coder: NSCoder) { fatalError() }
+    override func mouseEntered(with e: NSEvent) { hovered = true }
+    override func mouseExited(with e: NSEvent) { hovered = false }
     override func mouseDown(with e: NSEvent) { onClick?() }
+    private func restyle() {
+        layer?.hbBgResolver = { [weak self] in
+            guard let self else { return nil }
+            if self.unread {
+                return (self.hovered ? Theme.sel : Theme.notifUnread).color.cgColor
+            }
+            return self.hovered ? Theme.notifHover.color.cgColor : nil
+        }
+    }
 }
