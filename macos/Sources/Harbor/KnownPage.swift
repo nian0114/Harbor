@@ -225,22 +225,20 @@ final class KnownPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         guard let o = items.first(where: {
             String(cString: hb_obj_id($0)) == id }) else { return }
         let host = KnownFormat.hostDisp(hb_obj_get_str(o, "host").str)
-        let a = NSAlert()
-        a.messageText = String(format: L("删除 %@ 的已知主机条目？"), host)
-        a.informativeText = L("下次连接将重新弹出指纹确认（TOFU）。")
-        a.addButton(withTitle: L("删除"))
-        a.addButton(withTitle: L("取消"))
-        DialogRegistry.shared.present(alert: a, kind: "known-del",
-                                      in: window) { [weak self] ok in
+        let m = HModal(title: String(format: L("删除 %@ 的已知主机条目？"), host), width: 420)
+        let msg = NSTextField(wrappingLabelWithString: L("下次连接将重新弹出指纹确认（TOFU）。"))
+        msg.font = .systemFont(ofSize: 13); msg.hbText = "text2"
+        m.addBody(msg)
+        m.addFootBtn(L("取消"), style: .gray, accept: false)
+        m.addFootBtn(L("删除"), style: .danger, accept: true)
+        m.present(kind: "known-del", in: window) { [weak self] ok in
             guard ok else { return }
             Vault.shared.delete(id)
             self?.reload()
-            let u = NSAlert()
-            u.messageText = String(format: L("已删除 %@"), host)
-            u.addButton(withTitle: L("撤销"))
-            u.addButton(withTitle: L("关闭"))
-            DialogRegistry.shared.present(alert: u, kind: "undo-del",
-                                          in: self?.window) { uok in
+            let u = HModal(title: String(format: L("已删除 %@"), host), width: 380)
+            u.addFootBtn(L("关闭"), style: .gray, accept: false)
+            u.addFootBtn(L("撤销"), style: .primary, accept: true)
+            u.present(kind: "undo-del", in: self?.window) { uok in
                 if uok { Vault.shared.undelete(id); self?.reload() }
             }
         }

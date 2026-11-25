@@ -193,23 +193,60 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     // MARK: 生成
     @objc private func genKey() {
-        let a = NSAlert()
-        a.messageText = L("生成密钥")
-        a.addButton(withTitle: L("生成")); a.addButton(withTitle: L("取消"))
-        let name = NSTextField(frame: NSRect(x: 0, y: 76, width: 240, height: 22))
-        name.placeholderString = L("名称")
+        let m = HModal(title: "New key", icon: "key")
+        func box(_ v: NSView) -> NSView {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            let b = NSView()
+            b.wantsLayer = true; b.layer?.cornerRadius = 8; b.layer?.borderWidth = 1
+            b.layer?.hbBg = "tableHead"; b.layer?.hbBorder = "line"
+            b.addSubview(v)
+            NSLayoutConstraint.activate([
+                b.heightAnchor.constraint(equalToConstant: 36),
+                v.leadingAnchor.constraint(equalTo: b.leadingAnchor, constant: 10),
+                v.trailingAnchor.constraint(equalTo: b.trailingAnchor, constant: -10),
+                v.centerYAnchor.constraint(equalTo: b.centerYAnchor),
+            ])
+            return b
+        }
+        func lbl(_ s: String) -> NSTextField {
+            let l = NSTextField(labelWithString: s)
+            l.font = .systemFont(ofSize: 12, weight: .semibold); l.hbText = "text2"
+            return l
+        }
+        m.addBody(lbl(L("名称")))
+        let name = NSTextField()
+        name.isBordered = false; name.drawsBackground = false; name.focusRingType = .none
+        name.font = .systemFont(ofSize: 13); name.hbText = "text"
+        name.placeholderString = "id_ed25519_new"
         name.setAccessibilityIdentifier("kgen-name")
-        let type = NSPopUpButton(frame: NSRect(x: 0, y: 46, width: 240, height: 24))
+        m.addBody(box(name))
+
+        let row = NSStackView()
+        row.orientation = .horizontal; row.spacing = 12; row.distribution = .fillEqually
+        let c1 = VFlippedStack(); c1.orientation = .vertical; c1.alignment = .leading; c1.spacing = 5
+        let c2 = VFlippedStack(); c2.orientation = .vertical; c2.alignment = .leading; c2.spacing = 5
+        let type = NSPopUpButton()
+        type.isBordered = false; type.font = .systemFont(ofSize: 13)
         type.addItems(withTitles: ["Ed25519", "ECDSA", "RSA 3072", "RSA 4096"])
         type.setAccessibilityIdentifier("kgen-type")
-        let pp = NSSecureTextField(frame: NSRect(x: 0, y: 20, width: 240, height: 22))
-        pp.placeholderString = L("口令（可空）")
+        let tb = box(type)
+        c1.addArrangedSubview(lbl(L("算法"))); c1.addArrangedSubview(tb)
+        tb.widthAnchor.constraint(equalTo: c1.widthAnchor).isActive = true
+
+        let pp = NSSecureTextField()
+        pp.isBordered = false; pp.drawsBackground = false; pp.focusRingType = .none
+        pp.font = .systemFont(ofSize: 13); pp.hbText = "text"
+        pp.placeholderString = L("可选")
         pp.setAccessibilityIdentifier("kgen-pass")
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 104))
-        v.addSubview(name); v.addSubview(type); v.addSubview(pp)
-        a.accessoryView = v
-        DialogRegistry.shared.present(alert: a, kind: "kgen",
-                                      in: window) { [weak self] ok in
+        let pb = box(pp)
+        c2.addArrangedSubview(lbl("Passphrase")); c2.addArrangedSubview(pb)
+        pb.widthAnchor.constraint(equalTo: c2.widthAnchor).isActive = true
+        row.addArrangedSubview(c1); row.addArrangedSubview(c2)
+        m.addBody(row)
+
+        m.addFootBtn(L("取消"), style: .gray, accept: false)
+        m.addFootBtn(L("生成"), style: .primary, accept: true)
+        m.present(kind: "kgen", in: window) { [weak self] ok in
             guard ok, let self else { return }
             let t: hb_key_type
             var bits = 0

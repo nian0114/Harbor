@@ -220,51 +220,42 @@ final class SharePage: NSView {
     // ---------------- join 对话框 ----------------
 
     @objc private func onJoinBtn() {
-        let a = NSAlert()
-        a.messageText = L("通过配对码加入")
-        a.addButton(withTitle: L("加入"))
-        a.addButton(withTitle: L("取消"))
-        let acc = NSView()
-        acc.translatesAutoresizingMaskIntoConstraints = false
-        let l1 = NSTextField(labelWithString: L("粘贴共享链接："))
-        l1.font = .systemFont(ofSize: 12)
-        let link = NSTextField()
-        link.placeholderString = "harbor://share/..."
-        link.setAccessibilityIdentifier("join-link")
-        let l2 = NSTextField(labelWithString: L("6 位配对码："))
-        l2.font = .systemFont(ofSize: 12)
-        let code = NSTextField()
-        code.placeholderString = "482913"
-        code.setAccessibilityIdentifier("join-code")
-        [l1, link, l2, code].forEach {
-            $0.translatesAutoresizingMaskIntoConstraints = false
-            acc.addSubview($0)
+        let m = HModal(title: L("通过配对码加入"), icon: "link", width: 460)
+        func box(_ tf: NSTextField, _ ph: String, _ aid: String) -> NSView {
+            tf.isBordered = false; tf.drawsBackground = false; tf.focusRingType = .none
+            tf.font = .systemFont(ofSize: 13); tf.hbText = "text"
+            tf.placeholderString = ph
+            tf.setAccessibilityIdentifier(aid)
+            tf.translatesAutoresizingMaskIntoConstraints = false
+            let b = NSView()
+            b.wantsLayer = true; b.layer?.cornerRadius = 8; b.layer?.borderWidth = 1
+            b.layer?.hbBg = "tableHead"; b.layer?.hbBorder = "line"
+            b.addSubview(tf)
+            NSLayoutConstraint.activate([
+                b.heightAnchor.constraint(equalToConstant: 36),
+                tf.leadingAnchor.constraint(equalTo: b.leadingAnchor, constant: 12),
+                tf.trailingAnchor.constraint(equalTo: b.trailingAnchor, constant: -12),
+                tf.centerYAnchor.constraint(equalTo: b.centerYAnchor),
+            ])
+            return b
         }
-        NSLayoutConstraint.activate([
-            acc.widthAnchor.constraint(equalToConstant: 340),
-            l1.topAnchor.constraint(equalTo: acc.topAnchor),
-            l1.leadingAnchor.constraint(equalTo: acc.leadingAnchor),
-            link.topAnchor.constraint(equalTo: l1.bottomAnchor,
-                                      constant: 4),
-            link.leadingAnchor.constraint(equalTo: acc.leadingAnchor),
-            link.trailingAnchor.constraint(equalTo: acc.trailingAnchor),
-            l2.topAnchor.constraint(equalTo: link.bottomAnchor,
-                                    constant: 10),
-            l2.leadingAnchor.constraint(equalTo: acc.leadingAnchor),
-            code.topAnchor.constraint(equalTo: l2.bottomAnchor,
-                                      constant: 4),
-            code.leadingAnchor.constraint(equalTo: acc.leadingAnchor),
-            code.widthAnchor.constraint(equalToConstant: 140),
-            code.bottomAnchor.constraint(equalTo: acc.bottomAnchor),
-        ])
-        a.accessoryView = acc
-        DialogRegistry.shared.present(alert: a, kind: "share-join",
-                                      in: window) { [weak self] ok in
+        let l1 = NSTextField(labelWithString: L("共享链接"))
+        l1.font = .systemFont(ofSize: 12, weight: .semibold); l1.hbText = "text2"
+        m.addBody(l1)
+        let link = NSTextField()
+        m.addBody(box(link, "harbor://share/...", "join-link"))
+        let l2 = NSTextField(labelWithString: L("6 位配对码"))
+        l2.font = .systemFont(ofSize: 12, weight: .semibold); l2.hbText = "text2"
+        m.addBody(l2)
+        let code = NSTextField()
+        m.addBody(box(code, "482913", "join-code"))
+        m.addBody(vHintBox(L("配对码仅在本地通过 PAKE 协商 E2EE 密钥，服务端无法解密画面。")))
+        m.addFootBtn(L("取消"), style: .gray, accept: false)
+        m.addFootBtn(L("加入"), style: .primary, accept: true)
+        m.present(kind: "share-join", in: window) { [weak self] ok in
             guard ok, let self else { return }
-            let l = link.stringValue.trimmingCharacters(
-                in: .whitespacesAndNewlines)
-            let c = code.stringValue.replacingOccurrences(
-                of: " ", with: "")
+            let l = link.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let c = code.stringValue.replacingOccurrences(of: " ", with: "")
             ShareService.shared.joinGuest(l, c) { [weak self] ctx, err in
                 self?.joinCb(ctx: ctx, err: err)
             }

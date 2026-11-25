@@ -356,17 +356,14 @@ final class ForwardPage: NSView {
             destAddr: hb_obj_get_str(o, "dest_addr").str,
             destPort: Int(hb_obj_get_int(o, "dest_port", 0)))
         let wasEnabled = hb_obj_get_bool(o, "enabled", false)
-        let a = NSAlert()
-        a.messageText = L("删除转发规则")
-        a.informativeText = L("确定删除 %@？" +
-            "监听将立即停止。删除后 9 秒内可撤销。").fmt(desc)
-        a.addButton(withTitle: L("删除"))
-        a.addButton(withTitle: L("取消"))
-        a.buttons.first?.hasDestructiveAction = true
-        let w = window
-        a.beginSheetModal(for: w!) { [weak self] resp in
-            guard resp == .alertFirstButtonReturn, let self
-            else { return }
+        let m = HModal(title: L("删除转发规则"), width: 420)
+        let msg = NSTextField(wrappingLabelWithString: L("确定删除 %@？监听将立即停止。删除后 9 秒内可撤销。").fmt(desc))
+        msg.font = .systemFont(ofSize: 13); msg.hbText = "text2"
+        m.addBody(msg)
+        m.addFootBtn(L("取消"), style: .gray, accept: false)
+        m.addFootBtn(L("删除"), style: .danger, accept: true)
+        m.present(kind: "fwd-del", in: window) { [weak self] ok in
+            guard ok, let self else { return }
             self.mgr.stop(id)
             Vault.shared.delete(id)
             let t = SftpToast(text: L("已删除规则 %@").fmt(desc),
