@@ -6,15 +6,15 @@ import HarborKit
 struct Section { let id: String; let icon: String; let title: String }
 // 与 linux/src/hb-vault-page.c 同 msgid：同一概念同一翻译源。
 var kSections: [Section] { [
-    .init(id: "hosts",      icon: "server",   title: "Hosts"),
-    .init(id: "keychain",   icon: "key",      title: "Keychain"),
-    .init(id: "fwd",        icon: "fwd",      title: "Port Forwarding"),
-    .init(id: "snippets",   icon: "list",     title: "Snippets"),
-    .init(id: "knownhosts", icon: "fingerprint", title: "Known Hosts"),
-    .init(id: "logs",       icon: "clock",    title: "Logs"),
+    .init(id: "hosts",      icon: "grid",      title: "Hosts"),
+    .init(id: "keychain",   icon: "key",       title: "Keychain"),
+    .init(id: "fwd",        icon: "fwd",       title: "Port Forwarding"),
+    .init(id: "snippets",   icon: "braces",    title: "Snippets"),
+    .init(id: "knownhosts", icon: "shield",    title: "Known Hosts"),
+    .init(id: "logs",       icon: "clock",     title: "Logs"),
     .init(id: "shared",     icon: "broadcast", title: L("共享会话")),
-    .init(id: "appearance", icon: "palette",  title: L("外观与终端")),
-    .init(id: "account",    icon: "user",     title: L("账号与同步")),
+    .init(id: "appearance", icon: "palette",   title: L("外观与终端")),
+    .init(id: "account",    icon: "cloud",     title: L("账号与同步")),
 ] }
 
 // ---------- 图标渲染：IconPath → tinted NSImage ----------

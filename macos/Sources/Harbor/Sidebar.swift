@@ -183,9 +183,21 @@ private final class SideItem: NSView {
             NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
         }
         let tint = isOn ? Theme.text.color : Theme.text2.color
-        hbIcon(iconName, size: 16, tint: tint).draw(
-            in: NSRect(x: compact ? bounds.midX - 8 : 12,
-                       y: bounds.midY - 8, width: 16, height: 16))
+        if iconName == "braces" {
+            let p = NSMutableParagraphStyle()
+            p.alignment = .center
+            ("{ }" as NSString).draw(
+                in: NSRect(x: compact ? bounds.midX - 10 : 10,
+                           y: bounds.midY - 8, width: 20, height: 16),
+                withAttributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
+                    .foregroundColor: tint,
+                    .paragraphStyle: p])
+        } else {
+            hbIcon(iconName, size: 16, tint: tint).draw(
+                in: NSRect(x: compact ? bounds.midX - 8 : 12,
+                           y: bounds.midY - 8, width: 16, height: 16))
+        }
         guard !compact else { return }
         (title as NSString).draw(
             in: NSRect(x: 38, y: bounds.midY - 8.5,

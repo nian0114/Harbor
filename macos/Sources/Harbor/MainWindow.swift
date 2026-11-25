@@ -28,6 +28,8 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         isRestorable = false   // 自管理 tab；避免系统崩溃恢复弹窗
         titlebarAppearsTransparent = true
         titleVisibility = .hidden
+        toolbar = NSToolbar(identifier: "main")
+        toolbarStyle = .unifiedCompact
         isMovableByWindowBackground = true
         delegate = self
         minSize = NSSize(width: 640, height: 420)
@@ -38,28 +40,28 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         bar.layer?.hbBg = "titlebar"
         contentView?.addSubview(bar)
         bar.autoresizingMask = [.width, .minYMargin]
-        strip.frame = NSRect(x: 78, y: 0, width: 1202, height: 52)
+        strip.frame = NSRect(x: 84, y: 0, width: 1230, height: 52)
         strip.autoresizingMask = [.width]
         bar.addSubview(strip)
         let side = NSButton()
         side.bezelStyle = .texturedRounded
         side.image = hbIcon("panel", size: 17, tint: Theme.titlebarText.color)
         side.isBordered = false
-        side.frame = NSRect(x: 1292, y: 12, width: 28, height: 28)
+        side.frame = NSRect(x: 1324, y: 12, width: 28, height: 28)
         side.autoresizingMask = [.minXMargin]
         side.target = self; side.action = #selector(toggleSidebar)
         bar.addSubview(side)
         bell.bezelStyle = .texturedRounded
         bell.image = hbIcon("bell", size: 17, tint: Theme.titlebarText.color)
         bell.isBordered = false
-        bell.frame = NSRect(x: 1356, y: 12, width: 28, height: 28)
+        bell.frame = NSRect(x: 1358, y: 12, width: 28, height: 28)
         bell.autoresizingMask = [.minXMargin]
         bell.target = self
         bell.action = #selector(toggleNotifs)
         bell.setAccessibilityIdentifier("bell")
         bar.addSubview(bell)
         // 角标钉在铃铛右上内缘（不贴窗口圆角边缘，避免被裁）
-        bellBadge.frame = NSRect(x: 1368, y: 24, width: 16, height: 13)
+        bellBadge.frame = NSRect(x: 1372, y: 26, width: 16, height: 13)
         bellBadge.autoresizingMask = [.minXMargin]
         bellBadge.wantsLayer = true
         bellBadge.layer?.cornerRadius = 6
@@ -103,6 +105,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         ForwardMgr.shared.startAll()
         /* M6：实例化同步服务（lazy init → tryResume 恢复会话） */
         _ = SyncService.shared
+        alignTrafficLights()
 
         // 主 runloop 卡顿计量（perf 验收用）
         stallTimer = Timer.scheduledTimer(withTimeInterval: 0.05,
@@ -610,6 +613,25 @@ final class MainWindow: NSWindow, NSWindowDelegate {
             }
         }
     }
+    private func alignTrafficLights() {
+        guard !styleMask.contains(.fullScreen),
+              let close = standardWindowButton(.closeButton),
+              let mini = standardWindowButton(.miniaturizeButton),
+              let zoom = standardWindowButton(.zoomButton),
+              let tv = close.superview else { return }
+        let y = tv.isFlipped
+            ? 26 - close.frame.height / 2
+            : tv.bounds.height - 26 - close.frame.height / 2
+        for (i, btn) in [close, mini, zoom].enumerated() {
+            btn.setFrameOrigin(NSPoint(x: 13 + CGFloat(i) * 20, y: y))
+        }
+    }
+    override func layoutIfNeeded() {
+        super.layoutIfNeeded()
+        alignTrafficLights()
+    }
+    func windowDidResize(_ n: Notification) { alignTrafficLights() }
+    func windowDidExitFullScreen(_ n: Notification) { alignTrafficLights() }
     func windowWillClose(_ n: Notification) {
         for t in tabs { t.kill() }
     }

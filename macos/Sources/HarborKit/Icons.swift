@@ -31,6 +31,7 @@ public enum Icons {
         "palette": "<path d=\"M12 3a9 9 0 1 0 0 18h1.6a2 2 0 0 0 1.4-3.4c-.8-.8-.2-2.1 1-2.1h1.9A3.6 3.6 0 0 0 21 11.6 9 9 0 0 0 12 3z\"/><circle cx=\"8\" cy=\"10\" r=\"1.1\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"12\" cy=\"7.3\" r=\"1.1\" fill=\"currentColor\" stroke=\"none\"/><circle cx=\"16\" cy=\"10\" r=\"1.1\" fill=\"currentColor\" stroke=\"none\"/>",
         "refresh": "<path d=\"M20.5 12a8.5 8.5 0 1 1-2.5-6M20.5 3.5V8H16\"/>",
         "plus": "<path d=\"M12 5v14M5 12h14\"/>",
+        "shield": "<path d=\"M12 3l7.8 2.9v5.9c0 4.8-3.3 7.7-7.8 8.9-4.5-1.2-7.8-4.1-7.8-8.9V5.9L12 3z\"/><path d=\"m9 11.8 2.1 2.1 4-4.4\"/>",
         "chevron-d": "<path d=\"m6 9 6 6 6-6\"/>",
         "chevron-r": "<path d=\"m9 6 6 6-6 6\"/>",
         "chevron-u": "<path d=\"m6 15 6-6 6 6\"/>",
