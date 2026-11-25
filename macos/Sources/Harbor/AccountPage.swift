@@ -44,7 +44,9 @@ final class AccountPage: NSView {
     }
     private func h4(_ s: String) -> NSTextField { label(s, 14, bold: true) }
     private func psub(_ s: String) -> NSTextField {
-        label(s, 11.5, dim: true)
+        let text = label(s, 12, dim: true)
+        text.hbText = "text2"
+        return text
     }
     private func hint(_ s: String, color: NSColor) -> NSTextField {
         let l = label(s, 11.5); l.textColor = color; return l
@@ -82,6 +84,20 @@ final class AccountPage: NSView {
         return v
     }
 
+    private func loginField(_ title: String, _ entry: NSTextField) -> NSStackView {
+        let caption = vLabel(title, head: true)
+        entry.setAccessibilityLabel(title)
+        entry.translatesAutoresizingMaskIntoConstraints = false
+        let row = VFlippedStack()
+        row.orientation = .vertical
+        row.alignment = .leading
+        row.spacing = 5
+        row.addArrangedSubview(caption)
+        row.addArrangedSubview(entry)
+        entry.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
+        return row
+    }
+
     // ---------- 重建 ----------
     private func rebuild() {
         subviews.forEach { $0.removeFromSuperview() }
@@ -96,16 +112,25 @@ final class AccountPage: NSView {
             scroll.topAnchor.constraint(equalTo: topAnchor),
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        let col = NSStackView()
+        let col = VFlippedStack()
         col.orientation = .vertical
         col.alignment = .centerX   // 子卡显式宽度
         col.spacing = 14
-        col.edgeInsets = .init(top: 20, left: 20, bottom: 30, right: 20)
+        col.edgeInsets = .init(top: svc.state == .signedOut ? 40 : 14,
+                               left: 18, bottom: 20, right: 18)
         col.translatesAutoresizingMaskIntoConstraints = false
         scroll.documentView = col
-        col.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
+        col.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
         if svc.state == .signedOut {
-            col.addArrangedSubview(buildSignedOut())
+            let login = buildSignedOut()
+            col.addArrangedSubview(login)
+            let available = login.widthAnchor.constraint(equalTo: col.widthAnchor, constant: -36)
+            available.priority = .defaultHigh
+            NSLayoutConstraint.activate([
+                login.widthAnchor.constraint(lessThanOrEqualTo: col.widthAnchor, constant: -36),
+                login.widthAnchor.constraint(lessThanOrEqualToConstant: 460),
+                available,
+            ])
         } else {
             buildSignedIn(col)
         }
@@ -114,33 +139,37 @@ final class AccountPage: NSView {
 
     // ---------- 未登录 ----------
     private func buildSignedOut() -> NSView {
-        let p = card()
-        p.widthAnchor.constraint(equalToConstant: 460).isActive = true
-        p.addArrangedSubview(h4(L("登录 Harbor 账号")))
-        p.addArrangedSubview(psub(L(
+        let p = VPanel()
+        p.append(vPanelTitle(L("登录 Harbor 账号"), icon: "cloud"))
+        p.append(psub(L(
             "登录后从云端拉取密文并在本地解密，恢复全部 Vault 与同步。")))
         srvE.stringValue = svc.server ?? Self.defaultServer
-        p.addArrangedSubview(field(L("服务器"), srvE))
-        p.addArrangedSubview(field(L("邮箱"), emE))
-        p.addArrangedSubview(field(L("主密码"), pwE))
-        let tr = field(L("TOTP 验证码"), totpE)
-        tr.isHidden = true
+        p.append(loginField(L("服务器"), srvE))
+        p.append(loginField(L("邮箱"), emE))
+        p.append(loginField(L("主密码"), pwE))
+        let tr = loginField(L("TOTP 验证码"), totpE)
+        tr.isHidden = totpRow?.isHidden ?? true
         totpRow = tr
-        p.addArrangedSubview(tr)
+        p.append(tr)
         errL.textColor = .systemRed
-        p.addArrangedSubview(errL)
+        errL.isHidden = errL.stringValue.isEmpty
+        p.append(errL)
         let row = NSStackView()
         row.orientation = .horizontal; row.spacing = 9
-        row.addArrangedSubview(
-            btn(L("登录并同步"), primary: true, act: #selector(doLogin)))
+        let login = HBtn(L("登录并同步"), style: .primary, icon: "key")
+        login.keyEquivalent = "\r"
+        login.onTap = { [weak self] in self?.doLogin() }
+        login.translatesAutoresizingMaskIntoConstraints = false
+        login.widthAnchor.constraint(equalToConstant: login.intrinsicContentSize.width + 24).isActive = true
+        login.heightAnchor.constraint(equalToConstant: 31).isActive = true
+        row.addArrangedSubview(login)
         row.addArrangedSubview(
             btn(L("注册新账号"), act: #selector(openRegister)))
         row.addArrangedSubview(
             btn(L("用恢复码恢复"), act: #selector(openRecover)))
-        p.addArrangedSubview(row)
-        p.addArrangedSubview(hint(L(
-            "零知识架构：密码错误则无法解密 Vault，服务端不能帮你重置。"),
-            color: .secondaryLabelColor))
+        p.append(row)
+        p.append(vHintBox(L(
+            "零知识架构：密码错误则无法解密 Vault，服务端不能帮你重置。")))
         return p
     }
 
@@ -179,28 +208,24 @@ final class AccountPage: NSView {
 
     // ---------- 已登录 ----------
     private func buildSignedIn(_ col: NSStackView) {
-        // E2EE 横幅
-        let ban = card()
-        ban.widthAnchor.constraint(equalToConstant: 560).isActive = true
-        let brow = NSStackView()
-        brow.orientation = .horizontal; brow.spacing = 12
-        let ic = NSImageView(image: hbIcon("key", size: 22,
-                                           tint: .systemGreen))
-        let vb = NSStackView()
-        vb.orientation = .vertical; vb.spacing = 2
-        vb.alignment = .leading
-        vb.addArrangedSubview(
-            label(L("端到端加密已开启"), 13, bold: true))
-        vb.addArrangedSubview(psub(L(
-            "Vault 在本地解密；服务器只存密文，无法读取你的数据。")))
-        brow.addArrangedSubview(ic); brow.addArrangedSubview(vb)
-        ban.addArrangedSubview(brow)
-        col.addArrangedSubview(ban)
+        func append(_ view: NSView) {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            col.addArrangedSubview(view)
+            view.widthAnchor.constraint(equalTo: col.widthAnchor, constant: -36).isActive = true
+        }
 
-        // 账号卡
-        let acct = card()
-        acct.widthAnchor.constraint(equalToConstant: 560).isActive = true
-        acct.addArrangedSubview(h4(svc.email ?? L("账号")))
+        let banner = VPanel()
+        banner.layer?.hbBg = "hintBlueBg"
+        banner.layer?.hbBorder = "hintBlueLine"
+        banner.layer?.borderWidth = 1
+        banner.append(vPanelTitle(L("端到端加密已开启"), icon: "key"))
+        banner.append(psub(L(
+            "Vault 在本地解密；服务器只存密文，无法读取你的数据。")))
+        append(banner)
+
+        let acct = VPanel()
+        acct.append(vPanelTitle(L("账号"), icon: "user"))
+        acct.append(h4(svc.email ?? L("账号")))
         var sub = ""
         if let s = svc.server { sub += s + "  " }
         sub += svc.statusText
@@ -211,29 +236,23 @@ final class AccountPage: NSView {
                            TimeInterval(svc.lastSync)))
         }
         if let e = svc.lastError { sub += "  " + e }
-        acct.addArrangedSubview(psub(sub))
-        let arow = NSStackView()
-        arow.orientation = .horizontal; arow.spacing = 8
-        arow.addArrangedSubview(btn(L("立即同步"),
-                                    act: #selector(syncNow)))
-        arow.addArrangedSubview(btn(L("修改密码"),
-                                    act: #selector(openChangePw)))
-        arow.addArrangedSubview(btn(L("轮换恢复码"),
-                                    act: #selector(openRotate)))
-        arow.addArrangedSubview(btn(
-            svc.totpEnabled ? L("关闭两步验证") : L("开启两步验证"),
-            act: #selector(openTotp)))
-        arow.addArrangedSubview(btn(L("退出账号"), danger: true,
-                                    act: #selector(openLogout)))
-        acct.addArrangedSubview(arow)
-        col.addArrangedSubview(acct)
+        acct.append(psub(sub))
+        let actions = [
+            btn(L("立即同步"), act: #selector(syncNow)),
+            btn(L("修改密码"), act: #selector(openChangePw)),
+            btn(L("退出账号"), danger: true, act: #selector(openLogout)),
+            btn(L("轮换恢复码"), act: #selector(openRotate)),
+            btn(svc.totpEnabled ? L("关闭两步验证") : L("开启两步验证"), act: #selector(openTotp)),
+        ]
+        for i in stride(from: 0, to: actions.count, by: 2) {
+            let row = NSStackView(views: Array(actions[i..<min(i + 2, actions.count)]) + [NSView()])
+            row.spacing = 6
+            acct.append(row)
+        }
 
-        // 设备卡
-        let dev = card()
-        dev.widthAnchor.constraint(equalToConstant: 560).isActive = true
-        dev.addArrangedSubview(h4(L("已登录设备")))
+        acct.append(vPanelTitle(L("已登录设备"), icon: "phone"))
         if devices.isEmpty {
-            dev.addArrangedSubview(psub(L("加载中…")))
+            acct.append(psub(L("加载中…")))
             // devices() 会 opCount++ → emitChanged → rebuild 同步递归，
             // 必须只允许一个在途请求，否则栈溢出。
             if !devicesRequested {
@@ -242,7 +261,7 @@ final class AccountPage: NSView {
             }
         }
         let df = DateFormatter(); df.dateFormat = "MM-dd HH:mm"
-        for d in devices {
+        for (index, d) in devices.enumerated() {
             let row = NSStackView()
             row.orientation = .horizontal; row.spacing = 10
             let info = NSStackView()
@@ -257,7 +276,12 @@ final class AccountPage: NSView {
             info.addArrangedSubview(psub(
                 "\(d.platform.isEmpty ? "macos" : d.platform)" +
                 " · \(L("上次活动")) \(seen)"))
+            let icon = NSImageView(image: hbIcon(d.platform == "android" ? "phone" : "terminal",
+                                                size: 18, tint: Theme.dyn("text2")))
+            icon.setContentHuggingPriority(.required, for: .horizontal)
+            row.addArrangedSubview(icon)
             row.addArrangedSubview(info)
+            row.addArrangedSubview(NSView())
             if d.current {
                 let tag = label(L("当前"), 10.5)
                 tag.textColor = .systemBlue
@@ -266,18 +290,15 @@ final class AccountPage: NSView {
                 let b = NSButton(title: L("吊销"), target: self,
                                  action: #selector(revokeBtn(_:)))
                 b.contentTintColor = .systemRed
-                b.tag = devices.firstIndex(where: { $0.id == d.id }) ?? 0
+                b.tag = index
                 row.addArrangedSubview(b)
             }
-            dev.addArrangedSubview(row)
+            acct.append(row)
         }
-        col.addArrangedSubview(dev)
 
-        // 范围卡
-        let sp = card()
-        sp.widthAnchor.constraint(equalToConstant: 560).isActive = true
-        sp.addArrangedSubview(h4(L("同步范围")))
-        sp.addArrangedSubview(psub(L(
+        let sp = VPanel()
+        sp.append(vPanelTitle(L("同步范围"), icon: "cloud"))
+        sp.append(psub(L(
             "关闭的项目不参与同步。冲突采用版本向量 + LWW 合并。")))
         let scopes: [(String, String)] = [
             ("hosts",    L("主机与分组")),
@@ -298,7 +319,7 @@ final class AccountPage: NSView {
             sw.action = #selector(scopeSw(_:))
             sw.identifier = NSUserInterfaceItemIdentifier(key)
             row.addArrangedSubview(l); row.addArrangedSubview(sw)
-            sp.addArrangedSubview(row)
+            sp.append(row)
         }
         let hrow = NSStackView()
         hrow.orientation = .horizontal; hrow.spacing = 8
@@ -306,8 +327,8 @@ final class AccountPage: NSView {
         hl.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let hsw = NSSwitch(); hsw.isEnabled = false
         hrow.addArrangedSubview(hl); hrow.addArrangedSubview(hsw)
-        sp.addArrangedSubview(hrow)
-        col.addArrangedSubview(sp)
+        sp.append(hrow)
+        append(VPanelColumns(left: acct, right: sp))
 
         // 冲突卡
         if let s = svc.sync {
@@ -315,7 +336,7 @@ final class AccountPage: NSView {
             var n = 0
             if hb_sync_conflicts(s, &cl, &n) == HB_OK, let cl, n > 0 {
                 let arr = UnsafeBufferPointer(start: cl, count: n)
-                for c in arr { col.addArrangedSubview(conflictCard(c)) }
+                for c in arr { append(conflictCard(c)) }
                 hb_sync_conflicts_free(cl, n)
             } else if let cl { hb_sync_conflicts_free(cl, n) }
         }
@@ -323,7 +344,6 @@ final class AccountPage: NSView {
 
     private func conflictCard(_ c: hb_sync_conflict) -> NSView {
         let card = card()
-        card.widthAnchor.constraint(equalToConstant: 560).isActive = true
         let id = c.id.map { String(cString: $0) } ?? ""
         let tp = c.type.map { String(cString: $0) } ?? ""
         card.addArrangedSubview(h4("\(tp) · \(id.prefix(8))"))
