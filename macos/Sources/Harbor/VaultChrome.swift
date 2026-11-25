@@ -594,6 +594,7 @@ final class VIconBtn: NSButton {
 
 /// .switch.green：38x22，轨道 pending→green，白色圆钮滑动。
 final class VSwitch: NSControl {
+    var green = true { didSet { place(animated: false) } }
     var isOn = false {
         didSet {
             guard isOn != oldValue else { return }
@@ -631,7 +632,7 @@ final class VSwitch: NSControl {
     }
     private func place(animated: Bool) {
         track.backgroundColor =
-            (isOn ? Theme.green : Theme.pending).color.cgColor
+            (isOn ? (green ? Theme.green : Theme.blue) : Theme.pending).color.cgColor
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = animated ? 0.18 : 0
             ctx.allowsImplicitAnimation = true
@@ -641,17 +642,25 @@ final class VSwitch: NSControl {
     }
 }
 
-// ---------- hintbox / empty / section-title ----------
-func vHintBox(_ text: String) -> NSView {
+// ---------- hintbox / codebox / HModal ----------
+enum VHintStyle { case blue, amber, red }
+
+func vHintBox(_ text: String, style: VHintStyle = .blue) -> NSView {
     let v = NSView()
     v.wantsLayer = true
     v.layer?.cornerRadius = 9
     v.layer?.borderWidth = 1
-    v.layer?.hbBg = "hintBlueBg"
-    v.layer?.hbBorder = "hintBlueLine"
+    let bg: String, bd: String, fg: String
+    switch style {
+    case .blue:  bg = "hintBlueBg";  bd = "hintBlueLine";  fg = "hintBlueFg"
+    case .amber: bg = "hintAmberBg"; bd = "hintAmberLine"; fg = "hintAmberFg"
+    case .red:   bg = "errBg";       bd = "errLine";       fg = "hintRedFg"
+    }
+    v.layer?.hbBg = bg
+    v.layer?.hbBorder = bd
     let l = NSTextField(wrappingLabelWithString: text)
     l.font = .systemFont(ofSize: 12)
-    l.hbText = "hintBlueFg"
+    l.hbText = fg
     l.translatesAutoresizingMaskIntoConstraints = false
     l.preferredMaxLayoutWidth = 600
     v.addSubview(l)
@@ -665,6 +674,195 @@ func vHintBox(_ text: String) -> NSView {
                                   constant: -10),
     ])
     return v
+}
+
+/// 原型 .codebox：#f4f6f8 底、1px line 边框、圆角 9、等宽文本 + 可选右侧附件（tag / 复制按钮）。
+func vCodeBox(_ text: String, trailing: NSView? = nil) -> NSView {
+    let v = NSView()
+    v.wantsLayer = true
+    v.layer?.cornerRadius = 9
+    v.layer?.borderWidth = 1
+    v.layer?.hbBg = "subtle"
+    v.layer?.hbBorder = "line"
+    let l = NSTextField(wrappingLabelWithString: text)
+    l.font = .monospacedSystemFont(ofSize: 12.5, weight: .regular)
+    l.hbText = "text"
+    l.isSelectable = true
+    l.translatesAutoresizingMaskIntoConstraints = false
+    v.addSubview(l)
+    if let tr = trailing {
+        tr.translatesAutoresizingMaskIntoConstraints = false
+        tr.setContentHuggingPriority(.required, for: .horizontal)
+        tr.setContentCompressionResistancePriority(.required, for: .horizontal)
+        v.addSubview(tr)
+        NSLayoutConstraint.activate([
+            l.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 13),
+            l.topAnchor.constraint(equalTo: v.topAnchor, constant: 10),
+            l.bottomAnchor.constraint(equalTo: v.bottomAnchor, constant: -10),
+            l.trailingAnchor.constraint(lessThanOrEqualTo: tr.leadingAnchor, constant: -8),
+            tr.trailingAnchor.constraint(equalTo: v.trailingAnchor, constant: -13),
+            tr.centerYAnchor.constraint(equalTo: v.centerYAnchor),
+        ])
+    } else {
+        NSLayoutConstraint.activate([
+            l.leadingAnchor.constraint(equalTo: v.leadingAnchor, constant: 13),
+            l.trailingAnchor.constraint(equalTo: v.trailingAnchor, constant: -13),
+            l.topAnchor.constraint(equalTo: v.topAnchor, constant: 10),
+            l.bottomAnchor.constraint(equalTo: v.bottomAnchor, constant: -10),
+        ])
+    }
+    return v
+}
+
+/// 原型 .modal：圆角 14 白底无边框弹窗（.modal-head + .modal-body + .modal-foot）。
+final class HModal: NSView {
+    let body = VFlippedStack()
+    let foot = NSStackView()
+    let headRow = NSStackView()
+    private let modalW: CGFloat
+    private weak var sheetWin: NSWindow?
+    private weak var parentWin: NSWindow?
+    private var onDismiss: ((Bool) -> Void)?
+    private var dismissed = false
+
+    init(title: String, icon: String? = nil, iconTint: NSColor? = nil,
+         width: CGFloat = 520, pill: NSView? = nil) {
+        self.modalW = width
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 200))
+        wantsLayer = true
+        layer?.cornerRadius = 14
+        layer?.masksToBounds = true
+        layer?.hbBg = "card"
+
+        // .modal-head
+        headRow.orientation = .horizontal
+        headRow.spacing = 8
+        headRow.alignment = .centerY
+        headRow.translatesAutoresizingMaskIntoConstraints = false
+        if let icon {
+            let iv = NSImageView(image: hbIcon(
+                icon, size: 17, tint: iconTint ?? Theme.dyn("text")))
+            iv.setContentHuggingPriority(.required, for: .horizontal)
+            headRow.addArrangedSubview(iv)
+        }
+        let tl = NSTextField(labelWithString: title)
+        tl.font = .systemFont(ofSize: 16, weight: .bold)
+        tl.hbText = "text"
+        tl.lineBreakMode = .byTruncatingTail
+        headRow.addArrangedSubview(tl)
+        if let pill { headRow.addArrangedSubview(pill) }
+        headRow.addArrangedSubview(NSView())
+        let xb = NSButton(title: "", target: self, action: #selector(hitCancel))
+        xb.isBordered = false
+        xb.image = hbIcon("x", size: 13, tint: Theme.dyn("text3"))
+        xb.translatesAutoresizingMaskIntoConstraints = false
+        xb.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        xb.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        headRow.addArrangedSubview(xb)
+        addSubview(headRow)
+
+        // .modal-body
+        body.orientation = .vertical
+        body.alignment = .leading
+        body.spacing = 13
+        body.edgeInsets = NSEdgeInsets(top: 10, left: 22, bottom: 18, right: 22)
+        body.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(body)
+
+        // .modal-foot
+        foot.orientation = .horizontal
+        foot.spacing = 9
+        foot.alignment = .centerY
+        foot.translatesAutoresizingMaskIntoConstraints = false
+        foot.addArrangedSubview(NSView())
+        addSubview(foot)
+
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: width),
+            headRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            headRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            headRow.topAnchor.constraint(equalTo: topAnchor, constant: 16),
+            body.leadingAnchor.constraint(equalTo: leadingAnchor),
+            body.trailingAnchor.constraint(equalTo: trailingAnchor),
+            body.topAnchor.constraint(equalTo: headRow.bottomAnchor, constant: 4),
+            foot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            foot.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -22),
+            foot.topAnchor.constraint(equalTo: body.bottomAnchor),
+            foot.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20),
+            foot.heightAnchor.constraint(equalToConstant: 32),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func addBody(_ v: NSView) {
+        v.translatesAutoresizingMaskIntoConstraints = false
+        body.addArrangedSubview(v)
+        v.widthAnchor.constraint(equalTo: body.widthAnchor,
+                                 constant: -44).isActive = true
+    }
+
+    @discardableResult
+    func addFootBtn(_ title: String, style: HBtn.Style = .gray,
+                    icon: String? = nil, accept: Bool? = nil,
+                    id: String? = nil,
+                    onClick: (() -> Void)? = nil) -> HBtn {
+        let b = HBtn(title, style: style, icon: icon)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        let w = max(b.intrinsicContentSize.width + 28, 72)
+        b.widthAnchor.constraint(equalToConstant: w).isActive = true
+        b.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        if let id { b.setAccessibilityIdentifier(id) }
+        if accept == true { b.keyEquivalent = "\r" }
+        b.onTap = { [weak self] in
+            if let onClick { onClick(); return }
+            if let accept { self?.dismiss(accept) }
+        }
+        foot.addArrangedSubview(b)
+        return b
+    }
+
+    override func cancelOperation(_ sender: Any?) { dismiss(false) }
+    @objc private func hitCancel() { dismiss(false) }
+
+    func dismiss(_ accepted: Bool) {
+        guard !dismissed else { return }
+        dismissed = true
+        if let s = sheetWin {
+            DialogRegistry.shared.untrack(s)
+            if let p = parentWin {
+                p.endSheet(s)
+            } else {
+                s.orderOut(nil)
+            }
+        }
+        onDismiss?(accepted)
+        onDismiss = nil
+    }
+
+    func present(kind: String, in window: NSWindow?,
+                 done: @escaping (Bool) -> Void) {
+        onDismiss = done
+        layoutSubtreeIfNeeded()
+        let fit = fittingSize
+        let h = max(140, fit.height)
+        let s = NSWindow(contentRect: NSRect(x: 0, y: 0, width: modalW, height: h),
+                         styleMask: [.borderless], backing: .buffered, defer: false)
+        s.isOpaque = false
+        s.backgroundColor = .clear
+        s.hasShadow = true
+        s.isReleasedWhenClosed = false
+        s.contentView = self
+        sheetWin = s
+        let w = window ?? NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first
+        parentWin = w
+        DialogRegistry.shared.track(window: s, kind: kind)
+        if let w {
+            w.beginSheet(s) { _ in }
+        } else {
+            s.center()
+            s.makeKeyAndOrderFront(nil)
+        }
+    }
 }
 
 private final class VGradTile: NSView {

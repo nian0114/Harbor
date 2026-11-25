@@ -53,9 +53,13 @@ final class DialogRegistry {
         if let av = alert.accessoryView { registerFields(av) }
         tracked.append((alert.window, kind))
     }
+    func track(window: NSWindow, kind: String) {
+        if let cv = window.contentView { registerFields(cv) }
+        tracked.append((window, kind))
+    }
     func untrack(alert: NSAlert) { untrack(alert.window) }
 
-    private func untrack(_ w: NSWindow) {
+    func untrack(_ w: NSWindow) {
         tracked.removeAll { $0.win === w }
         fields.removeAll()
         textViews.removeAll()

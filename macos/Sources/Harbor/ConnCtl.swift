@@ -45,7 +45,7 @@ final class ConnCtl {
     private var pendIsPass = false
     private var hopIds: [String?] = []
     private var promptField: NSSecureTextField?
-    private var rememberBox: NSButton?
+    private var rememberSw: VSwitch?
 
     // 借给 hb_ssh_opts 的分配：secrets 用完 wipe+free；allocs 仅 free
     private var secrets: [UnsafeMutablePointer<CChar>] = []
@@ -393,24 +393,64 @@ final class ConnCtl {
                                                omittingEmptySubsequences: false)
         let line = parts.first.map(String.init) ?? ""
         let art = parts.count > 1 ? String(parts[1]) : ""
-        let a = NSAlert()
+        let lineParts = line.split(separator: " ")
+        let keytype = lineParts.count >= 2 ? String(lineParts[1]) : "ssh-ed25519"
+        let fpOnly = fp.split(separator: " ").last.map(String.init) ?? fp
+        let m = HModal(
+            title: changed ? L("主机密钥已变更") : L("首次连接 · 验证主机指纹"),
+            icon: "shield",
+            iconTint: changed ? Theme.dyn("red") : Theme.dyn("text"))
         if changed {
-            a.alertStyle = .critical
-            a.messageText = L("主机密钥已变更")
-            a.informativeText = String(format:
-                L("主机 %@ 的密钥与记录不符，可能遭遇中间人攻击！\n\n%@\n\n%@"),
-                hostPort, fp, art)
-            a.addButton(withTitle: L("断开"))         // 默认 = Return
-            a.addButton(withTitle: L("仍然连接"))
+            m.addBody(vHintBox(String(format:
+                L("主机 %@ 的密钥与记录不符，可能遭遇中间人攻击！"), hostPort),
+                style: .red))
         } else {
-            a.messageText = String(format: L("首次连接 %@"), hostPort)
-            a.informativeText = "\(fp)\n\n\(art)"
-            a.addButton(withTitle: L("信任并连接"))
-            a.addButton(withTitle: L("断开"))
+            m.addBody(vHintBox(
+                L("该主机不在 known_hosts 中。请通过电话 / 控制台等带外渠道核对指纹后再信任，防止中间人攻击。"),
+                style: .amber))
         }
-        DialogRegistry.shared.present(alert: a,
-                                      kind: changed ? "hk-changed" : "tofu",
-                                      in: window) { [weak self] ok in
+        let ktTag = hbTagLabel(keytype)
+        ktTag.translatesAutoresizingMaskIntoConstraints = false
+        ktTag.widthAnchor.constraint(equalToConstant: ktTag.frame.width).isActive = true
+        ktTag.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        m.addBody(vCodeBox(hostPort, trailing: ktTag))
+
+        let fpLbl = NSTextField(labelWithString: L("主机公钥指纹 (SHA256)"))
+        fpLbl.font = .systemFont(ofSize: 12, weight: .semibold)
+        fpLbl.hbText = "text2"
+        m.addBody(fpLbl)
+
+        let copyB = HBtn(L("复制"), style: .gray, sm: true)
+        copyB.translatesAutoresizingMaskIntoConstraints = false
+        copyB.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        copyB.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        copyB.onTap = { [weak copyB] in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(fpOnly, forType: .string)
+            copyB?.titleText = L("已复制")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                copyB?.titleText = L("复制")
+            }
+        }
+        m.addBody(vCodeBox(fpOnly, trailing: copyB))
+
+        if !changed {
+            let cr = NSStackView()
+            cr.orientation = .vertical; cr.spacing = 2; cr.alignment = .leading
+            let t1 = NSTextField(labelWithString: L("信任后写入 known_hosts 并经 E2EE 同步"))
+            t1.font = .systemFont(ofSize: 13); t1.hbText = "text"
+            let t2 = NSTextField(labelWithString: L("之后指纹若变更将红色告警并阻断连接"))
+            t2.font = .systemFont(ofSize: 11.5); t2.hbText = "text3"
+            cr.addArrangedSubview(t1); cr.addArrangedSubview(t2)
+            m.addBody(cr)
+            m.addFootBtn(L("取消"), style: .gray, accept: false)
+            m.addFootBtn(L("信任并继续"), style: .primary, accept: true)
+        } else {
+            m.addFootBtn(L("仍然连接"), style: .danger, accept: false)
+            m.addFootBtn(L("断开"), style: .primary, accept: true)
+        }
+        m.present(kind: changed ? "hk-changed" : "tofu",
+                  in: window) { [weak self] ok in
             guard let self, let s = self.sess?.sess else { return }
             self.awaitingReply = false
             let accepted = changed ? !ok : ok
@@ -471,30 +511,61 @@ final class ConnCtl {
             hb_obj_free(h)
         }
         pendKeyId = targetId; pendIsPass = isPass
-        let a = NSAlert()
-        a.messageText = ev.pointee.text.str.isEmpty
-            ? "Password:" : ev.pointee.text.str
-        a.informativeText = isPass ? L("私钥口令") : L("密码")
-        a.addButton(withTitle: L("确定"))
-        a.addButton(withTitle: L("取消"))
-        let f = NSSecureTextField(frame: NSRect(x: 0, y: 24, width: 240, height: 24))
+        let title = ev.pointee.text.str.isEmpty ? "Password:" : ev.pointee.text.str
+        let m = HModal(title: title, icon: "key", width: 440)
+        let lbl = NSTextField(labelWithString: isPass ? L("私钥口令") : L("密码"))
+        lbl.font = .systemFont(ofSize: 12, weight: .semibold)
+        lbl.hbText = "text2"
+        m.addBody(lbl)
+
+        let f = NSSecureTextField()
+        f.isBordered = false
+        f.drawsBackground = false
+        f.focusRingType = .none
+        f.font = .systemFont(ofSize: 13)
+        f.hbText = "text"
+        f.translatesAutoresizingMaskIntoConstraints = false
         f.setAccessibilityIdentifier("prompt-secret")
-        let rem = NSButton(checkboxWithTitle: L("记住（加密）"),
-                           target: nil, action: nil)
-        rem.frame = NSRect(x: 0, y: 0, width: 240, height: 20)
+        let box = NSView()
+        box.wantsLayer = true
+        box.layer?.cornerRadius = 8
+        box.layer?.borderWidth = 1
+        box.layer?.hbBg = "tableHead"
+        box.layer?.hbBorder = "line"
+        box.addSubview(f)
+        NSLayoutConstraint.activate([
+            box.heightAnchor.constraint(equalToConstant: 36),
+            f.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 12),
+            f.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -12),
+            f.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+        ])
+        m.addBody(box)
+
+        let remRow = NSStackView()
+        remRow.orientation = .horizontal; remRow.spacing = 8; remRow.alignment = .centerY
+        let remLbl = NSTextField(labelWithString: L("记住（加密）"))
+        remLbl.font = .systemFont(ofSize: 13); remLbl.hbText = "text"
+        let rem = VSwitch(frame: .zero)
+        rem.green = false
         rem.setAccessibilityIdentifier("prompt-remember")
-        let stack = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 52))
-        stack.addSubview(f); stack.addSubview(rem)
-        a.accessoryView = stack
-        promptField = f; rememberBox = rem
-        DialogRegistry.shared.present(alert: a, kind: "prompt",
-                                      in: window) { [weak self] ok in
+        rem.translatesAutoresizingMaskIntoConstraints = false
+        rem.widthAnchor.constraint(equalToConstant: 38).isActive = true
+        rem.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        remRow.addArrangedSubview(remLbl)
+        remRow.addArrangedSubview(NSView())
+        remRow.addArrangedSubview(rem)
+        m.addBody(remRow)
+
+        m.addFootBtn(L("取消"), style: .gray, accept: false)
+        m.addFootBtn(L("确定"), style: .primary, accept: true)
+        promptField = f; rememberSw = rem
+        m.present(kind: "prompt", in: window) { [weak self] ok in
             guard let self, let s = self.sess?.sess else { return }
             self.awaitingReply = false
             let secStr = self.promptField?.stringValue ?? ""
             self.promptField?.stringValue = ""     // 清空对话框中的明文
-            let remember = self.rememberBox?.state == .on
-            self.promptField = nil; self.rememberBox = nil
+            let remember = self.rememberSw?.isOn ?? false
+            self.promptField = nil; self.rememberSw = nil
             if ok {
                 let buf = secStr.withCString { strdup($0) }
                 hb_session_prompt_reply(s, buf)
