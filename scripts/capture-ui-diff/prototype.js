@@ -189,7 +189,7 @@ async ({ id, mode, advance }) => {
     131: () => { section("account"); settings(); },
     132: () => fileMenu(false),
     133: () => { notice(); A.readAll(); notice("Build completed"); notifications(); },
-    134: async () => { local(); command("ai-task"); section("hosts"); await advance(12050); },
+    134: async () => { local(); command("ai-task"); section("hosts"); await advance(6100); await advance(5950); },
     135: async () => { await fileAction("Delete…"); A.confirmOk(); },
   };
 

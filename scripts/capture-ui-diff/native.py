@@ -42,7 +42,6 @@ MAC = {
     42: section(3, "seed-snippet", "dialog-fill snip-search Harbor"),
     43: section(3, "snip-editor", sheet=True),
     44: section(4, "click known-import"),
-    45: section(5, "seed-log", "click logs-sort", "click logs-saved"),
     46: section(5, "seed-log", "click logs-csv"),
     47: ("tab-sel 1",),
     49: (*SFTP, "local-pane 0 left", "local-pane 1 right"),
@@ -69,6 +68,7 @@ MAC = {
     99: section(3, "seed-snippet", f"dialog-fill snip-search {NO_MATCH}"),
     100: section(4, f"dialog-fill known-search {NO_MATCH}"),
     101: section(5, "seed-log", f"dialog-fill logs-search {NO_MATCH}"),
+    102: section(6),
     112: (*LOCAL, "seed-variable", "snip-send {snippet}", "sheet"),
     120: ("seed-hosts", "host-sel {host}", "click drawer-dup"),
     121: ("import-config",),
@@ -78,9 +78,10 @@ MAC = {
 MAC_BLOCKED = {}
 for ids, reason in (
     ((8,), "需要可选中 Hosts 排序菜单选项的驱动步骤"),
+    ((45,), "现有 click 钩子只支持 NSControl，不能触发 Logs 的自定义排序表头"),
     ((13, 14, 15, 48, 114, 115), "需要可控的本地 SSH/SFTP 服务及连接状态，当前配方未配置该夹具"),
     ((57, 58, 59, 60, 61, 117, 118, 127), "需要可控的本地 RDP/VNC 和 SSH 隧道夹具"),
-    ((34, 35, 37, 102, 103, 104, 105, 106, 107, 108, 128, 129), "需要隔离的已登录同步账号或共享 Console 参与端夹具"),
+    ((34, 35, 37, 103, 104, 105, 106, 107, 108, 128, 129), "需要隔离的已登录同步账号或共享 Console 参与端夹具"),
     ((18, 20, 69, 116, 133, 134), "需要驱动本地会话监控事件及通知状态，现有配方未验证该入口"),
     ((23, 24), "需要可驱动会话监控弹窗及规则测试器的入口"),
     ((55,), "需要可稳定停留在传输运行态的 SFTP 夹具"),
@@ -114,6 +115,11 @@ def mac_recipe(n, dev, data):
                 response = dev(f"mkobj host|name={name}|address=127.0.0.1|proto={proto}|user=demo|group={group}|os=ubuntu")
                 if name == "10.88.2.11":
                     variables["host"] = re.search(r"\bid=(\S+)", response)[1]
+            # HostsPage does not observe mkobj writes. Re-enter it to reload
+            # HostStore before selecting chips/cards or taking the first shot.
+            dev("select-sidebar 0")
+            dev(f"host-sel {variables['host']}")
+            dev("select-sidebar 0")
         elif command in {"seed-snippet", "seed-variable"}:
             body = "tail -f {{path}}" if command == "seed-variable" else "printf 'Harbor demo\\n'"
             response = dev(f"mkobj snippet|title=Harbor Demo|body={body}|scope=global")
@@ -141,16 +147,16 @@ def mac_recipe(n, dev, data):
         elif command == "wait-transfer":
             wait_state(dev, "sftp", lambda raw: "done" in raw)
         elif command == "wait-local":
-            wait_state(dev, "state", lambda raw: json.loads(raw)["tabs"][-1].get("screen", "").strip())
+            wait_state(dev, "state", lambda raw: json.loads(raw)["tabs"][-1].get("running", False))
         elif command == "wait-ended":
             wait_state(dev, "state", lambda raw: not json.loads(raw)["tabs"][-1].get("running"))
         elif command.startswith("wait-output "):
-            wait_state(dev, "state", lambda raw: command[12:] in raw)
+            wait_state(dev, "gridinfo", lambda raw: command[12:28] in raw)
         elif command == "wait-workspace":
             wait_state(dev, "ws-state", lambda raw: raw.startswith("panes=2 "))
         elif command == "fixture-find":
             dev(r"type echo Harbor Alpha; echo Harbor Bravo\n")
-            wait_state(dev, "state", lambda raw: "Harbor Bravo" in raw)
+            wait_state(dev, "gridinfo", lambda raw: "Harbor Bravo" in raw)
         elif command == "import-config":
             config = data / "ssh-config"
             config.write_text("Host web-01.prod\n  HostName 127.0.0.1\n  User demo\n", encoding="utf-8")
