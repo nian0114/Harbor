@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from contextlib import ExitStack
 import argparse
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ import struct
 import subprocess
 import tempfile
 import time
+import traceback
 
 
 HERE = Path(__file__).resolve().parent
@@ -116,7 +118,7 @@ class Prototype:
 
 def app_env(data):
     return dict(os.environ, HARBOR_DATA_DIR=str(data), HARBOR_DEMO="1", HARBOR_DEV_ACTIONS="1",
-                HARBOR_DEK_FILE="1", XDG_CONFIG_HOME=str(data / "config"),
+                HARBOR_DEK_FILE="1", HARBOR_CAPTURE_PANEL_DIR=str(data), XDG_CONFIG_HOME=str(data / "config"),
                 XDG_DATA_HOME=str(data / "xdg"), XDG_CACHE_HOME=str(data / "cache"), ZDOTDIR=str(data))
 
 
@@ -147,10 +149,11 @@ def wait_for(check, reason, timeout=8):
 
 
 def capture_mac(n, binary, data, output, foreground=False):
-    from native import mac_recipe
+    from native import mac_recipe, fixture_provenance
 
     env = app_env(data)
     commands = []
+    resources = ExitStack()
 
     def dev(command):
         commands.append(command)
@@ -161,10 +164,16 @@ def capture_mac(n, binary, data, output, foreground=False):
         result = run([str(ROOT / "scripts/dev-mac.sh"), verb, rest], env)
         if not result or result.startswith("ERR") or "\nTIMEOUT" in result:
             raise Blocked(f"macOS {command}: {result or 'dev.sock 没有响应'}")
+        if verb in ('ui-click','ui-menu'):
+            time.sleep(.15)
         return result.removeprefix("OK ")
 
-    with tempfile.TemporaryFile() as logs:
-        process = subprocess.Popen([binary, "-harbor.language", "zh_CN"], cwd=ROOT, env=env,
+    dev.resources = resources
+    with (data / 'app.log').open('w+b') as logs:
+        arguments = ["-harbor.language", "zh_CN", "-NSNavLastRootDirectory", str(data),
+                     "-NSNavLastCurrentDirectory", str(data)]
+        command = [str(binary), *arguments]
+        process = subprocess.Popen(command, cwd=ROOT, env=env,
                                    stdin=subprocess.DEVNULL, stdout=logs, stderr=subprocess.STDOUT)
         try:
             def ready():
@@ -186,15 +195,36 @@ def capture_mac(n, binary, data, output, foreground=False):
             result = dev(f"snapshot {output}")
             if result.endswith("+sheet"):
                 png_size(Path(f"{output}.sheet.png"))
-            if extra == "sheet" and not result.endswith("+sheet"):
-                dialogs = dev("dialogs")
-                raise Blocked("snapshot 未输出所需弹窗；现有 hook 只覆盖主窗/attachedSheet，dialogs=" + dialogs)
+            capture_method = "AppKit view tree and actual child-window frames"
+            composite = dev(f"snapshot-ui {output}")
+            overlays = int(composite.split('overlays=')[-1])
+            if (extra in ("sheet", "window") and overlays == 0) or extra in ("menu", "screen", "notification"):
+                capture_method = "ScreenCaptureKit isolated Harbor windows within the main frame"
+                screen_command = "snapshot-screen-notification" if extra == "notification" else "snapshot-screen"
+                dev(f"{screen_command} {output}")
+                deadline = time.monotonic()+60
+                while time.monotonic()<deadline:
+                    screen_state=dev('snapshot-screen-state')
+                    if screen_state.startswith('OK') or screen_state.startswith('captured'):break
+                    time.sleep(.1)
+                else: raise Blocked('System screenshot did not complete: ' + screen_state)
             actual = png_size(output)
             if actual == tuple(pixels * 2 for pixels in SIZE):
                 run(["sips", "-z", "900", "1400", str(output)])
+        except Exception as error:
+            evidence = {"commands": commands.copy()}
+            for name in ("state", "dialogs", "sftp", "rd", "ui-menu-info", "ui-windows", "hier 18"):
+                try: evidence[name] = dev(name)
+                except Exception: pass
+            logs.seek(0)
+            evidence['app_log'] = logs.read().decode(errors='replace')[-8000:]
+            error.capture_evidence = evidence
+            raise
         finally:
             stop(process)
-    return {"commands": commands}
+            resources.close()
+    return {"commands": commands, "composited_overlays": overlays,
+            "capture_method": capture_method, "fixtures": fixture_provenance(n)}
 
 
 def capture_linux(n, binary, data, output):
@@ -274,7 +304,7 @@ def capture_one(n, output, capture):
             if companion.is_file():
                 shutil.move(companion, sheet)
                 extra["sheet"] = str(sheet.relative_to(output.parents[1]))
-                extra["sheet_note"] = "原生 hook 单独渲染 sheet；主 PNG 不含该 sheet，未猜测坐标合成。"
+                extra["sheet_note"] = "原生 hook 额外保存的独立 sheet；主 PNG 使用实际子窗口坐标合成或系统窗口区域截图。"
         artifacts = []
         for image in (output, sheet):
             if image.is_file():
@@ -288,7 +318,7 @@ def capture_one(n, output, capture):
         output.unlink(missing_ok=True)
         sheet.unlink(missing_ok=True)
         reason = str(error).strip().splitlines()
-        return {"status": "blocked", "reason": reason[0] if reason else type(error).__name__}
+        return {"status": "blocked", "reason": reason[0] if reason else type(error).__name__, "traceback": traceback.format_exc(), "evidence": getattr(error, "capture_evidence", {})}
 
 
 def write_blocked(out, matrix):
