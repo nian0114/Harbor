@@ -2,11 +2,11 @@ import AppKit
 import CHarbor
 import HarborKit
 
-/// FR-06 Vault「端口转发」页 —— 对齐 linux/src/hb-forward-view.c：
-/// 工具栏（新建分裂键 + ▾ 菜单 + 搜索），行 = 类型 tag | 监听 |
-/// 目标 | 经由 | 流量 | 状态 pill | 开关/编辑/删除；双击编辑，
-/// 删除确认 + 9s 撤销。mgr "changed" 单行刷新（STATS ≤1/s 不重建）。
-/// documentView 翻转坐标：内容少于视口时贴顶（否则 NSStackView 沉底）。
+/// FR-06 Vault「端口转发」页 —— 对齐 prototype forwardingView：
+/// 工具栏（新建分裂键 + ▾ 菜单 + 搜索），白卡片表格 = 类型 tag |
+/// 监听 | 目标 | 经由 | 流量 | 状态 pill | 开关/编辑/删除；双击编辑，
+/// 删除确认 + 9s 撤销；表下 hintbox。mgr "changed" 单行刷新
+/// （STATS ≤1/s 不重建）。documentView 翻转坐标：内容少于视口贴顶。
 private final class FlippedStack: NSStackView {
     override var isFlipped: Bool { true }
 }
@@ -14,10 +14,10 @@ private final class FlippedStack: NSStackView {
 final class ForwardPage: NSView {
     private var objs: [OpaquePointer] = []        // "forward" 对象（owned）
     private var filtered: [OpaquePointer]?
-    private var rowsBox: NSStackView!
+    private var rowsBox: FlippedStack!
+    private var card: VCard!
     private var rows: [FwdRow] = []
-    private var search: NSSearchField!
-    private var emptyL: NSTextField!
+    private var search: VField!
     private var vaultObs: NSObjectProtocol?
     private var tick: Timer?
     private let mgr = ForwardMgr.shared
@@ -25,35 +25,35 @@ final class ForwardPage: NSView {
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        layer?.hbBg = "page"
+        layer?.hbBg = "content"
         buildBar()
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         scroll.frame = NSRect(x: 0, y: 0, width: f.width,
-                              height: f.height - 46)
+                              height: f.height - 56)
         scroll.autoresizingMask = [.width, .height]
         rowsBox = FlippedStack()
         rowsBox.orientation = .vertical
-        rowsBox.spacing = 0
+        rowsBox.spacing = 14
         rowsBox.alignment = .leading
+        rowsBox.edgeInsets = NSEdgeInsets(top: 4, left: 18,
+                                          bottom: 20, right: 18)
         rowsBox.translatesAutoresizingMaskIntoConstraints = false
         scroll.documentView = rowsBox
         rowsBox.widthAnchor.constraint(
             equalTo: scroll.contentView.widthAnchor).isActive = true
         addSubview(scroll)
-        rowsBox.addArrangedSubview(makeHeader())
-        emptyL = NSTextField(labelWithString: "")
-        emptyL.textColor = .secondaryLabelColor
-        emptyL.font = .systemFont(ofSize: 12.5)
-        emptyL.alignment = .center
-        addSubview(emptyL)
-        emptyL.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            emptyL.centerXAnchor.constraint(equalTo: centerXAnchor),
-            emptyL.topAnchor.constraint(equalTo: topAnchor,
-                                        constant: 120),
-        ])
+        card = VCard()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        rowsBox.addArrangedSubview(card)
+        card.widthAnchor.constraint(
+            equalTo: rowsBox.widthAnchor).isActive = true
+        let hint = vHintBox(L("VNC / RDP 主机勾选「SSH 隧道」后会自动创建临时 Local 规则：本机随机端口 → 服务器回环 127.0.0.1:3389/5901，桌面会话关闭即拆除（FR-07）。"))
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        rowsBox.addArrangedSubview(hint)
+        hint.widthAnchor.constraint(
+            equalTo: rowsBox.widthAnchor).isActive = true
         mgr.onChange = { [weak self] id in self?.onMgrChange(id) }
         vaultObs = NotificationCenter.default.addObserver(
             forName: .hbVaultChanged, object: nil, queue: .main)
@@ -79,99 +79,52 @@ final class ForwardPage: NSView {
 
     // ---------- 工具栏 ----------
     private func buildBar() {
-        var x: CGFloat = 14
-        let newB = NSButton(title: L("＋ 新建转发"), target: self,
-                            action: #selector(onNew))
-        newB.bezelStyle = .rounded
-        newB.font = .systemFont(ofSize: 12)
-        newB.frame = NSRect(x: x, y: bounds.height - 38,
-                            width: max(30,
-                                newB.intrinsicContentSize.width + 14),
-                            height: 26)
-        newB.autoresizingMask = [.minYMargin]
-        newB.setAccessibilityIdentifier("fwd-new")
-        addSubview(newB)
-        x += newB.frame.width
-        let dd = NSPopUpButton(frame: NSRect(x: x, y: bounds.height - 38,
-                                             width: 30, height: 26),
-                               pullsDown: true)
-        dd.bezelStyle = .rounded
-        dd.autoresizingMask = [.minYMargin]
-        let menu = NSMenu()
-        for (t, a) in [
-            (L("New forwarding"), #selector(onNew)),
-            (L("全部启动"), #selector(onStartAll)),
-            (L("全部停止"), #selector(onStopAll)),
-            (L("导出规则 JSON"), #selector(onExport)),
-        ] as [(String, Selector)] {
-            let mi = NSMenuItem(title: t, action: a,
-                                keyEquivalent: "")
-            mi.target = self
-            menu.addItem(mi)
-        }
-        dd.menu = menu
-        dd.setAccessibilityIdentifier("fwd-menu")
-        addSubview(dd)
-        x += 38
-        search = NSSearchField(frame: NSRect(
-            x: bounds.width - 250, y: bounds.height - 38,
-            width: 236, height: 26))
-        search.placeholderString = L("搜索监听 / 目标 / 主机…")
-        search.font = .systemFont(ofSize: 12)
+        let split = VSplit(L("新建转发"), icon: "plus")
+        split.entries = [
+            VMenuEntry(L("新建规则")) { [weak self] in self?.onNew() },
+            VMenuEntry(L("全部启动")) { [weak self] in
+                self?.onStartAll()
+            },
+            VMenuEntry(L("全部停止")) { [weak self] in
+                self?.onStopAll()
+            },
+            VMenuEntry(L("导出规则 JSON")) { [weak self] in
+                self?.onExport()
+            },
+        ]
+        split.size()
+        split.frame.origin = NSPoint(x: 18, y: bounds.height - 45)
+        split.autoresizingMask = [.minYMargin]
+        split.main.setAccessibilityIdentifier("fwd-new")
+        split.dd.setAccessibilityIdentifier("fwd-menu")
+        addSubview(split)
+        search = VField(placeholder: L("搜索监听 / 目标 / 主机…"),
+                        width: 240)
+        search.frame.origin = NSPoint(x: bounds.width - 258,
+                                      y: bounds.height - 45)
         search.autoresizingMask = [.minXMargin, .minYMargin]
-        search.target = self
-        search.action = #selector(onSearch)
-        search.setAccessibilityIdentifier("fwd-search")
+        search.onChange = { [weak self] in self?.fillRows() }
+        search.entry.setAccessibilityIdentifier("fwd-search")
         addSubview(search)
     }
     private func makeHeader() -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.spacing = 8
-        row.edgeInsets = NSEdgeInsets(top: 6, left: 14,
-                                      bottom: 6, right: 10)
-        for (t, w) in [(L("类型"), 60.0), (L("监听"), -1.0),
-                       (L("目标"), -1.0), (L("经由 SSH 主机"), 140.0),
-                       (L("流量"), 170.0), (L("状态"), 110.0),
-                       ("", 96.0)] {
-            let l = NSTextField(labelWithString: t)
-            l.font = .systemFont(ofSize: 11)
-            l.textColor = .secondaryLabelColor
-            if w > 0 {
-                l.widthAnchor.constraint(
-                    equalToConstant: w).isActive = true
-            } else {
-                l.widthAnchor.constraint(
-                    greaterThanOrEqualToConstant: 110).isActive = true
-                l.setContentHuggingPriority(.init(1),
-                                            for: .horizontal)
-            }
-            row.addArrangedSubview(l)
-        }
-        let line = NSView()
-        line.wantsLayer = true
-        line.layer?.hbBg = "line"
-        let wrap = NSStackView(views: [row, line])
-        wrap.orientation = .vertical
-        wrap.spacing = 0
-        line.heightAnchor.constraint(equalToConstant: 1).isActive = true
-        line.widthAnchor.constraint(
-            equalTo: wrap.widthAnchor).isActive = true
-        return wrap
+        vHead([(L("类型"), 60), (L("监听"), -1), (L("目标"), -1),
+               (L("经由 SSH 主机"), 140), (L("流量"), 170),
+               (L("状态"), 110), ("", 104)])
     }
 
     // ---------- 行 ----------
     private final class FwdRow: NSObject {
         let id: String
         weak var page: ForwardPage?
-        let view = NSStackView()
-        let tag = NSTextField(labelWithString: "")
-        let bind = NSTextField(labelWithString: "")
-        let dest = NSTextField(labelWithString: "")
-        let via = NSTextField(labelWithString: "")
-        let traffic = NSTextField(labelWithString: "—")
-        let pill = NSTextField(labelWithString: "")
-        let sw = NSSwitch()
+        let view = VRow()
+        let tag = hbTagLabel("")
+        let bind = vLabel("", mono: true)
+        let dest = vLabel("", mono: true)
+        let via = vLabel("")
+        let traffic = vLabel("—")
+        let pill = VPill("", kind: .off)
+        let sw = VSwitch()
         var swHold = false
         init(id: String, page: ForwardPage) {
             self.id = id; self.page = page
@@ -183,18 +136,19 @@ final class ForwardPage: NSView {
         let r = FwdRow(id: id, page: self)
         let ks = hb_obj_get_str(o, "kind").str
         let kind = FwdKit.Kind(rawValue: ks) ?? .local
-        r.view.orientation = .horizontal
-        r.view.spacing = 8
-        r.view.edgeInsets = NSEdgeInsets(top: 5, left: 14,
-                                       bottom: 5, right: 10)
-        r.view.heightAnchor.constraint(
-            greaterThanOrEqualToConstant: 30).isActive = true
         r.tag.stringValue = kind.tag
-        r.tag.font = .systemFont(ofSize: 11)
-        r.tag.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        let tagWrap = NSView()
+        r.tag.translatesAutoresizingMaskIntoConstraints = false
+        tagWrap.addSubview(r.tag)
+        NSLayoutConstraint.activate([
+            r.tag.leadingAnchor.constraint(
+                equalTo: tagWrap.leadingAnchor),
+            r.tag.centerYAnchor.constraint(
+                equalTo: tagWrap.centerYAnchor),
+            tagWrap.widthAnchor.constraint(equalToConstant: 60),
+        ])
         for (l, w) in [(r.bind, -1.0), (r.dest, -1.0),
                        (r.via, 140.0), (r.traffic, 170.0)] {
-            l.lineBreakMode = .byTruncatingTail
             if w > 0 {
                 l.widthAnchor.constraint(
                     equalToConstant: w).isActive = true
@@ -208,51 +162,50 @@ final class ForwardPage: NSView {
         r.bind.stringValue = FwdKit.bindText(kind: kind,
             addr: hb_obj_get_str(o, "bind_addr").str,
             port: Int(hb_obj_get_int(o, "bind_port", 0)))
-        r.bind.font = .monospacedSystemFont(ofSize: 11.5,
-                                            weight: .regular)
         r.dest.stringValue = FwdKit.destText(kind: kind,
             addr: hb_obj_get_str(o, "dest_addr").str,
             port: Int(hb_obj_get_int(o, "dest_port", 0)))
-        r.dest.font = .monospacedSystemFont(ofSize: 11.5,
-                                            weight: .regular)
         r.via.stringValue = viaText(hb_obj_get_str(o, "via").str)
-        r.via.lineBreakMode = .byTruncatingTail
-        // 状态 pill：圆角着色标签（同 logs 行徽标）
-        r.pill.alignment = .center
-        r.pill.font = .systemFont(ofSize: 11)
-        r.pill.wantsLayer = true
-        r.pill.layer?.cornerRadius = 8
-        r.pill.widthAnchor.constraint(equalToConstant: 110)
-            .isActive = true
-        r.view.addArrangedSubview(r.tag)
+        let pillWrap = NSView()
+        r.pill.translatesAutoresizingMaskIntoConstraints = false
+        pillWrap.addSubview(r.pill)
+        NSLayoutConstraint.activate([
+            r.pill.leadingAnchor.constraint(
+                equalTo: pillWrap.leadingAnchor),
+            r.pill.centerYAnchor.constraint(
+                equalTo: pillWrap.centerYAnchor),
+            pillWrap.widthAnchor.constraint(equalToConstant: 110),
+        ])
+        r.view.addArrangedSubview(tagWrap)
         r.view.addArrangedSubview(r.bind)
         r.view.addArrangedSubview(r.dest)
         r.view.addArrangedSubview(r.via)
         r.view.addArrangedSubview(r.traffic)
-        r.traffic.font = .monospacedSystemFont(ofSize: 11,
-                                               weight: .regular)
-        r.view.addArrangedSubview(r.pill)
-        r.sw.controlSize = .small
+        r.view.addArrangedSubview(pillWrap)
+        let act = NSStackView()
+        act.orientation = .horizontal
+        act.spacing = 4
         r.sw.target = self
         r.sw.action = #selector(onSw(_:))
         r.sw.setAccessibilityIdentifier("fwd-sw-\(id)")
-        r.view.addArrangedSubview(r.sw)
-        let eb = NSButton(title: "✎", target: self,
-                          action: #selector(onEdit(_:)))
-        eb.bezelStyle = .inline
-        eb.font = .systemFont(ofSize: 12)
+        act.addArrangedSubview(r.sw)
+        let eb = VIconBtn(icon: "wand")
         eb.toolTip = L("编辑")
-        eb.identifier = .init(id)
+        eb.onTap = { [weak self] in
+            guard let self,
+                  let o = self.objs.first(where: {
+                      hb_obj_id($0).str == id }) else { return }
+            self.openForm(obj: o)
+        }
         eb.setAccessibilityIdentifier("fwd-edit-\(id)")
-        r.view.addArrangedSubview(eb)
-        let db = NSButton(title: "🗑", target: self,
-                          action: #selector(onDel(_:)))
-        db.bezelStyle = .inline
-        db.font = .systemFont(ofSize: 12)
+        act.addArrangedSubview(eb)
+        let db = VIconBtn(icon: "trash", kind: .del)
         db.toolTip = L("删除规则")
-        db.identifier = .init(id)
+        db.onTap = { [weak self] in self?.delRule(id) }
         db.setAccessibilityIdentifier("fwd-del-\(id)")
-        r.view.addArrangedSubview(db)
+        act.addArrangedSubview(db)
+        act.widthAnchor.constraint(equalToConstant: 104).isActive = true
+        r.view.addArrangedSubview(act)
         // 双击编辑：行空白区手势
         let g = NSClickGestureRecognizer(target: self,
                                          action: #selector(onDbl(_:)))
@@ -273,12 +226,6 @@ final class ForwardPage: NSView {
     }
 
     // ---------- 刷新 ----------
-    private func setPill(_ r: FwdRow, _ t: String,
-                         _ fg: NSColor, _ bg: NSColor) {
-        r.pill.stringValue = t
-        r.pill.textColor = fg
-        r.pill.layer?.backgroundColor = bg.cgColor
-    }
     private func updateRow(_ r: FwdRow) {
         let st = mgr.status(r.id)
         if let o = objs.first(where: { hb_obj_id($0).str == r.id }),
@@ -294,29 +241,25 @@ final class ForwardPage: NSView {
             active: st.active)
         switch st.state {
         case .listening:
-            setPill(r, L("监听中"),
-                    Theme.greenPillFg.color, Theme.greenPillBg.color)
+            r.pill.setText(L("监听中"), kind: .on)
             r.view.toolTip = st.message
         case .connecting:
-            setPill(r, L("连接中…"), Theme.pillRunFg.color,
-                    Theme.pillRunBg.color)
+            r.pill.setText(L("连接中…"), kind: .run)
             r.view.toolTip = nil
         case .reconnecting:
-            setPill(r, L("断开 · %ds 后重连").fmt(st.retryInS),
-                    Theme.pillWaitFg.color, Theme.pillWaitBg.color)
+            r.pill.setText(L("断开 · %ds 后重连").fmt(st.retryInS),
+                           kind: .wait)
             r.view.toolTip = st.message ?? L("连接断开，自动重连中")
             ensureTick()
         case .failed:
-            setPill(r, L("失败"), Theme.pillErrFg.color,
-                    Theme.pillErrBg.color)
+            r.pill.setText(L("失败"), kind: .err)
             r.view.toolTip = st.message ?? L("启动失败")
         case .stopped:
-            setPill(r, L("已停止"), Theme.termDim.color,
-                    Theme.line.color.withAlphaComponent(0.35))
+            r.pill.setText(L("已停止"), kind: .off)
             r.view.toolTip = st.message
         }
         r.swHold = true
-        r.sw.state = st.running ? .on : .off
+        r.sw.isOn = st.running
         r.swHold = false
     }
     /// 1s 倒计时 tick：只刷 RECONNECTING 行 pill 文本（linux tick_cb）。
@@ -329,8 +272,9 @@ final class ForwardPage: NSView {
             for r in self.rows {
                 let st = self.mgr.status(r.id)
                 if st.state == .reconnecting {
-                    r.pill.stringValue =
-                        L("断开 · %ds 后重连").fmt(st.retryInS)
+                    r.pill.setText(
+                        L("断开 · %ds 后重连").fmt(st.retryInS),
+                        kind: .wait)
                     any = true
                 }
             }
@@ -372,46 +316,37 @@ final class ForwardPage: NSView {
         let q = search?.stringValue.trimmingCharacters(
             in: .whitespaces).lowercased() ?? ""
         filtered = objs.filter { match($0, q) }
-        rowsBox.arrangedSubviews.dropFirst().forEach {
-            rowsBox.removeArrangedSubview($0)
-            $0.removeFromSuperview()
-        }
         rows.removeAll()
+        var views: [NSView] = []
         for o in filtered ?? [] {
             let r = buildRow(o)
             rows.append(r)
-            rowsBox.addArrangedSubview(r.view)
+            views.append(r.view)
             updateRow(r)
         }
-        emptyL.stringValue = objs.isEmpty
-            ? L("还没有转发规则。点击「＋ 新建转发」创建第一条。")
-            : L("无匹配规则")
-        emptyL.isHidden = !(filtered?.isEmpty ?? true)
+        if views.isEmpty {
+            views = [vEmptyRow(objs.isEmpty
+                ? L("还没有转发规则。点击「＋ 新建转发」创建第一条。")
+                : L("无匹配规则"))]
+        }
+        card.fill(header: makeHeader(), rows: views)
     }
-    @objc private func onSearch() { fillRows() }
 
     // ---------- 动作 ----------
-    @objc private func onSw(_ sw: NSSwitch) {
+    @objc private func onSw(_ sw: VSwitch) {
         guard let r = rows.first(where: { $0.sw === sw }),
               !r.swHold else { return }
-        if sw.state == .on { mgr.start(r.id) } else { mgr.stop(r.id) }
+        if sw.isOn { mgr.start(r.id) } else { mgr.stop(r.id) }
     }
     @objc private func onDbl(_ g: NSClickGestureRecognizer) {
-        guard let v = g.view as? NSStackView,
+        guard let v = g.view as? VRow,
               let r = rows.first(where: { $0.view === v }),
               let o = objs.first(where: { hb_obj_id($0).str == r.id })
         else { return }
         openForm(obj: o)
     }
-    @objc private func onEdit(_ b: NSButton) {
-        guard let id = b.identifier?.rawValue,
-              let o = objs.first(where: { hb_obj_id($0).str == id })
-        else { return }
-        openForm(obj: o)
-    }
-    @objc private func onDel(_ b: NSButton) {
-        guard let id = b.identifier?.rawValue,
-              let o = objs.first(where: { hb_obj_id($0).str == id })
+    private func delRule(_ id: String) {
+        guard let o = objs.first(where: { hb_obj_id($0).str == id })
         else { return }
         let kind = FwdKit.Kind(rawValue:
             hb_obj_get_str(o, "kind").str) ?? .local

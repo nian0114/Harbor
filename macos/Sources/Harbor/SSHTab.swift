@@ -532,6 +532,14 @@ final class SSHTab: TermTab, ConnDelegate {
     // ---- Workspace 叶钩子 ----
     override var isSSHLeaf: Bool { true }
     override var wsIconName: String { osTile(conn.hostOS).icon }
+    override var wsBarTitle: String {
+        conn.shareHost.isEmpty ? title
+            : "ssh \(conn.sshUser)@\(conn.shareHost)"
+    }
+    override var wsHeadTitle: String {
+        conn.shareHost.isEmpty ? title
+            : "\(conn.shareHost) · ssh, \(conn.sshUser)"
+    }
     override var wsHostId: String? { conn.hostId }
     override var wsDead: Bool {
         ended || failed || (session != nil && !session!.alive)

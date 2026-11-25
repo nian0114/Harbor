@@ -86,6 +86,16 @@ class TermTab: NSObject {
     var wsIconName: String { "terminal" }
     /// pane-head 标题。
     var wsTitle: String { title }
+    /// term-toolbar tt-title（prototype：Local · zsh / ssh user@host）。
+    var wsBarTitle: String {
+        let sh = (ProcessInfo.processInfo.environment["SHELL"]
+            as NSString?)?.lastPathComponent ?? "zsh"
+        return "Local · \(sh)"
+    }
+    /// pane-head 文案（prototype：name · ssh, user）。
+    var wsHeadTitle: String { wsBarTitle }
+    /// 切走 tab 时收起页级浮层（hosts drawer 等）。
+    func dismissOverlays() {}
     /// snippet scope / watch 主机规则用的 host id；Local → nil。
     var wsHostId: String? { nil }
 

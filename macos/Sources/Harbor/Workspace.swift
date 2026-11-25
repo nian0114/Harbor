@@ -23,6 +23,115 @@ private final class WsSplitView: NSSplitView {
     override var dividerThickness: CGFloat { 5 }
 }
 
+/// prototype .tbtn：终端 chrome 按钮（bg t-line / border t-border /
+/// fg t-title，radius 7，padding 5x11；on=绿、share-on=蓝；sm=pane-head
+/// 的 padding 2x8）。颜色随终端主题（light 主题 on 态换浅绿）。
+final class TBtn: NSButton {
+    enum Mode { case plain, on, share }
+    var mode: Mode = .plain { didSet { if mode != oldValue { restyle() } } }
+    var mono = false { didSet { rebuildTitle() } }
+    /// 自定义前导图（assist 主题页的 sw-dot）；优先于 icon 名。
+    var leadingImage: NSImage? { didSet { rebuildTitle() } }
+    private(set) var theme = TermTheme.for("harbor")
+    private var text: String
+    private var icon: String?
+    private let sm: Bool
+    private var hovering = false
+
+    init(_ text: String, icon: String? = nil, sm: Bool = false,
+         target: AnyObject? = nil, action: Selector? = nil) {
+        self.text = text; self.icon = icon; self.sm = sm
+        super.init(frame: .zero)
+        self.target = target; self.action = action
+        isBordered = false
+        bezelStyle = .regularSquare
+        alignment = .left
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        layer?.borderWidth = 1
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: sm ? 20 : 26).isActive = true
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self))
+        rebuildTitle()
+        restyle()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func setContent(_ text: String, icon: String? = nil) {
+        self.text = text; self.icon = icon
+        rebuildTitle()
+        invalidateIntrinsicContentSize()
+    }
+    var titleText: String { text }
+    func applyTheme(_ t: TermTheme) { theme = t; restyle() }
+
+    override var intrinsicContentSize: NSSize {
+        var s = super.intrinsicContentSize
+        s.width += sm ? 16 : 22
+        s.height = sm ? 20 : 26
+        return s
+    }
+    private func colors() -> (bg: Theme.RGBA, fg: Theme.RGBA,
+                              bd: Theme.RGBA) {
+        switch mode {
+        case .on:
+            return theme.id == "light"
+                ? (.init(0xe6f6ee), .init(0x1a7f4b), .init(0xbfe6d2))
+                : (.init(0x12351f), .init(0x6fe09c), .init(0x1f5c33))
+        case .share:
+            return (.init(0x10304f), .init(0x6cb8ff), .init(0x1d4d7d))
+        case .plain:
+            return (hovering ? theme.border : theme.line,
+                    theme.title, theme.border)
+        }
+    }
+    private func rebuildTitle() {
+        let c = colors()
+        let s = NSMutableAttributedString()
+        if let img = leadingImage {
+            let att = NSTextAttachment()
+            att.image = img
+            s.append(NSAttributedString(attachment: att))
+            if !text.isEmpty {
+                s.append(NSAttributedString(string: " ",
+                                            attributes: [.kern: 4]))
+            }
+        } else if let icon {
+            let att = NSTextAttachment()
+            att.image = hbIcon(icon, size: sm ? 11 : 13, tint: c.fg.color)
+            s.append(NSAttributedString(attachment: att))
+            if !text.isEmpty {
+                s.append(NSAttributedString(string: " ",
+                                            attributes: [.kern: 4]))
+            }
+        }
+        if !text.isEmpty {
+            let f = mono
+                ? NSFont.monospacedSystemFont(ofSize: sm ? 11 : 12,
+                                              weight: .regular)
+                : NSFont.systemFont(ofSize: sm ? 11 : 12)
+            s.append(NSAttributedString(string: text, attributes: [
+                .font: f, .foregroundColor: c.fg.color]))
+        }
+        attributedTitle = s
+    }
+    private func restyle() {
+        let c = colors()
+        layer?.backgroundColor = c.bg.color.cgColor
+        layer?.borderColor = c.bd.color.cgColor
+        rebuildTitle()
+    }
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true; restyle()
+    }
+    override func mouseExited(with event: NSEvent) {
+        hovering = false; restyle()
+    }
+}
+
 final class Workspace: NSObject, NSSplitViewDelegate {
     weak var tab: TermTab?
     let model: WsModel
@@ -33,9 +142,11 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     private var heads: [UUID: NSView] = [:]
     private var headH: [UUID: NSLayoutConstraint] = [:]
     private var headBtns: [UUID: (img: NSImageView, lbl: NSTextField,
-                                  reconn: NSButton, watch: NSButton,
-                                  share: NSButton,
-                                  badge: NSTextField)] = [:]
+                                  reconn: TBtn, watch: TBtn,
+                                  share: TBtn,
+                                  badge: NSTextField, close: TBtn)] = [:]
+    /// leafId → pane margin 四约束（单叶 0 / 多叶 6，对齐 .pane margin）
+    private var mCons: [UUID: [NSLayoutConstraint]] = [:]
     /// 内节点 → 渲染出的 splitView（focus 还原 / frac 回收用）
     private var splitOf: [ObjectIdentifier: (sv: NSSplitView,
                                              node: WsModel.Node)] = [:]
@@ -43,10 +154,30 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     let view = NSView()
     private let bodyHost = NSView()
     private var treeView: NSView?
+    private let bar = NSView()
+    private let barSep = NSView()
+    private let ttIcon = NSImageView()
     private let ttLabel = NSTextField(labelWithString: "")
-    private var bcastBtn: NSButton!
-    private var focusBtn: NSButton!
-    private var shareBtn: NSButton!
+    private let rightStack = NSStackView()
+    private var bcastBtn: TBtn!
+    private var focusBtn: TBtn!
+    private var shareBtn: TBtn!
+    private var watchBtn: TBtn!
+    private var searchBtn: TBtn!
+    private var reconnBtn: TBtn!
+    private var assistBtn: TBtn!
+    // term-status（prototype .term-status）
+    private let statusView = NSView()
+    private let statusSep = NSView()
+    private let stOk = NSTextField(labelWithString: "")
+    private let stTerm = NSTextField(labelWithString: "xterm-256color")
+    private let stEnc = NSTextField(labelWithString: "UTF-8")
+    private let stWatch = NSTextField(labelWithString: "")
+    private let stShare = NSTextField(labelWithString: "")
+    private let stSb = NSTextField(labelWithString: "")
+    private let leftStack = NSStackView()
+    private var chromeTheme = TermTheme.for("harbor")
+    private var themeObs: NSObjectProtocol?
     let findHost = NSView()          // find bar 宿主（⌘F，见 find 补丁）
     private var findH: NSLayoutConstraint?
 
@@ -55,6 +186,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     /// focus 模式下被独占的 pane box / 原 margin / 原槽位
     private var fmBox: NSView?
     private var fmMargin: NSView?
+    private var fmCons: [NSLayoutConstraint]?
     private var fmSlot: (node: WsModel.Node, index: Int, frac: Float)?
 
     init(seed: TermTab) {
@@ -66,67 +198,73 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         wireLeaf(seed)
         rebuild()
         focus(model.root, grab: false)
+        themeObs = NotificationCenter.default.addObserver(
+            forName: TerminalView.nTheme, object: nil,
+            queue: .main) { [weak self] n in
+                guard let self, let t = n.object as? TerminalView,
+                      self.allTerms.contains(where: { $0 === t })
+                else { return }
+                self.applyChrome(t.theme)
+            }
+        applyChrome(seed.term?.theme ?? TermTheme.for("harbor"))
     }
 
-    // ---------------- 工具栏（对齐 hb_workspace_init 的 bar） ----------------
+    deinit {
+        if let o = themeObs { NotificationCenter.default.removeObserver(o) }
+    }
+
+    // ---------------- 工具栏 + 状态栏（prototype term-toolbar/term-status） ----------------
     private let assistHost = NSView()
     private var assistW: NSLayoutConstraint?
-    private var assistBtn: NSButton?
     private var assistPanel: AssistPanel?
     private(set) var assistOn = false
 
     private func buildChrome() {
         view.wantsLayer = true
-        view.layer?.hbBg = "card"
-        let bar = NSView()
         bar.wantsLayer = true
-        bar.layer?.hbBg = "subtle"
-        let ic = NSImageView(image: hbIcon("cols", size: 15,
-                                           tint: Theme.dyn("termDim")))
+        barSep.wantsLayer = true
+        statusView.wantsLayer = true
+        statusSep.wantsLayer = true
         ttLabel.font = .systemFont(ofSize: 12.5)
-        ttLabel.hbText = "termDim"
-        let search = NSButton()
-        search.bezelStyle = .texturedRounded
-        search.isBordered = false
-        search.image = hbIcon("search", size: 13, tint: Theme.dyn("termDim"))
-        search.target = self
-        search.action = #selector(onSearchBtn)
-        search.setAccessibilityIdentifier("ws-find")
-        // FR-12 共享（对齐 hb-ssh-page/hb-term-page 的 共享 按钮，
-        // 作用于焦点叶；pane-head 另有逐叶入口）
-        let sh = NSButton(title: L("共享"), target: self,
-                          action: #selector(onShareBtn))
-        sh.bezelStyle = .texturedRounded
-        sh.font = .systemFont(ofSize: 11.5)
-        sh.setAccessibilityIdentifier("ws-share")
-        shareBtn = sh
-        bcastBtn = NSButton(title: L("Broadcast"), target: self,
-                            action: #selector(toggleBroadcast))
-        bcastBtn.bezelStyle = .texturedRounded
-        bcastBtn.font = .systemFont(ofSize: 11.5)
-        bcastBtn.setAccessibilityIdentifier("ws-broadcast")
-        let fb = NSButton(title: L("Focus"), target: self,
-                          action: #selector(toggleFocusMode))
-        fb.bezelStyle = .texturedRounded
-        fb.font = .systemFont(ofSize: 11.5)
-        fb.setAccessibilityIdentifier("ws-focus")
-        focusBtn = fb
-        let ab = NSButton(title: L("助手栏"), target: self,
-                          action: #selector(toggleAssist))
-        ab.bezelStyle = .texturedRounded
-        ab.font = .systemFont(ofSize: 11.5)
-        ab.setAccessibilityIdentifier("ws-assist")
-        assistBtn = ab
-        [bar, ic, ttLabel, search, bcastBtn, focusBtn, ab, bodyHost,
-         findHost, assistHost, shareBtn].forEach {
+        ttLabel.lineBreakMode = .byTruncatingTail
+        func mk(_ title: String, _ icon: String?, _ act: Selector,
+                _ aid: String) -> TBtn {
+            let b = TBtn(title, icon: icon, target: self, action: act)
+            b.setAccessibilityIdentifier(aid)
+            return b
+        }
+        watchBtn = mk(L("监控 关"), "eye", #selector(onWatchBtn), "ws-watch")
+        shareBtn = mk(L("共享"), "broadcast", #selector(onShareBtn), "ws-share")
+        searchBtn = mk("", "search", #selector(onSearchBtn), "ws-find")
+        reconnBtn = mk(L("重连"), "refresh", #selector(onReconnBtn), "ws-reconn")
+        bcastBtn = mk(L("Broadcast"), "broadcast",
+                      #selector(toggleBroadcast), "ws-broadcast")
+        assistBtn = mk(L("助手栏"), "panel", #selector(toggleAssist), "ws-assist")
+        focusBtn = mk(L("Focus"), "focus",
+                      #selector(toggleFocusMode), "ws-focus")
+        rightStack.orientation = .horizontal
+        rightStack.spacing = 8
+        rightStack.alignment = .centerY
+        for l in [stOk, stTerm, stEnc, stWatch, stShare, stSb] {
+            l.font = .systemFont(ofSize: 11.5)
+        }
+        stShare.textColor = Theme.RGBA(0x6cb8ff).color
+        leftStack.orientation = .horizontal
+        leftStack.spacing = 14
+        leftStack.alignment = .centerY
+        [bar, barSep, ttIcon, ttLabel, rightStack, statusView, statusSep,
+         leftStack, stSb, bodyHost, findHost, assistHost].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false }
         view.addSubview(bar)
-        bar.addSubview(ic); bar.addSubview(ttLabel)
-        bar.addSubview(search); bar.addSubview(sh)
-        bar.addSubview(bcastBtn); bar.addSubview(focusBtn)
-        bar.addSubview(ab)
+        bar.addSubview(barSep); bar.addSubview(ttIcon); bar.addSubview(ttLabel)
+        bar.addSubview(rightStack)
         view.addSubview(findHost); view.addSubview(bodyHost)
         view.addSubview(assistHost)
+        view.addSubview(statusView)
+        statusView.addSubview(statusSep); statusView.addSubview(leftStack)
+        statusView.addSubview(stSb)
+        [stOk, stTerm, stEnc, stWatch, stShare].forEach {
+            leftStack.addArrangedSubview($0) }
         assistW = assistHost.widthAnchor.constraint(equalToConstant: 0)
         findH = findHost.heightAnchor.constraint(equalToConstant: 0)
         findH?.isActive = true
@@ -134,43 +272,130 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             bar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             bar.topAnchor.constraint(equalTo: view.topAnchor),
-            bar.heightAnchor.constraint(equalToConstant: 36),
-            ic.leadingAnchor.constraint(equalTo: bar.leadingAnchor,
-                                        constant: 14),
-            ic.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            bar.heightAnchor.constraint(equalToConstant: 42),
+            barSep.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
+            barSep.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            barSep.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+            barSep.heightAnchor.constraint(equalToConstant: 1),
+            ttIcon.leadingAnchor.constraint(equalTo: bar.leadingAnchor,
+                                            constant: 14),
+            ttIcon.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            ttIcon.widthAnchor.constraint(equalToConstant: 15),
+            ttIcon.heightAnchor.constraint(equalToConstant: 15),
             ttLabel.leadingAnchor.constraint(
-                equalTo: ic.trailingAnchor, constant: 7),
+                equalTo: ttIcon.trailingAnchor, constant: 8),
             ttLabel.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            ab.trailingAnchor.constraint(
-                equalTo: bar.trailingAnchor, constant: -10),
-            ab.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            focusBtn.trailingAnchor.constraint(
-                equalTo: ab.leadingAnchor, constant: -6),
-            focusBtn.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            bcastBtn.trailingAnchor.constraint(
-                equalTo: focusBtn.leadingAnchor, constant: -6),
-            bcastBtn.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            search.trailingAnchor.constraint(
-                equalTo: bcastBtn.leadingAnchor, constant: -6),
-            search.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            search.widthAnchor.constraint(equalToConstant: 28),
-            shareBtn.trailingAnchor.constraint(
-                equalTo: search.leadingAnchor, constant: -6),
-            shareBtn.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            ttLabel.trailingAnchor.constraint(lessThanOrEqualTo:
+                rightStack.leadingAnchor, constant: -8),
+            rightStack.trailingAnchor.constraint(
+                equalTo: bar.trailingAnchor, constant: -14),
+            rightStack.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             findHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             findHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             findHost.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            statusView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            statusView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            statusView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            statusView.heightAnchor.constraint(equalToConstant: 25),
+            statusSep.leadingAnchor.constraint(equalTo: statusView.leadingAnchor),
+            statusSep.trailingAnchor.constraint(equalTo: statusView.trailingAnchor),
+            statusSep.topAnchor.constraint(equalTo: statusView.topAnchor),
+            statusSep.heightAnchor.constraint(equalToConstant: 1),
+            leftStack.leadingAnchor.constraint(
+                equalTo: statusView.leadingAnchor, constant: 14),
+            leftStack.centerYAnchor.constraint(equalTo: statusView.centerYAnchor),
+            leftStack.trailingAnchor.constraint(lessThanOrEqualTo:
+                stSb.leadingAnchor, constant: -14),
+            stSb.trailingAnchor.constraint(
+                equalTo: statusView.trailingAnchor, constant: -14),
+            stSb.centerYAnchor.constraint(equalTo: statusView.centerYAnchor),
             bodyHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             bodyHost.trailingAnchor.constraint(
                 equalTo: assistHost.leadingAnchor),
             bodyHost.topAnchor.constraint(equalTo: findHost.bottomAnchor),
-            bodyHost.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            bodyHost.bottomAnchor.constraint(equalTo: statusView.topAnchor),
             assistHost.trailingAnchor.constraint(
                 equalTo: view.trailingAnchor),
             assistHost.topAnchor.constraint(equalTo: findHost.bottomAnchor),
-            assistHost.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            assistHost.bottomAnchor.constraint(equalTo: statusView.topAnchor),
         ])
         assistW?.isActive = true
+        syncBarButtons()
+    }
+
+    /// 单叶 = termToolbar（监控/共享/search/重连）；
+    /// 多叶 = workspaceView toolbar（Broadcast/助手栏/Focus）。
+    private var barKey = ""
+    private func syncBarButtons() {
+        let dead = paneCount == 1 && focusedLeaf?.wsDead == true
+        let key = "\(paneCount)-\(dead)"
+        guard key != barKey else { return }
+        barKey = key
+        var btns: [TBtn] = paneCount == 1
+            ? [watchBtn, shareBtn, searchBtn]
+            : [bcastBtn, assistBtn, focusBtn]
+        if dead { btns.append(reconnBtn) }
+        rightStack.arrangedSubviews.forEach {
+            rightStack.removeArrangedSubview($0); $0.removeFromSuperview() }
+        btns.forEach { rightStack.addArrangedSubview($0) }
+    }
+
+    /// term-status 内容（焦点叶状态/监控/共享 + scrollback 设置）。
+    private func updateStatus() {
+        let leaf = focusedLeaf
+        let dead = leaf?.wsDead ?? false
+        stOk.stringValue = dead ? L("● 会话已结束") : L("● 已连接")
+        stOk.textColor = (dead ? Theme.RGBA(0xe8c66a)
+                          : chromeTheme.cursor).color
+        stWatch.stringValue = String(
+            format: L("监控: %@"),
+            (leaf?.watchOn ?? false) ? L("EOF + OSC133 + AI 预设") : L("关"))
+        let wTitle = (leaf?.watchOn ?? false) ? L("监控 开") : L("监控 关")
+        if watchBtn.titleText != wTitle {
+            watchBtn.setContent(wTitle, icon: "eye")
+        }
+        watchBtn.mode = (leaf?.watchOn ?? false) ? .on : .plain
+        if let leaf, leaf.shareOn, let sid = leaf.shareId {
+            stShare.isHidden = false
+            stShare.stringValue = String(
+                format: L("共享中 · %d 人"),
+                ShareService.shared.participants(sid).count)
+        } else {
+            stShare.isHidden = true
+        }
+        let sb = Int(Vault.shared.setting("scrollback") ?? "10000") ?? 10000
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = ","
+        stSb.stringValue = String(
+            format: L("scrollback %@ 行"),
+            f.string(from: NSNumber(value: sb)) ?? "\(sb)")
+    }
+
+    /// 终端主题 → chrome 全量取色（prototype .term-view 的 --t-* 变量）。
+    func applyChrome(_ t: TermTheme) {
+        chromeTheme = t
+        view.layer?.backgroundColor = t.bg.color.cgColor
+        bar.layer?.backgroundColor = t.bar.color.cgColor
+        barSep.layer?.backgroundColor = t.line.color.cgColor
+        ttLabel.textColor = t.title.color
+        statusView.layer?.backgroundColor = t.bar.color.cgColor
+        statusSep.layer?.backgroundColor = t.line.color.cgColor
+        for l in [stTerm, stEnc, stWatch, stSb] { l.textColor = t.muted.color }
+        for b in [watchBtn, shareBtn, searchBtn, reconnBtn,
+                  bcastBtn, assistBtn, focusBtn] { b?.applyTheme(t) }
+        for (id, h) in heads {
+            h.layer?.backgroundColor = t.bar.color.cgColor
+            guard let hb = headBtns[id] else { continue }
+            hb.lbl.textColor = t.title.color
+            hb.img.image = hbIcon(pages[id]?.wsIconName ?? "terminal",
+                                  size: 12, tint: t.title.color)
+            hb.watch.applyTheme(t); hb.share.applyTheme(t)
+            hb.reconn.applyTheme(t); hb.close.applyTheme(t)
+        }
+        assistPanel?.applyTheme(t)
+        updateTitle()
+        updateStatus()
     }
 
     /// find bar 展开/收起（find 补丁调用）
@@ -206,13 +431,11 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     /// leaf 标题/状态点变化 → pane-head + tab 标题同步
     private func leafMeta(_ id: UUID) {
         if let hb = headBtns[id], let leaf = pages[id] {
-            hb.lbl.stringValue = leaf.wsTitle
+            hb.lbl.stringValue = leaf.wsHeadTitle
             hb.reconn.isHidden = !leaf.wsDead
             hb.img.image = hbIcon(leaf.wsIconName, size: 12,
-                                  tint: Theme.dyn("termDim"))
-            hb.watch.image = hbIcon("eye", size: 11,
-                tint: leaf.watchOn ? Theme.blue.color
-                                   : Theme.termDim.color)
+                                  tint: chromeTheme.title.color)
+            hb.watch.mode = leaf.watchOn ? .on : .plain
             let bg = leaf.watchBadge
             hb.badge.stringValue =
                 bg == "err" ? "×" : bg == "pending" ? "●"
@@ -221,11 +444,11 @@ final class Workspace: NSObject, NSSplitViewDelegate {
                 bg == "err" ? Theme.red.color
                 : bg == "pending" ? Theme.amber.color
                 : Theme.green.color
-            hb.share.image = hbIcon("broadcast", size: 11,
-                tint: leaf.shareOn ? Theme.blue.color
-                                   : Theme.termDim.color)
+            hb.share.mode = leaf.shareOn ? .share : .plain
         }
         updateTitle()
+        updateStatus()
+        syncBarButtons()
         syncShareState()
         tab?.syncFromWorkspace()
     }
@@ -313,6 +536,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         heads[id] = nil
         headH[id] = nil
         headBtns[id] = nil
+        mCons[id] = nil
         _ = model.removeLeaf(n)
         rebuild()
         if let f = model.leaves.first { focus(f, grab: true) }
@@ -336,8 +560,9 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     private func applyBroadcast() {
         leavesList.forEach { applyMirror($0) }
         applyBorders()
-        bcastBtn.title = broadcast ? L("Broadcast 开") : L("Broadcast")
-        bcastBtn.contentTintColor = broadcast ? Theme.green.color : nil
+        bcastBtn.setContent(broadcast ? L("Broadcast 开") : L("Broadcast"),
+                            icon: "broadcast")
+        bcastBtn.mode = broadcast ? .on : .plain
     }
     /// 装/卸输入镜像：开 → 该 term 的输入转发给其它存活 pane。
     private func applyMirror(_ leaf: TermTab) {
@@ -400,9 +625,11 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     }
 
     // ---------------- Focus 模式（⌘⇧M） ----------------
-    private func pinBox(_ box: NSView, in mv: NSView, inset: CGFloat) {
+    @discardableResult
+    private func pinBox(_ box: NSView, in mv: NSView,
+                        inset: CGFloat) -> [NSLayoutConstraint] {
         box.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
+        let cs = [
             box.leadingAnchor.constraint(equalTo: mv.leadingAnchor,
                                          constant: inset),
             box.trailingAnchor.constraint(equalTo: mv.trailingAnchor,
@@ -411,20 +638,24 @@ final class Workspace: NSObject, NSSplitViewDelegate {
                                      constant: inset),
             box.bottomAnchor.constraint(equalTo: mv.bottomAnchor,
                                         constant: -inset),
-        ])
+        ]
+        NSLayoutConstraint.activate(cs)
+        return cs
     }
 
     /// 助手栏（prototype assist 栏）：右侧 Snippets 快捷发送面板。
     @objc func toggleAssist() { setAssist(!assistOn) }
     func setAssist(_ on: Bool) {
         assistOn = on
-        assistW?.constant = on ? 210 : 0
-        assistBtn?.state = on ? .on : .off
+        assistW?.constant = on ? 250 : 0
+        assistBtn?.mode = on ? .on : .plain
         if on && assistPanel == nil {
             let p = AssistPanel()
             p.onSend = { [weak self] id in
                 (self?.view.window as? MainWindow)?.sendSnippet(id: id)
             }
+            p.onSearch = { [weak self] in self?.openFind() }
+            p.applyTheme(chromeTheme)
             p.translatesAutoresizingMaskIntoConstraints = false
             assistHost.addSubview(p)
             NSLayoutConstraint.activate([
@@ -455,18 +686,17 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             fmSlot = pn.map { ($0, idx, $0.frac) }
             fmMargin = mv
             mv.removeFromSuperview()
-            box.removeFromSuperview()
             treeView?.isHidden = true
-            bodyHost.addSubview(box)
-            pinBox(box, in: bodyHost, inset: 5)
+            bodyHost.addSubview(mv)
+            fmCons = pinBox(mv, in: bodyHost, inset: 0)
             fmBox = box
         } else {
-            guard let box = fmBox, let mv = fmMargin, let slot = fmSlot,
+            guard fmBox != nil, let mv = fmMargin, let slot = fmSlot,
                   let sv = splitOf[ObjectIdentifier(slot.node)]?.sv
             else { focusMode = false; return }
-            box.removeFromSuperview()
-            mv.addSubview(box)
-            pinBox(box, in: mv, inset: 5)
+            fmCons?.forEach { $0.isActive = false }
+            fmCons = nil
+            mv.removeFromSuperview()
             sv.insertArrangedSubview(mv, at:
                 min(slot.index, sv.arrangedSubviews.count))
             slot.node.frac = slot.frac
@@ -474,7 +704,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             treeView?.isHidden = false
             fmBox = nil; fmMargin = nil; fmSlot = nil
         }
-        focusBtn.contentTintColor = focusMode ? Theme.blue.color : nil
+        focusBtn.mode = focusMode ? .on : .plain
         tab?.syncFromWorkspace()
     }
 
@@ -483,10 +713,11 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         guard let id = n.leafId else { return nil }
         if let b = boxes[id] { return b }
         guard let leaf = pages[id] else { return nil }
-        // pane：head + 内容（margin 5、radius 9、border 1.5，对齐 .pane）
+        // pane：head + 内容（margin 6、radius 8、border 1.5，对齐 .pane）
         let box = NSView()
         box.wantsLayer = true
-        box.layer?.cornerRadius = 9
+        box.layer?.cornerRadius = paneCount == 1 ? 0 : 8
+        box.layer?.masksToBounds = true
         box.layer?.borderWidth = 1.5
         box.layer?.borderColor = NSColor.clear.cgColor
         let head = buildHead(id: id, leaf: leaf)
@@ -494,7 +725,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         [head, content].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false }
         box.addSubview(head); box.addSubview(content)
-        let hh = head.heightAnchor.constraint(equalToConstant: 27)
+        let hh = head.heightAnchor.constraint(equalToConstant: 32)
         NSLayoutConstraint.activate([
             head.leadingAnchor.constraint(equalTo: box.leadingAnchor),
             head.trailingAnchor.constraint(equalTo: box.trailingAnchor),
@@ -506,13 +737,13 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             content.bottomAnchor.constraint(equalTo: box.bottomAnchor),
         ])
         head.isHidden = paneCount == 1
-        hh.constant = paneCount == 1 ? 0 : 27
+        hh.constant = paneCount == 1 ? 0 : 32
         headH[id] = hh
         // margin 容器（splitView arranged 子级）
         let mv = NSView()
         mv.translatesAutoresizingMaskIntoConstraints = false
         mv.addSubview(box)
-        pinBox(box, in: mv, inset: 5)
+        mCons[id] = pinBox(box, in: mv, inset: paneCount == 1 ? 0 : 6)
         boxes[id] = box
         margins[id] = mv
         heads[id] = head
@@ -523,40 +754,37 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     private func buildHead(id: UUID, leaf: TermTab) -> NSView {
         let h = NSView()
         h.wantsLayer = true
-        h.layer?.hbBg = "subtle"
         let ic = NSImageView(image: hbIcon(leaf.wsIconName, size: 12,
-                                           tint: Theme.dyn("termDim")))
-        let lbl = NSTextField(labelWithString: leaf.wsTitle)
-        lbl.font = .systemFont(ofSize: 11.5)
-        lbl.hbText = "termDim"
+                                           tint: chromeTheme.title.color))
+        let lbl = NSTextField(labelWithString: leaf.wsHeadTitle)
+        lbl.font = .systemFont(ofSize: 12)
+        lbl.textColor = chromeTheme.title.color
         lbl.lineBreakMode = .byTruncatingTail
         func headBtn(_ icon: String, _ act: Selector, _ aid: String,
-                     _ tip: String) -> NSButton {
-            let b = NSButton()
-            b.bezelStyle = .texturedRounded
-            b.isBordered = false
-            b.image = hbIcon(icon, size: 11, tint: Theme.dyn("termDim"))
-            b.target = self; b.action = act
+                     _ tip: String) -> TBtn {
+            let b = TBtn("", icon: icon, sm: true,
+                         target: self, action: act)
             b.toolTip = tip
             b.identifier = NSUserInterfaceItemIdentifier(
                 "\(aid)-\(id.uuidString.prefix(8))")
-            b.translatesAutoresizingMaskIntoConstraints = false
-            b.widthAnchor.constraint(equalToConstant: 22).isActive = true
+            b.setAccessibilityIdentifier(aid)
             return b
         }
-        let eye = headBtn("eye", #selector(onHeadWatch(_:)),
-                          "pane-watch", L("监控设置"))
         let shr = headBtn("broadcast", #selector(onHeadShare(_:)),
                           "pane-share", L("共享"))
+        let eye = headBtn("eye", #selector(onHeadWatch(_:)),
+                          "pane-watch", L("监控设置"))
         let reconn = headBtn("refresh", #selector(onHeadReconn(_:)),
                              "pane-reconn", L("重新连接"))
         reconn.isHidden = !leaf.wsDead
         let x = headBtn("x", #selector(onHeadClose(_:)),
                         "pane-close", L("关闭分屏"))
+        eye.mode = leaf.watchOn ? .on : .plain
+        shr.mode = leaf.shareOn ? .share : .plain
         // watch 命中角标（对齐 hb_window_set_watch_dot）
         let badge = NSTextField(labelWithString: "")
         badge.font = .systemFont(ofSize: 11, weight: .bold)
-        [ic, lbl, badge, eye, shr, reconn, x].forEach {
+        [ic, lbl, badge, shr, eye, reconn, x].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             h.addSubview($0)
         }
@@ -565,24 +793,24 @@ final class Workspace: NSObject, NSSplitViewDelegate {
                                         constant: 10),
             ic.centerYAnchor.constraint(equalTo: h.centerYAnchor),
             lbl.leadingAnchor.constraint(equalTo: ic.trailingAnchor,
-                                         constant: 6),
+                                         constant: 8),
             lbl.centerYAnchor.constraint(equalTo: h.centerYAnchor),
             lbl.trailingAnchor.constraint(lessThanOrEqualTo:
                 badge.leadingAnchor, constant: -4),
-            badge.trailingAnchor.constraint(equalTo: eye.leadingAnchor,
-                                            constant: -4),
+            badge.trailingAnchor.constraint(equalTo: shr.leadingAnchor,
+                                            constant: -6),
             badge.centerYAnchor.constraint(equalTo: h.centerYAnchor),
             x.trailingAnchor.constraint(equalTo: h.trailingAnchor,
-                                        constant: -6),
+                                        constant: -10),
             x.centerYAnchor.constraint(equalTo: h.centerYAnchor),
             reconn.trailingAnchor.constraint(equalTo: x.leadingAnchor,
-                                             constant: -2),
+                                             constant: -6),
             reconn.centerYAnchor.constraint(equalTo: h.centerYAnchor),
             eye.trailingAnchor.constraint(
-                equalTo: shr.leadingAnchor, constant: -2),
+                equalTo: reconn.leadingAnchor, constant: -6),
             eye.centerYAnchor.constraint(equalTo: h.centerYAnchor),
             shr.trailingAnchor.constraint(
-                equalTo: reconn.leadingAnchor, constant: -2),
+                equalTo: eye.leadingAnchor, constant: -6),
             shr.centerYAnchor.constraint(equalTo: h.centerYAnchor),
         ])
         // 点击 head 区聚焦该 pane
@@ -590,7 +818,7 @@ final class Workspace: NSObject, NSSplitViewDelegate {
             "panehead-\(id.uuidString.prefix(8))")
         h.addGestureRecognizer(NSClickGestureRecognizer(
             target: self, action: #selector(onPaneClick(_:))))
-        headBtns[id] = (ic, lbl, reconn, eye, shr, badge)
+        headBtns[id] = (ic, lbl, reconn, eye, shr, badge, x)
         return h
     }
 
@@ -636,15 +864,18 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     }
     /// 叶共享态变化 → bar 按钮文案 + tab 蓝点（对齐 wire_refresh）。
     func syncShareState() {
-        shareBtn?.title = focusedLeaf?.shareOn == true
-            ? L("共享中") : L("共享")
+        let on = focusedLeaf?.shareOn == true
+        let title = on ? L("共享中") : L("共享")
+        if shareBtn.titleText != title {
+            shareBtn.setContent(title, icon: "broadcast")
+        }
+        shareBtn.mode = on ? .share : .plain
         tab?.shareOn = leavesList.contains { $0.shareOn }
         if let id = model.focused.leafId,
            let hb = headBtns[id] {
-            hb.share.image = hbIcon("broadcast", size: 11,
-                tint: pages[id]?.shareOn == true
-                    ? Theme.blue.color : Theme.termDim.color)
+            hb.share.mode = pages[id]?.shareOn == true ? .share : .plain
         }
+        updateStatus()
     }
 
     /// ⌘F：焦点 pane 的查找栏（findHost 承载，绑定打开时的焦点 term）。
@@ -751,13 +982,17 @@ final class Workspace: NSObject, NSSplitViewDelegate {
         treeView = tv
         // head 仅多 pane 时显示（对齐 Linux：单页无 pane-head）；
         // 高度一并归零 —— 隐藏视图仍占布局高度，会露出空白条。
+        let single = model.leafCount == 1
         for (id, h) in heads {
-            let single = model.leafCount == 1
             h.isHidden = single
-            headH[id]?.constant = single ? 0 : 27
+            headH[id]?.constant = single ? 0 : 32
+            mCons[id]?.forEach { $0.constant = single ? 0 : 6 }
+            boxes[id]?.layer?.cornerRadius = single ? 0 : 8
         }
         applyBorders()
         updateTitle()
+        syncBarButtons()
+        applyChrome(chromeTheme)
         // frac 要等 splitView 有 frame 后才能写
         DispatchQueue.main.async { [weak self] in self?.applyFractions() }
     }
@@ -787,14 +1022,15 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     }
 
     private func applyBorders() {
+        let single = model.leafCount == 1
         for (id, b) in boxes {
             b.layer?.hbBorderResolver = { [weak self] in
-                guard let self else { return nil }
+                guard let self, !single else { return nil }
                 if self.broadcast {
-                    return Theme.green.color.cgColor     // 广播：全 pane 绿框
+                    return Theme.RGBA(0x2ea043).color.cgColor
                 }
                 return (self.model.focused.leafId == id
-                    ? Theme.blue.color.cgColor           // 焦点：蓝框
+                    ? Theme.RGBA(0x1f8a4c).color.cgColor
                     : NSColor.clear.cgColor)
             }
         }
@@ -803,8 +1039,17 @@ final class Workspace: NSObject, NSSplitViewDelegate {
     private func updateTitle() {
         if model.leafCount > 1 {
             ttLabel.stringValue = String(format: L("Workspace · %d 分屏"), model.leafCount)
+            ttIcon.image = hbIcon("cols", size: 15,
+                                  tint: chromeTheme.title.color)
+        } else if let f = focusedLeaf {
+            ttLabel.stringValue = f.wsBarTitle
+            ttIcon.image = hbIcon(f.wsIconName, size: 15,
+                                  tint: chromeTheme.title.color)
         } else {
-            ttLabel.stringValue = focusedLeaf?.wsTitle ?? L("Workspace")
+            ttLabel.stringValue = L("Workspace")
         }
     }
+
+    @objc private func onWatchBtn() { focusedLeaf?.openWatch() }
+    @objc private func onReconnBtn() { focusedLeaf?.wsReconnect() }
 }

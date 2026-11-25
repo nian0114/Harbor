@@ -2,47 +2,79 @@ import AppKit
 import CHarbor
 import HarborKit
 
-/// FR-09 Vault「已知主机」页 —— 对齐 linux/src/hb-known-view.c：
-/// 导入（默认 ~/.ssh/known_hosts 或选文件）、导出、写回、
-/// host/port/keytype/SHA256 指纹/添加时间/删除(确认+撤销)、双击详情。
+/// FR-09 Vault「已知主机」页 —— 对齐 prototype knownView：
+/// toolbar（Import + 搜索），白卡片表格 = 主机 | 密钥类型 |
+/// 指纹 (SHA256) | 添加时间 | 删除；表下 hintbox（TOFU，FR-04）。
+/// 保留 mac 侧导出/写回/双击详情能力。
 final class KnownPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
-    private let table = NSTableView()
-    private var search: NSSearchField!
+    private let card = VTableCard()
+    private var search: VField!
     private var items: [OpaquePointer] = []     // "known" obj
     private var filtered: [OpaquePointer]?
     private var vaultObs: NSObjectProtocol?
-    private let colIDs = ["host", "port", "keytype", "fp", "added", "del"]
+    private let colIDs = ["host", "keytype", "fp", "added", "del"]
 
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        layer?.hbBg = "page"
-        let titles = [L("主机"), L("端口"), L("密钥类型"),
+        layer?.hbBg = "content"
+        buildBar()
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.wantsLayer = true
+        scroll.layer?.hbBg = "content"
+        scroll.frame = NSRect(x: 0, y: 0, width: f.width,
+                              height: f.height - 56)
+        scroll.autoresizingMask = [.width, .height]
+        let box = VFlippedStack()
+        box.orientation = .vertical
+        box.spacing = 14
+        box.alignment = .centerX
+        box.edgeInsets = NSEdgeInsets(top: 4, left: 18,
+                                      bottom: 20, right: 18)
+        box.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = box
+        box.widthAnchor.constraint(
+            equalTo: scroll.contentView.widthAnchor).isActive = true
+        addSubview(scroll)
+        card.translatesAutoresizingMaskIntoConstraints = false
+        box.addArrangedSubview(card)
+        card.widthAnchor.constraint(
+            equalTo: box.widthAnchor, constant: -36).isActive = true
+        let hint = vHintBox(L("首次连接未知主机时会弹出指纹确认（TOFU）；指纹变更会红色告警并阻断连接，防中间人（FR-04）。"))
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        box.addArrangedSubview(hint)
+        hint.widthAnchor.constraint(
+            equalTo: box.widthAnchor, constant: -36).isActive = true
+        let titles = [L("主机"), L("密钥类型"),
                       L("指纹 (SHA256)"), L("添加时间"), ""]
-        let widths: [CGFloat] = [210, 50, 100, 230, 100, 50]
         for (i, cid) in colIDs.enumerated() {
             let c = NSTableColumn(identifier: .init(cid))
             c.title = titles[i]
-            c.width = widths[i]
-            table.addTableColumn(c)
+            c.headerCell = TableHeadCell(textCell: titles[i])
+            c.resizingMask = []
+            if cid == "host" || cid == "fp" {
+                c.minWidth = 140
+            } else {
+                c.width = [0, 120, 0, 110, 60][i]
+                c.minWidth = c.width
+                c.maxWidth = c.width
+            }
+            card.table.addTableColumn(c)
         }
-        table.dataSource = self
-        table.delegate = self
-        table.rowHeight = 28
-        table.intercellSpacing = NSSize(width: 0, height: 2)
-        table.backgroundColor = .clear
-        table.target = self
-        table.doubleAction = #selector(rowDetails)
-        let scroll = NSScrollView()
-        scroll.documentView = table
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        scroll.frame = NSRect(x: 0, y: 0, width: f.width,
-                              height: f.height - 46)
-        scroll.autoresizingMask = [.width, .height]
-        addSubview(scroll)
-        buildBar()
+        card.table.dataSource = self
+        card.table.delegate = self
+        card.table.target = self
+        card.table.doubleAction = #selector(rowDetails)
+        card.table.setAccessibilityIdentifier("known-table")
         reload()
+        card.sizeColumns = { [weak self] width in
+            guard let cols = self?.card.table.tableColumns else { return }
+            let flex = max(280, width - 290)
+            cols[0].width = max(140, floor(flex * 0.4))
+            cols[2].width = flex - cols[0].width
+        }
         vaultObs = NotificationCenter.default.addObserver(
             forName: .hbVaultChanged, object: nil, queue: .main)
         { [weak self] n in
@@ -58,35 +90,38 @@ final class KnownPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     private func buildBar() {
-        var x: CGFloat = 14
-        func btn(_ t: String, _ a: Selector, _ id: String,
-                 w: CGFloat = 0) -> NSButton {
-            let b = NSButton(title: t, target: self, action: a)
-            b.bezelStyle = .rounded
-            b.font = .systemFont(ofSize: 12)
-            let bw = w > 0 ? w : max(30, b.intrinsicContentSize.width + 14)
-            b.frame = NSRect(x: x, y: bounds.height - 38,
-                             width: bw, height: 26)
-            b.autoresizingMask = [.minYMargin]
-            b.setAccessibilityIdentifier(id)
-            addSubview(b)
-            x += bw + 8
-            return b
-        }
-        _ = btn(L("导入 known_hosts"), #selector(importBtn), "known-import")
-        _ = btn(L("导出"), #selector(exportBtn), "known-export", w: 60)
-        _ = btn(L("写回 ~/.ssh/known_hosts"), #selector(writeBackBtn),
-                "known-write")
-        search = NSSearchField(frame: NSRect(
-            x: bounds.width - 234, y: bounds.height - 39,
-            width: 220, height: 26))
-        search.placeholderString = L("搜索主机 / 指纹…")
-        search.target = self
-        search.action = #selector(searchChanged)
-        (search.cell as? NSSearchFieldCell)?.sendsSearchStringImmediately = true
-        search.autoresizingMask = [.minXMargin, .minYMargin]
-        search.setAccessibilityIdentifier("known-search")
+        let imp = HBtn(L("导入 known_hosts"), icon: "plus")
+        imp.onTap = { [weak self] in self?.importBtn() }
+        imp.setAccessibilityIdentifier("known-import")
+        imp.frame = NSRect(x: 18, y: bounds.height - 45,
+                           width: imp.intrinsicContentSize.width + 28,
+                           height: 33)
+        imp.autoresizingMask = [.minYMargin]
+        addSubview(imp)
+        search = VField(placeholder: L("搜索主机 / 指纹…"), width: 280)
+        search.frame.origin = NSPoint(x: imp.frame.maxX + 8,
+                                      y: bounds.height - 45)
+        search.autoresizingMask = [.minYMargin]
+        search.onChange = { [weak self] in self?.searchChanged() }
+        search.entry.setAccessibilityIdentifier("known-search")
         addSubview(search)
+        var x = search.frame.maxX + 8
+        for (t, aid, act) in [
+            (L("导出"), "known-export", #selector(exportBtn)),
+            (L("写回 ~/.ssh/known_hosts"), "known-write",
+             #selector(writeBackBtn)),
+        ] {
+            let b = HBtn(t, style: .ghost)
+            b.target = self
+            b.action = act
+            b.setAccessibilityIdentifier(aid)
+            b.frame = NSRect(x: x, y: bounds.height - 45,
+                             width: b.intrinsicContentSize.width + 28,
+                             height: 33)
+            b.autoresizingMask = [.minYMargin]
+            addSubview(b)
+            x += b.frame.width + 8
+        }
     }
 
     // MARK: 数据
@@ -94,7 +129,8 @@ final class KnownPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         for o in items { hb_obj_free(o) }
         items = Vault.shared.list("known")
         applyFilter()
-        table.reloadData()
+        card.table.reloadData()
+        card.setRows((filtered ?? items).count, emptyText: L("无匹配条目"))
     }
     private func applyFilter() {
         let q = (search?.stringValue ?? "").lowercased()
@@ -110,52 +146,58 @@ final class KnownPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in t: NSTableView) -> Int {
         (filtered ?? items).count
     }
+    func tableView(_ t: NSTableView, rowViewForRow row: Int)
+        -> NSTableRowView? { VTableRowView() }
     func tableView(_ t: NSTableView, viewFor c: NSTableColumn?,
                    row: Int) -> NSView? {
         let o = at(row)
         guard let cid = c?.identifier.rawValue else { return nil }
         if cid == "del" {
-            let b = NSButton()
-            b.isBordered = false
-            b.image = hbIcon("trash", size: 13, tint: Theme.dyn("termDim"))
-            b.target = self
-            b.action = #selector(delRow(_:))
-            b.tag = row
+            let wrap = NSView()
+            let b = VIconBtn(icon: "trash", kind: .del)
+            b.toolTip = L("删除条目")
+            let id = String(cString: hb_obj_id(o))
+            b.onTap = { [weak self] in self?.delEntry(id: id) }
             b.setAccessibilityIdentifier("known-del")
-            return b
+            b.translatesAutoresizingMaskIntoConstraints = false
+            wrap.addSubview(b)
+            NSLayoutConstraint.activate([
+                b.leadingAnchor.constraint(equalTo: wrap.leadingAnchor),
+                b.centerYAnchor.constraint(equalTo: wrap.centerYAnchor),
+            ])
+            return wrap
         }
-        let l = NSTextField(labelWithString: "")
-        l.lineBreakMode = .byTruncatingMiddle
         switch cid {
         case "host":
             let h = hb_obj_get_str(o, "host").str
-            l.stringValue = KnownFormat.hostDisp(h)
+            let l = vLabel(KnownFormat.hostDisp(h), bold: true)
+            l.lineBreakMode = .byTruncatingMiddle
             l.toolTip = h
-        case "port":
-            let p = Int(hb_obj_get_int(o, "port", 22))
-            l.stringValue = p > 0 ? "\(p)" : "—"
+            return l
         case "keytype":
-            l.stringValue = hb_obj_get_str(o, "keytype").str
-            l.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
+            return vLabel(hb_obj_get_str(o, "keytype").str, mono: true)
         case "fp":
             let fp = hb_obj_get_str(o, "fingerprint").str
-            l.stringValue = fp
+            let l = vLabel(fp, mono: true, dim: true)
+            l.lineBreakMode = .byTruncatingMiddle
             l.toolTip = fp
-            l.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
-        case "added":
+            return l
+        default:
             let a = hb_obj_get_int(o, "added", 0)
-            l.stringValue = a > 0 ? LogFormat.dateOnly(a) : ""
-        default: break
+            return vLabel(a > 0 ? LogFormat.dateOnly(a) : "—")
         }
-        return l
     }
 
     // MARK: 动作
-    @objc private func searchChanged() { applyFilter(); table.reloadData() }
+    private func searchChanged() {
+        applyFilter()
+        card.table.reloadData()
+        card.setRows((filtered ?? items).count, emptyText: L("无匹配条目"))
+    }
 
     @objc private func rowDetails() {
-        let r = table.clickedRow
-        guard r >= 0, r < numberOfRows(in: table) else { return }
+        let r = card.table.clickedRow
+        guard r >= 0, r < numberOfRows(in: card.table) else { return }
         let o = at(r)
         let host = hb_obj_get_str(o, "host").str
         let port = hb_obj_get_int(o, "port", 22)
@@ -179,9 +221,9 @@ final class KnownPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
                                       in: window) { _ in }
     }
 
-    @objc private func delRow(_ b: NSButton) {
-        let o = at(b.tag)
-        let id = String(cString: hb_obj_id(o))
+    private func delEntry(id: String) {
+        guard let o = items.first(where: {
+            String(cString: hb_obj_id($0)) == id }) else { return }
         let host = KnownFormat.hostDisp(hb_obj_get_str(o, "host").str)
         let a = NSAlert()
         a.messageText = String(format: L("删除 %@ 的已知主机条目？"), host)
@@ -204,7 +246,7 @@ final class KnownPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         }
     }
 
-    @objc private func importBtn() { importFile(path: nil) }
+    private func importBtn() { importFile(path: nil) }
     /// path != nil → 直接导入（dev 钩子；测试只传生成文件，绝不碰真实 ~/.ssh）。
     func importFile(path: String?) {
         var p = path

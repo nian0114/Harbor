@@ -2,11 +2,12 @@ import AppKit
 import CHarbor
 import HarborKit
 
-/// FR-08 Vault「命令片段」页 —— Snippets + Shell History 双栈
-/// （对齐 linux/src/hb-snippets-view.c：toolbar 切栈、卡片列表、
-/// scope/host/group 编辑、删除可撤销、JSON 导入导出、history 开关）。
+/// FR-08 Vault「命令片段」页 —— 对齐 prototype snippetsView：
+/// toolbar（New snippet 分裂键 + Shell History ghost + 搜索），
+/// .list-plain 卡片列表（sc-title + scope tag + 行内编辑/删除，
+/// sc-code 灰底 mono 块，整卡点击发送）；History 为真实功能子栈。
 final class SnippetsPage: NSView, NSTableViewDataSource,
-                          NSTableViewDelegate, NSTextFieldDelegate {
+                          NSTableViewDelegate {
     private enum Mode { case snips, hist }
     private var mode: Mode = .snips
     /// 发送 snippet → MainWindow.sendSnippet（共享变量/broadcast 流程）。
@@ -16,15 +17,18 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
     /// host filter 标签解析（id → "name (addr)"）。
     var hostLabel: (String) -> String = { $0 }
 
-    private let table = NSTableView()
     private let scroll = NSScrollView()
-    private var search: NSSearchField!
+    private let box = VFlippedStack()
+    private var search: VField!
     private var items: [OpaquePointer] = []         // snippet obj（需 free）
     private var hist: [HistRow] = []
     private var histFilter: String?                 // nil=全部 ""=仅本地
     private var histHostIds: [String] = []          // popup 里出现过的 host_id
-    private var histSwitch: NSSwitch!
     private var histHostPop: NSPopUpButton!
+    private let histTable = NSTableView()
+    private var histCard: NSView?
+    private var histHC: NSLayoutConstraint?
+    private var histEmpty: NSTextField?
     private var vaultObs: NSObjectProtocol?
 
     private struct HistRow {
@@ -34,22 +38,35 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
     override init(frame f: NSRect) {
         super.init(frame: f)
         wantsLayer = true
-        layer?.hbBg = "page"
-        let col = NSTableColumn()
-        table.addTableColumn(col)
-        table.headerView = nil
-        table.dataSource = self
-        table.delegate = self
-        table.rowHeight = 64
-        table.intercellSpacing = NSSize(width: 0, height: 6)
-        table.backgroundColor = .clear
-        scroll.documentView = table
+        layer?.hbBg = "content"
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
-        scroll.frame = NSRect(x: 14, y: 0, width: f.width - 28,
-                              height: f.height - 46)
+        scroll.wantsLayer = true
+        scroll.layer?.hbBg = "content"
+        scroll.frame = NSRect(x: 0, y: 0, width: f.width,
+                              height: f.height - 56)
         scroll.autoresizingMask = [.width, .height]
+        box.orientation = .vertical
+        box.spacing = 10
+        box.alignment = .leading
+        box.edgeInsets = NSEdgeInsets(top: 4, left: 18,
+                                      bottom: 20, right: 18)
+        box.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = box
+        box.widthAnchor.constraint(
+            equalTo: scroll.contentView.widthAnchor).isActive = true
         addSubview(scroll)
+        let col = NSTableColumn()
+        col.resizingMask = .autoresizingMask
+        histTable.addTableColumn(col)
+        histTable.headerView = nil
+        histTable.dataSource = self
+        histTable.delegate = self
+        histTable.rowHeight = 30
+        histTable.intercellSpacing = .zero
+        histTable.selectionHighlightStyle = .none
+        histTable.backgroundColor = Theme.dyn("card")
+        histTable.setAccessibilityIdentifier("hist-table")
         buildBar()
         reload()
         vaultObs = NotificationCenter.default.addObserver(
@@ -58,7 +75,7 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
             switch n.userInfo?["type"] as? String {
             case "history":
                 self?.reloadHist()
-                self?.table.reloadData()
+                self?.rebuildContent()
             case "snippet":
                 self?.reload()
             default: break
@@ -74,94 +91,77 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
     // MARK: toolbar（两种模式各一套）
     private func buildBar() {
         subviews.filter { $0 !== scroll }.forEach { $0.removeFromSuperview() }
-        let W = bounds.width
-        var x: CGFloat = 14
-        func btn(_ t: String, _ a: Selector, _ id: String,
-                 w: CGFloat = 0) -> NSButton {
-            let b = NSButton(title: t, target: self, action: a)
-            b.bezelStyle = .rounded
-            b.font = .systemFont(ofSize: 12)
-            let bw = w > 0 ? w : max(30, b.intrinsicContentSize.width + 14)
-            b.frame = NSRect(x: x, y: bounds.height - 38,
-                             width: bw, height: 26)
-            b.autoresizingMask = [.minYMargin]
-            b.setAccessibilityIdentifier(id)
-            addSubview(b)
-            x += bw + 8
-            return b
+        histHostPop = nil
+        var x: CGFloat = 18
+        func place(_ v: NSView, w: CGFloat, h: CGFloat = 33) {
+            v.frame = NSRect(x: x, y: bounds.height - 45 + (33 - h) / 2,
+                             width: w, height: h)
+            v.autoresizingMask = [.minYMargin]
+            addSubview(v)
+            x += w + 8
         }
         if mode == .snips {
-            let nb = btn("+ " + L("New snippet"), #selector(newSnip), "snip-new")
-            nb.bezelStyle = .rounded
-            let menu = NSPopUpButton(frame: NSRect(
-                x: x - 2, y: bounds.height - 38, width: 30, height: 26),
-                pullsDown: true)
-            menu.addItem(withTitle: "")
-            menu.addItem(withTitle: L("新建 Snippet"))
-            menu.addItem(withTitle: L("导入 JSON…"))
-            menu.addItem(withTitle: L("导出 JSON"))
-            menu.target = self
-            menu.action = #selector(snipMenu(_:))
-            menu.autoresizingMask = [.minYMargin]
-            menu.setAccessibilityIdentifier("snip-menu")
-            addSubview(menu)
-            x += 32
-            _ = btn(L("Shell History"), #selector(showHist), "snip-hist", w: 110)
+            let split = VSplit(L("New snippet"), icon: "plus")
+            split.entries = [
+                VMenuEntry(L("新建 Snippet")) { [weak self] in
+                    self?.newSnip()
+                },
+                VMenuEntry(L("导入 JSON…")) { [weak self] in
+                    self?.importJSON()
+                },
+                VMenuEntry(L("导出 JSON")) { [weak self] in
+                    self?.exportJSON()
+                },
+            ]
+            split.size()
+            split.main.setAccessibilityIdentifier("snip-new")
+            split.dd.setAccessibilityIdentifier("snip-menu")
+            place(split, w: split.frame.width)
+            let hb = HBtn(L("Shell History"), style: .ghost, icon: "clock")
+            hb.onTap = { [weak self] in self?.showHist() }
+            hb.setAccessibilityIdentifier("snip-hist")
+            place(hb, w: hb.intrinsicContentSize.width + 28)
         } else {
-            _ = btn("‹ " + L("Snippets"), #selector(showSnips), "hist-back", w: 96)
-            let swl = NSTextField(labelWithString: L("记录命令历史"))
-            swl.font = .systemFont(ofSize: 12)
-            swl.frame = NSRect(x: x, y: bounds.height - 35, width: 86, height: 18)
-            swl.autoresizingMask = [.minYMargin]
-            addSubview(swl)
-            x += 88
-            histSwitch = NSSwitch()
-            histSwitch.state = historyEnabled() ? .on : .off
-            histSwitch.target = self
-            histSwitch.action = #selector(histToggled(_:))
-            histSwitch.frame = NSRect(x: x, y: bounds.height - 37,
-                                      width: 42, height: 24)
-            histSwitch.autoresizingMask = [.minYMargin]
-            histSwitch.setAccessibilityIdentifier("hist-enabled")
-            addSubview(histSwitch)
-            x += 48
-            // host 过滤
-            histHostPop = NSPopUpButton(frame: NSRect(
-                x: x, y: bounds.height - 38, width: 130, height: 26))
+            let back = HBtn("‹ " + L("Snippets"))
+            back.onTap = { [weak self] in self?.showSnips() }
+            back.setAccessibilityIdentifier("hist-back")
+            place(back, w: back.intrinsicContentSize.width + 28)
+            let swl = vLabel(L("记录命令历史"))
+            place(swl, w: swl.intrinsicContentSize.width, h: 18)
+            x -= 4
+            let sw = VSwitch(frame: .zero)
+            sw.isOn = historyEnabled()
+            sw.target = self
+            sw.action = #selector(histToggled(_:))
+            sw.setAccessibilityIdentifier("hist-enabled")
+            place(sw, w: 38, h: 22)
+            histHostPop = NSPopUpButton(frame: .zero)
             histHostPop.target = self
             histHostPop.action = #selector(histHostChanged(_:))
-            histHostPop.autoresizingMask = [.minYMargin]
             histHostPop.setAccessibilityIdentifier("hist-host")
-            addSubview(histHostPop)
-            x += 136
-            _ = btn(L("清空历史"), #selector(clearHist), "hist-clear", w: 84)
+            place(histHostPop, w: 150, h: 26)
+            let cl = HBtn(L("清空历史"))
+            cl.onTap = { [weak self] in self?.clearHist() }
+            cl.setAccessibilityIdentifier("hist-clear")
+            place(cl, w: cl.intrinsicContentSize.width + 28)
             // 同步开关（M6 之前禁用，对齐 Linux 的 disabled 行）
-            let synl = NSTextField(labelWithString: L("同步"))
-            synl.font = .systemFont(ofSize: 12)
-            synl.hbText = "termDim"
-            synl.frame = NSRect(x: x, y: bounds.height - 35,
-                                width: 30, height: 18)
-            synl.autoresizingMask = [.minYMargin]
-            addSubview(synl)
-            x += 32
-            let syn = NSSwitch()
-            syn.isEnabled = false
-            syn.frame = NSRect(x: x, y: bounds.height - 37,
-                               width: 42, height: 24)
-            syn.autoresizingMask = [.minYMargin]
-            addSubview(syn)
-            x += 50
+            let synl = vLabel(L("同步"), dim: true)
+            place(synl, w: synl.intrinsicContentSize.width, h: 18)
+            x -= 4
+            let syn = VSwitch(frame: .zero)
+            syn.alphaValue = 0.45
+            place(syn, w: 38, h: 22)
         }
-        search = NSSearchField(frame: NSRect(
-            x: W - 234, y: bounds.height - 39, width: 220, height: 26))
-        search.placeholderString = mode == .snips
-            ? L("搜索 Snippets…") : L("搜索历史…")
-        search.target = self
-        search.action = #selector(searchChanged)
-        (search.cell as? NSSearchFieldCell)?.sendsSearchStringImmediately = true
+        let oldQ = search?.stringValue ?? ""
+        search = VField(placeholder: mode == .snips
+                        ? L("搜索 Snippets…") : L("搜索历史…"), width: 220)
+        search.stringValue = oldQ
+        search.frame.origin = NSPoint(x: bounds.width - 238,
+                                      y: bounds.height - 45)
         search.autoresizingMask = [.minXMargin, .minYMargin]
-        search.setAccessibilityIdentifier(mode == .snips
-                                          ? "snip-search" : "hist-search")
+        search.onChange = { [weak self] in self?.searchChanged() }
+        search.entry.setAccessibilityIdentifier(mode == .snips
+                                                ? "snip-search" : "hist-search")
         addSubview(search)
     }
 
@@ -176,8 +176,7 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
         reloadHist()
         buildBar()          // host popup 重建也在这
         rebuildHostPop()
-        table.reloadData()
-        table.rowHeight = mode == .snips ? 64 : 30
+        rebuildContent()
     }
 
     private func reloadHist() {
@@ -249,121 +248,154 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
         p.selectItem(at: idx)
     }
 
-    // MARK: 行
-    func numberOfRows(in t: NSTableView) -> Int {
-        if mode == .hist { return hist.count }
-        applySnipFilter()
-        return (snipFiltered ?? items).count
+    // MARK: 内容（snips 卡片列表 / hist 表格卡片）
+    private func rebuildContent() {
+        box.arrangedSubviews.forEach {
+            box.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        histCard = nil; histHC = nil; histEmpty = nil
+        if mode == .snips {
+            applySnipFilter()
+            let rows = snipFiltered ?? items
+            if rows.isEmpty {
+                let wrap = NSView()
+                let e = vEmptyState(icon: "search",
+                                    title: L("无匹配 Snippet"))
+                e.translatesAutoresizingMaskIntoConstraints = false
+                wrap.addSubview(e)
+                NSLayoutConstraint.activate([
+                    e.centerXAnchor.constraint(equalTo: wrap.centerXAnchor),
+                    e.topAnchor.constraint(equalTo: wrap.topAnchor,
+                                           constant: 30),
+                    e.bottomAnchor.constraint(equalTo: wrap.bottomAnchor,
+                                              constant: -30),
+                ])
+                addContent(wrap)
+            } else {
+                for o in rows {
+                    let c = SnippetCard(
+                        title: hb_obj_get_str(o, "title").str,
+                        body: hb_obj_get_str(o, "body").str,
+                        scope: SnipKit.scopeLabel(
+                            hb_obj_get_str(o, "scope").str)
+                            { [weak self] in self?.hostLabel($0) })
+                    let id = String(cString: hb_obj_id(o))
+                    c.onSend = { [weak self] in self?.onSendSnippet?(id) }
+                    c.onEdit = { [weak self] in self?.editSnip(id: id) }
+                    c.onDelete = { [weak self] in self?.delSnip(id: id) }
+                    c.setAccessibilityIdentifier("snip-card-\(id)")
+                    c.editBtn.setAccessibilityIdentifier("snip-edit-\(id)")
+                    c.delBtn.setAccessibilityIdentifier("snip-del-\(id)")
+                    addContent(c)
+                }
+            }
+        } else {
+            let card = NSView()
+            card.wantsLayer = true
+            card.layer?.cornerRadius = 10
+            card.layer?.masksToBounds = true
+            card.layer?.hbBg = "card"
+            histTable.translatesAutoresizingMaskIntoConstraints = false
+            card.addSubview(histTable)
+            NSLayoutConstraint.activate([
+                histTable.topAnchor.constraint(equalTo: card.topAnchor),
+                histTable.leadingAnchor.constraint(
+                    equalTo: card.leadingAnchor),
+                histTable.trailingAnchor.constraint(
+                    equalTo: card.trailingAnchor),
+                histTable.bottomAnchor.constraint(
+                    equalTo: card.bottomAnchor),
+            ])
+            let hc = card.heightAnchor.constraint(
+                equalToConstant: max(65, CGFloat(hist.count) * 30))
+            hc.isActive = true
+            histHC = hc
+            let el = NSTextField(labelWithString: L("暂无命令历史"))
+            el.font = .systemFont(ofSize: 12.5)
+            el.hbText = "text3"
+            el.alignment = .center
+            el.isHidden = !hist.isEmpty
+            el.translatesAutoresizingMaskIntoConstraints = false
+            card.addSubview(el)
+            NSLayoutConstraint.activate([
+                el.centerXAnchor.constraint(equalTo: card.centerXAnchor),
+                el.centerYAnchor.constraint(equalTo: card.centerYAnchor),
+            ])
+            histEmpty = el
+            histCard = card
+            histTable.reloadData()
+            addContent(card)
+        }
     }
+    private func addContent(_ v: NSView) {
+        v.translatesAutoresizingMaskIntoConstraints = false
+        box.addArrangedSubview(v)
+        v.widthAnchor.constraint(equalTo: box.widthAnchor).isActive = true
+    }
+
+    // MARK: hist 行
+    func numberOfRows(in t: NSTableView) -> Int { hist.count }
+    func tableView(_ t: NSTableView, rowViewForRow row: Int)
+        -> NSTableRowView? { VTableRowView() }
     func tableView(_ t: NSTableView, viewFor c: NSTableColumn?,
                    row: Int) -> NSView? {
-        mode == .snips ? snipRow(snipAt(row)) : histRow(row)
-    }
-    func tableViewSelectionDidChange(_ n: Notification) {
-        guard mode == .snips else { return }
-        let r = table.selectedRow
-        guard r >= 0, r < numberOfRows(in: table) else { return }
-        onSendSnippet?(String(cString: hb_obj_id(snipAt(r))))
-        table.deselectRow(r)
-    }
-
-    private func snipRow(_ o: OpaquePointer) -> NSView {
-        let id = String(cString: hb_obj_id(o))
-        let title = hb_obj_get_str(o, "title").str
-        let body = hb_obj_get_str(o, "body").str
-        let scope = hb_obj_get_str(o, "scope").str
-        let row = NSView()
-        let tl = NSTextField(labelWithString: title)
-        tl.font = .systemFont(ofSize: 13, weight: .medium)
-        tl.lineBreakMode = .byTruncatingTail
-        tl.frame = NSRect(x: 10, y: 34, width: 320, height: 18)
-        row.addSubview(tl)
-        let tag = NSTextField(labelWithString:
-            " " + SnipKit.scopeLabel(scope) { hostLabel($0) } + " ")
-        tag.font = .systemFont(ofSize: 10)
-        tag.hbText = "termDim"
-        tag.wantsLayer = true
-        tag.layer?.borderWidth = 1
-        tag.layer?.hbBorder = "line"
-        tag.layer?.cornerRadius = 4
-        tag.frame = NSRect(x: 10 + min(tl.intrinsicContentSize.width, 320) + 6,
-                           y: 34, width: tag.intrinsicContentSize.width,
-                           height: 18)
-        row.addSubview(tag)
-        let bl = NSTextField(labelWithString: body)
-        bl.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
-        bl.hbText = "termDim"
-        bl.lineBreakMode = .byTruncatingTail
-        bl.frame = NSRect(x: 10, y: 8, width: bounds.width - 120, height: 20)
-        bl.autoresizingMask = [.width]
-        row.addSubview(bl)
-        func ibtn(_ icon: String, _ aid: String,
-                  _ act: Selector, dx: CGFloat) -> NSButton {
-            let b = NSButton()
-            b.isBordered = false
-            b.image = hbIcon(icon, size: 13, tint: Theme.dyn("termDim"))
-            b.target = self
-            b.action = act
-            b.setAccessibilityIdentifier(aid + "-" + id)
-            b.tag = items.firstIndex(where: { String(cString: hb_obj_id($0)) == id }) ?? 0
-            b.frame = NSRect(x: bounds.width - 76 + dx, y: 32,
-                             width: 26, height: 22)
-            b.autoresizingMask = [.minXMargin]
-            row.addSubview(b)
-            return b
-        }
-        _ = ibtn("wand", "snip-edit", #selector(editRow(_:)), dx: 0)
-        _ = ibtn("trash", "snip-del", #selector(delRow(_:)), dx: 30)
-        return row
-    }
-
-    private func histRow(_ r: Int) -> NSView {
-        let e = hist[r]
-        let row = NSView()
-        let tl = NSTextField(labelWithString: e.cmd)
-        tl.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
-        tl.lineBreakMode = .byTruncatingTail
-        tl.frame = NSRect(x: 10, y: 5, width: bounds.width - 330, height: 20)
-        tl.autoresizingMask = [.width]
-        row.addSubview(tl)
+        let e = hist[row]
+        let r = NSStackView()
+        r.orientation = .horizontal
+        r.spacing = 10
+        r.edgeInsets = NSEdgeInsets(top: 5, left: 14,
+                                    bottom: 5, right: 14)
+        let cmd = vLabel(e.cmd, mono: true)
+        cmd.setContentHuggingPriority(.init(1), for: .horizontal)
+        cmd.setContentCompressionResistancePriority(.init(1),
+                                                    for: .horizontal)
+        r.addArrangedSubview(cmd)
         let host = e.host.isEmpty ? L("本地") : hostLabel(e.host)
-        let hl = NSTextField(labelWithString:
-            "\(LogFormat.date(e.ts)) · \(host)")
+        let hl = vLabel("\(LogFormat.date(e.ts)) · \(host)", dim: true)
         hl.font = .systemFont(ofSize: 10.5)
-        hl.hbText = "termDim"
-        hl.lineBreakMode = .byTruncatingTail
         hl.alignment = .right
-        hl.frame = NSRect(x: bounds.width - 320, y: 6,
-                          width: 160, height: 18)
-        hl.autoresizingMask = [.minXMargin]
-        row.addSubview(hl)
-        func ibtn(_ icon: String, _ aid: String,
-                  _ act: Selector, dx: CGFloat) {
-            let b = NSButton()
-            b.isBordered = false
-            b.image = hbIcon(icon, size: 12, tint: Theme.dyn("termDim"))
-            b.target = self
-            b.action = act
-            b.tag = r
-            b.setAccessibilityIdentifier(aid)
-            b.frame = NSRect(x: bounds.width - 150 + dx, y: 3,
-                             width: 24, height: 22)
-            b.autoresizingMask = [.minXMargin]
-            row.addSubview(b)
+        hl.translatesAutoresizingMaskIntoConstraints = false
+        hl.widthAnchor.constraint(equalToConstant: 190).isActive = true
+        r.addArrangedSubview(hl)
+        let acts = NSStackView()
+        acts.orientation = .horizontal
+        acts.spacing = 2
+        let sb = VIconBtn(icon: "list")
+        sb.toolTip = L("存为 Snippet")
+        sb.onTap = { [weak self] in
+            self?.openEditor(existing: nil, prefillBody: e.cmd)
         }
-        ibtn("list", "hist-tosnip", #selector(histToSnip(_:)), dx: 0)
-        ibtn("copy", "hist-copy", #selector(histCopy(_:)), dx: 28)
-        ibtn("trash", "hist-del", #selector(histDel(_:)), dx: 56)
-        return row
+        sb.setAccessibilityIdentifier("hist-tosnip")
+        acts.addArrangedSubview(sb)
+        let cp = VIconBtn(icon: "copy")
+        cp.toolTip = L("复制")
+        cp.onTap = {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(e.cmd, forType: .string)
+        }
+        cp.setAccessibilityIdentifier("hist-copy")
+        acts.addArrangedSubview(cp)
+        let db = VIconBtn(icon: "trash", kind: .del)
+        db.toolTip = L("删除")
+        db.onTap = { [weak self] in self?.histDel(id: e.id) }
+        db.setAccessibilityIdentifier("hist-del")
+        acts.addArrangedSubview(db)
+        r.addArrangedSubview(acts)
+        return r
     }
 
     // MARK: 动作
-    @objc private func searchChanged() {
-        reloadHist()
-        table.reloadData()
+    private func searchChanged() {
+        if mode == .hist {
+            reloadHist()
+            rebuildContent()
+        } else {
+            rebuildContent()
+        }
     }
 
-    /// snip 行内过滤：numberOfRows 用 filtered 列表。
+    /// snip 行内过滤。
     private var snipFiltered: [OpaquePointer]? = nil
     private func applySnipFilter() {
         let q = (search?.stringValue ?? "").lowercased()
@@ -374,16 +406,15 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
             return t.contains(q) || b.contains(q) || s.contains(q)
         }
     }
-    private func snipAt(_ r: Int) -> OpaquePointer {
-        applySnipFilter()
-        return (snipFiltered ?? items)[r]
+    private func snipObj(id: String) -> OpaquePointer? {
+        items.first { String(cString: hb_obj_id($0)) == id }
     }
 
-    @objc private func showHist() { mode = .hist; reload() }
-    @objc private func showSnips() { mode = .snips; reload() }
+    private func showHist() { mode = .hist; reload() }
+    private func showSnips() { mode = .snips; reload() }
 
-    @objc private func histToggled(_ s: NSSwitch) {
-        Vault.shared.setSettingsBool("history_enabled", s.state == .on)
+    @objc private func histToggled(_ s: VSwitch) {
+        Vault.shared.setSettingsBool("history_enabled", s.isOn)
         onHistoryToggle?()
     }
     @objc private func histHostChanged(_ p: NSPopUpButton) {
@@ -393,22 +424,15 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
         default: histFilter = histHostIds[p.indexOfSelectedItem - 2]
         }
         reloadHist()
-        table.reloadData()
+        rebuildContent()
     }
-    @objc private func histCopy(_ b: NSButton) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(hist[b.tag].cmd, forType: .string)
-    }
-    @objc private func histDel(_ b: NSButton) {
+    private func histDel(id: Int64) {
         guard let v = Vault.shared.vault else { return }
-        _ = hb_vault_history_delete(v, hist[b.tag].id)
+        _ = hb_vault_history_delete(v, id)
         reloadHist()
-        table.reloadData()
+        rebuildContent()
     }
-    @objc private func histToSnip(_ b: NSButton) {
-        openEditor(existing: nil, prefillBody: hist[b.tag].cmd)
-    }
-    @objc private func clearHist() {
+    private func clearHist() {
         let a = NSAlert()
         a.messageText = L("清空命令历史")
         a.informativeText = L("确定删除全部 Shell History？此操作不可撤销。")
@@ -422,13 +446,13 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
         }
     }
 
-    @objc private func newSnip() { openEditor(existing: nil, prefillBody: nil) }
-    @objc private func editRow(_ b: NSButton) {
-        openEditor(existing: snipAt(b.tag), prefillBody: nil)
+    private func newSnip() { openEditor(existing: nil, prefillBody: nil) }
+    private func editSnip(id: String) {
+        guard let o = snipObj(id: id) else { return }
+        openEditor(existing: o, prefillBody: nil)
     }
-    @objc private func delRow(_ b: NSButton) {
-        let o = snipAt(b.tag)
-        let id = String(cString: hb_obj_id(o))
+    private func delSnip(id: String) {
+        guard let o = snipObj(id: id) else { return }
         let t = hb_obj_get_str(o, "title").str
         Vault.shared.delete(id)
         reload()
@@ -439,16 +463,6 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
         DialogRegistry.shared.present(alert: a, kind: "undo-del",
                                       in: window) { [weak self] ok in
             if ok { Vault.shared.undelete(id); self?.reload() }
-        }
-    }
-
-    @objc private func snipMenu(_ p: NSPopUpButton) {
-        defer { p.selectItem(at: 0) }
-        switch p.indexOfSelectedItem {
-        case 1: newSnip()
-        case 2: importJSON()
-        case 3: exportJSON()
-        default: break
         }
     }
 
@@ -648,5 +662,114 @@ final class SnippetsPage: NSView, NSTableViewDataSource,
         }
         let d = try? JSONSerialization.data(withJSONObject: arr)
         return (d.flatMap { String(data: $0, encoding: .utf8) } ?? "[]")
+    }
+}
+
+/// prototype .snippet-card：白卡 radius 10，hover 边框 cardHover；
+/// sc-title（13.5 w600 + scope tag + 行内编辑/删除）+ sc-code
+/// （Menlo 12 text2，subtle 底 radius 7，pre-wrap）。整卡点击发送。
+private final class SnippetCard: NSView {
+    var onSend: (() -> Void)?
+    var onEdit: (() -> Void)?
+    var onDelete: (() -> Void)?
+    let editBtn = VIconBtn(icon: "wand")
+    let delBtn = VIconBtn(icon: "trash", kind: .del)
+    private var hovered = false
+
+    init(title: String, body: String, scope: String) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.borderWidth = 1
+        layer?.hbBg = "card"
+        restyleBorder()
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited,
+                                   .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+        let stack = VFlippedStack()
+        stack.orientation = .vertical
+        stack.spacing = 8
+        stack.alignment = .leading
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 16,
+                                        bottom: 14, right: 16)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        let head = NSStackView()
+        head.orientation = .horizontal
+        head.spacing = 8
+        let tl = vLabel(title, bold: true)
+        tl.font = .systemFont(ofSize: 13.5, weight: .semibold)
+        head.addArrangedSubview(tl)
+        head.addArrangedSubview(hbTagLabel(scope))
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.init(1),
+                                                       for: .horizontal)
+        head.addArrangedSubview(spacer)
+        editBtn.toolTip = L("编辑")
+        editBtn.onTap = { [weak self] in self?.onEdit?() }
+        head.addArrangedSubview(editBtn)
+        delBtn.toolTip = L("删除")
+        delBtn.onTap = { [weak self] in self?.onDelete?() }
+        head.addArrangedSubview(delBtn)
+        head.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(head)
+        head.widthAnchor.constraint(
+            equalTo: stack.widthAnchor).isActive = true
+        let code = NSView()
+        code.wantsLayer = true
+        code.layer?.cornerRadius = 7
+        code.layer?.hbBg = "subtle"
+        let cl = NSTextField(wrappingLabelWithString: body)
+        cl.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        cl.hbText = "text2"
+        cl.translatesAutoresizingMaskIntoConstraints = false
+        cl.preferredMaxLayoutWidth = 900
+        code.addSubview(cl)
+        NSLayoutConstraint.activate([
+            cl.topAnchor.constraint(equalTo: code.topAnchor, constant: 8),
+            cl.leadingAnchor.constraint(equalTo: code.leadingAnchor,
+                                        constant: 11),
+            cl.trailingAnchor.constraint(equalTo: code.trailingAnchor,
+                                         constant: -11),
+            cl.bottomAnchor.constraint(equalTo: code.bottomAnchor,
+                                       constant: -8),
+        ])
+        code.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(code)
+        code.widthAnchor.constraint(
+            equalTo: stack.widthAnchor).isActive = true
+        toolTip = L("点击发送到当前终端")
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func mouseEntered(with e: NSEvent) {
+        hovered = true; restyleBorder()
+    }
+    override func mouseExited(with e: NSEvent) {
+        hovered = false; restyleBorder()
+    }
+    override func mouseDown(with e: NSEvent) { onSend?() }
+    override func accessibilityPerformPress() -> Bool {
+        onSend?(); return true
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        restyleBorder()
+    }
+    private func restyleBorder() {
+        layer?.hbBorderResolver = { [weak self] in
+            guard let self, self.hovered else {
+                return NSColor.clear.cgColor
+            }
+            return Theme.cardHover.color.cgColor
+        }
     }
 }

@@ -7,8 +7,12 @@ import HarborKit
 final class VaultTab: TermTab {
     override var onlineCount: Int { 0 }
     override var wakeReconnectable: Bool { false }
+    override func dismissOverlays() { hostsPage?.closeDrawer() }
     let sidebar = SidebarView()
     let sectionArea = NSView()
+    private var sidebarWidth: NSLayoutConstraint!
+    private var sectionWithSidebar: NSLayoutConstraint!
+    private var sectionWithoutSidebar: NSLayoutConstraint!
     private(set) var sidebarVisible = true
     private var lastSection = -1
     private var hostsPage: HostsPage?
@@ -27,26 +31,43 @@ final class VaultTab: TermTab {
         iconName = "server"
         let v = view
         v.wantsLayer = true
-        v.layer?.hbBg = "page"
+        v.layer?.hbBg = "content"
         sidebar.translatesAutoresizingMaskIntoConstraints = false
         sectionArea.translatesAutoresizingMaskIntoConstraints = false
         v.addSubview(sidebar); v.addSubview(sectionArea)
+        sidebarWidth = sidebar.widthAnchor.constraint(equalToConstant: 200)
+        sectionWithSidebar = sectionArea.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor)
+        sectionWithoutSidebar = sectionArea.leadingAnchor.constraint(equalTo: v.leadingAnchor)
         NSLayoutConstraint.activate([
             sidebar.leadingAnchor.constraint(equalTo: v.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: v.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: v.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: 208),
-            sectionArea.leadingAnchor.constraint(
-                equalTo: sidebar.trailingAnchor),
+            sidebarWidth,
+            sectionWithSidebar,
             sectionArea.trailingAnchor.constraint(equalTo: v.trailingAnchor),
             sectionArea.topAnchor.constraint(equalTo: v.topAnchor),
             sectionArea.bottomAnchor.constraint(equalTo: v.bottomAnchor),
         ])
+        v.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(sidebarFrameChanged(_:)),
+            name: NSView.frameDidChangeNotification, object: v)
     }
 
     var onSSH: ((String?, String?, String) -> Void)?
 
-    func toggleSidebar() { sidebarVisible.toggle(); sidebar.isHidden = !sidebarVisible }
+    func toggleSidebar() {
+        sidebarVisible.toggle()
+        sidebar.isHidden = !sidebarVisible
+        (sidebarVisible ? sectionWithoutSidebar : sectionWithSidebar).isActive = false
+        (sidebarVisible ? sectionWithSidebar : sectionWithoutSidebar).isActive = true
+    }
+
+    @objc private func sidebarFrameChanged(_ note: Notification) {
+        let compact = view.bounds.width <= 900
+        sidebar.compact = compact
+        sidebarWidth.constant = compact ? 62 : 200
+    }
 
     func showSection(_ i: Int) {
         guard i >= 0 && i < kSections.count else { return }
@@ -158,9 +179,8 @@ final class VaultTab: TermTab {
                 (self?.view.window as? MainWindow)?.applySettings()
             }
             appearancePanel = p
-            p.frame.origin = NSPoint(
-                x: 20, y: area.bounds.height - p.frame.height - 20)
-            p.autoresizingMask = [.minYMargin]
+            p.frame = area.bounds
+            p.autoresizingMask = [.width, .height]
             area.addSubview(p)
         }
     }
@@ -230,6 +250,7 @@ final class SFTPTab: TermTab {
         sftp.panes[0].pick(nil)
         sftp.panes[1].pick(id)
     }
+    override func dismissOverlays() { sftp.closeMenus() }
     /// 远端 pane 的 ConnCtl 集合（日志行收尾/断开用）
     var devState: String { sftp.devState }
     override var running: Bool {

@@ -42,10 +42,13 @@ final class TerminalView: NSView, NSTextInputClient {
     var lineHeight: CGFloat = 1.15 { didSet { rebuildFont(); fitNotify() } }
     var cursorStyle = 1 { didSet { needsDisplay = true } }
     var theme = TermTheme.for("harbor") { didSet {
-        invalidateLayout(); needsDisplay = true; onThemeChange?() } }
+        invalidateLayout(); needsDisplay = true; onThemeChange?()
+        NotificationCenter.default.post(name: Self.nTheme, object: self) } }
     /// 主题变更回调（FindBar 重取色用；linux 走 CSS var 自动更新）。
     var onThemeChange: (() -> Void)?
-    var padX: CGFloat = 12, padY: CGFloat = 10
+    /// 主题变更广播（Workspace chrome 等多观察者用）。
+    static let nTheme = Notification.Name("hb.term.theme")
+    var padX: CGFloat = 16, padY: CGFloat = 14
     var optionIsMeta = false
     var session: Session?
     /// FR-12 viewer：外部 vt（与 session 模式互斥，对齐 ext_vt）。

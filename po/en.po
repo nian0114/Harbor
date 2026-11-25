@@ -5367,3 +5367,102 @@ msgid "需在「系统设置 › 通用 › 登录项」里批准一次 Harbor�
 msgstr "Harbor must be approved once in System Settings › General › Login Items."
 msgid "此设备没有可用的 Touch ID，已开启的密钥仍可要求确认。"
 msgstr "No Touch ID is available on this device; keys already enabled will still ask for confirmation."
+
+msgid "Search terminal · ⌘F"
+msgstr "Search terminal · ⌘F"
+
+msgid "终端主题（实时生效）："
+msgstr "Terminal theme (applies live): "
+
+msgid "基于 Shell History 与 OSC 133 上下文的本地补全候选；默认关闭，历史不出设备（隐私）"
+msgstr "Local completion candidates from shell history and OSC 133 context; off by default, history never leaves this device (privacy)"
+
+msgid "Snippets 快捷发送："
+msgstr "Snippets Quick Send: "
+
+msgid "换个关键词或分组试试，也可以直接新建一台。"
+msgstr "Try a different keyword or group, or create a new host."
+
+msgid "串口终端为 P2 功能（FR-14）"
+msgstr "Serial terminal is a P2 feature (FR-14)"
+
+msgid "E2EE 已同步"
+msgstr "E2EE synced"
+
+msgid "未分组"
+msgstr "Ungrouped"
+
+msgid "%ld 个跳板"
+msgstr "%ld jump hosts"
+
+msgid "凭据变更 5s 内同步到其它设备；主机指纹详见 Known Hosts。"
+msgstr "Credential changes sync to other devices within 5s; host fingerprints are in Known Hosts."
+
+msgid "Actions ▾"
+msgstr "Actions ▾"
+
+msgid "空目录 / 无匹配文件"
+msgstr "Empty directory / no matching files"
+
+msgid "不显示隐藏文件"
+msgstr "Hide hidden files"
+
+msgid "关闭此栏"
+msgstr "Close pane"
+
+msgid "监控: %@"
+msgstr "Monitor: %@"
+
+msgid "EOF + OSC133 + AI 预设"
+msgstr "EOF + OSC133 + AI presets"
+
+msgid "共享中 · %d 人"
+msgstr "Sharing · %d people"
+
+msgid "scrollback %@ 行"
+msgstr "scrollback %@ lines"
+
+msgid "私钥经 Secure Enclave / Android Keystore 包装加密存储，同步走端到端加密（FR-11），服务端零明文。"
+msgstr "Private keys are wrapped by Secure Enclave / Android Keystore and synced end-to-end encrypted (FR-11); the server never sees plaintext."
+
+msgid "生物识别"
+msgstr "Biometrics"
+
+msgid "新建密钥"
+msgstr "New key"
+
+msgid "导出全部公钥"
+msgstr "Export all public keys"
+
+msgid "密码凭据"
+msgstr "Password credential"
+
+msgid "证书导入（P1）"
+msgstr "Certificate import (P1)"
+
+msgid "Touch ID"
+msgstr "Touch ID"
+
+msgid "Touch ID / 生物识别解锁已在 macOS 生效"
+msgstr "Touch ID / biometric unlock is active on macOS"
+
+msgid "FIDO2 安全密钥（P1，libfido2）"
+msgstr "FIDO2 security keys (P1, libfido2)"
+
+msgid "公钥已导出（私钥永不导出）"
+msgstr "Public keys exported (private keys are never exported)"
+
+msgid "存为 Snippet"
+msgstr "Save as snippet"
+
+msgid "首次连接未知主机时会弹出指纹确认（TOFU）；指纹变更会红色告警并阻断连接，防中间人（FR-04）。"
+msgstr "Connecting to an unknown host prompts for fingerprint confirmation (TOFU); a changed fingerprint raises a red warning and blocks the connection to prevent MITM (FR-04)."
+
+msgid "删除条目"
+msgstr "Delete entry"
+
+msgid "暂无共享会话"
+msgstr "No shared sessions"
+
+msgid "%d 个参与者 · E2EE"
+msgstr "Participants: %d · E2EE"

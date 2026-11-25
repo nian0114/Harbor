@@ -6,18 +6,155 @@ import HarborKit
 final class AppearancePanel: NSView {
     override var isFlipped: Bool { true }
     private let v = Vault.shared
+    private let terminal = TerminalView()
+    private let settings = AppearanceSettingsView()
+    private let fontSize = NSSlider(value: 14, minValue: 10, maxValue: 20, target: nil, action: nil)
+    private let lineHeight = NSSlider(value: 1.15, minValue: 1, maxValue: 2.5, target: nil, action: nil)
+    private let sizeLabel = vLabel("")
+    private let heightLabel = vLabel("")
+    private var themes: [NSButton] = []
     var onChange: (() -> Void)?
     init() {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.hbBg = "content"
+        buildLayout()
+    }
+
+    private func buildLayout() {
+        let scroll = NSScrollView(frame: bounds)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .overlay
+        addSubview(scroll)
+        let content = VFlippedStack()
+        content.orientation = .vertical
+        content.alignment = .centerX
+        content.spacing = 14
+        content.edgeInsets = NSEdgeInsets(top: 14, left: 18, bottom: 20, right: 18)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = content
+        content.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor).isActive = true
+
+        let choices = VPanel()
+        choices.append(vPanelTitle(L("终端主题"), icon: "palette"))
+        themes = TermTheme.all.enumerated().map { index, theme in
+            let button = AppearanceThemeButton(theme: theme)
+            button.tag = index
+            button.target = self
+            button.action = #selector(selectTheme)
+            return button
+        }
+        for pair in stride(from: 0, to: themes.count, by: 2) {
+            let row = NSStackView(views: Array(themes[pair..<min(pair + 2, themes.count)]))
+            row.distribution = .fillEqually
+            row.spacing = 8
+            choices.append(row)
+        }
+        fontSize.numberOfTickMarks = 11
+        fontSize.allowsTickMarkValuesOnly = true
+        for (title, value, slider) in [(L("字号"), sizeLabel, fontSize),
+                                       (L("行高"), heightLabel, lineHeight)] {
+            let row = NSStackView(views: [vLabel(title), NSView(), value])
+            row.spacing = 8
+            choices.append(row)
+            slider.isContinuous = true
+            slider.target = self
+            slider.action = #selector(changeMetric)
+            slider.setAccessibilityLabel(title)
+            choices.append(slider)
+        }
+        let reset = HBtn(L("恢复默认"), sm: true, icon: "refresh")
+        reset.onTap = { [weak self] in
+            guard let self else { return }
+            self.v.setSetting("theme", "harbor")
+            self.v.setSetting("font_size", "14")
+            self.v.setSetting("line_height", "1.15")
+            self.refreshPreview()
+            self.onChange?()
+        }
+        choices.append(NSStackView(views: [reset, NSView()]))
+
+        let preview = VPanel()
+        preview.append(vPanelTitle(L("实时预览"), icon: "terminal"))
+        terminal.heightAnchor.constraint(equalToConstant: 240).isActive = true
+        terminal.wantsLayer = true
+        terminal.layer?.cornerRadius = 8
+        terminal.layer?.masksToBounds = true
+        terminal.setAccessibilityLabel(L("实时预览"))
+        if let vt = hb_vt_new(8, 72, 0) {
+            let sample = "\u{1b}[2mWelcome to Ubuntu 24.04 LTS\u{1b}[0m\r\n"
+                + "\u{1b}[32mdemo@host\u{1b}[0m:~$ make test\r\n"
+                + "\u{1b}[2mRunning tests…\u{1b}[0m\r\n"
+                + "\u{1b}[32m✔ All tests passed\u{1b}[0m\r\n"
+                + "\u{1b}[32mdemo@host\u{1b}[0m:~$ "
+            sample.withCString { hb_vt_feed(vt, $0, sample.utf8.count) }
+            terminal.extVt = vt
+        }
+        preview.append(terminal)
+        let panels = VPanelColumns(left: choices, right: preview)
+        let more = VPanel()
+        more.append(vPanelTitle(L("外观与终端"), icon: "palette"))
+        buildSettings()
+        settings.heightAnchor.constraint(equalToConstant: settings.frame.height).isActive = true
+        more.append(settings)
+        for section in [panels, more] {
+            section.translatesAutoresizingMaskIntoConstraints = false
+            content.addArrangedSubview(section)
+            section.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -36).isActive = true
+        }
+        refreshPreview()
+    }
+
+    deinit {
+        if let vt = terminal.extVt {
+            terminal.extVt = nil
+            hb_vt_free(vt)
+        }
+    }
+
+    private func refreshPreview() {
+        let theme = TermTheme.for(v.setting("theme"))
+        terminal.fontName = v.setting("font_family") ?? "Menlo"
+        terminal.fontSize = CGFloat(Double(v.setting("font_size") ?? "") ?? 14)
+        terminal.lineHeight = CGFloat(Double(v.setting("line_height") ?? "") ?? 1.15)
+        terminal.cursorStyle = Int(v.setting("cursor_style") ?? "0") ?? 0
+        terminal.theme = theme
+        fontSize.doubleValue = Double(terminal.fontSize)
+        lineHeight.doubleValue = Double(terminal.lineHeight)
+        sizeLabel.stringValue = String(format: "%g px", Double(terminal.fontSize))
+        heightLabel.stringValue = String(format: "%.2f", Double(terminal.lineHeight))
+        for (button, choice) in zip(themes, TermTheme.all) {
+            button.state = theme.id == choice.id ? .on : .off
+            button.needsDisplay = true
+        }
+    }
+
+    @objc private func selectTheme(_ button: NSButton) {
+        v.setSetting("theme", TermTheme.all[button.tag].id)
+        refreshPreview()
+        onChange?()
+    }
+
+    @objc private func changeMetric(_ slider: NSSlider) {
+        if slider === fontSize {
+            v.setSetting("font_size", String(slider.integerValue))
+        } else {
+            v.setSetting("line_height", String(format: "%.2f", slider.doubleValue))
+        }
+        refreshPreview()
+        onChange?()
+    }
+
+    private func buildSettings() {
         var y: CGFloat = 14
         func row(_ label: String, _ ctrl: NSView) {
             let l = NSTextField(labelWithString: label)
             l.font = .systemFont(ofSize: 12)
             l.frame = NSRect(x: 24, y: y + 2, width: 140, height: 20)
             ctrl.frame = NSRect(x: 170, y: y, width: 200, height: 24)
-            addSubview(l); addSubview(ctrl)
+            settings.addSubview(l); settings.addSubview(ctrl)
             y += 34
         }
         // ---- 界面（主题/语言；主题同步、语言设备本地）----
@@ -41,23 +178,9 @@ final class AppearancePanel: NSView {
         fonts.selectItem(withTitle: v.setting("font_family") ?? "Menlo")
         fonts.target = self; fonts.action = #selector(changed)
         row(L("终端字体"), fonts)
-        let size = NSTextField()
-        size.stringValue = v.setting("font_size") ?? "14"
-        size.target = self; size.action = #selector(changed)
-        row(L("字号"), size)
-        let lh = NSTextField()
-        lh.stringValue = v.setting("line_height") ?? "1.15"
-        lh.target = self; lh.action = #selector(changed)
-        row(L("行高"), lh)
-        let theme = NSPopUpButton()
-        theme.addItems(withTitles: TermTheme.all.map { $0.name })
-        let selTheme = TermTheme.for(v.setting("theme")).name
-        theme.selectItem(withTitle: selTheme)
-        theme.tag = 1
-        theme.target = self; theme.action = #selector(changed)
-        row(L("终端配色"), theme)
         let sb = NSTextField()
         sb.stringValue = v.setting("scrollback") ?? "10000"
+        sb.tag = 6
         sb.target = self; sb.action = #selector(changed)
         row(L("回滚行数"), sb)
         let cursor = NSPopUpButton()
@@ -71,7 +194,7 @@ final class AppearancePanel: NSView {
         meta.state = (v.setting("option_meta") ?? "0") == "1"
             ? .on : .off
         meta.frame = NSRect(x: 24, y: y, width: 220, height: 22)
-        addSubview(meta)
+        settings.addSubview(meta)
         y += 30
         let conc = NSTextField()
         conc.stringValue = v.setting("sftp_concurrency") ?? "3"
@@ -85,34 +208,34 @@ final class AppearancePanel: NSView {
         sect.font = .systemFont(ofSize: 12, weight: .semibold)
         sect.hbText = "termDim"
         sect.frame = NSRect(x: 24, y: y, width: 200, height: 20)
-        addSubview(sect)
+        settings.addSubview(sect)
         y += 28
         let tray = NSButton(checkboxWithTitle:
             L("关闭窗口时留在菜单栏（会话保持运行）"),
             target: self, action: #selector(trayChanged))
         tray.state = v.settingsBool("close_to_tray", true) ? .on : .off
         tray.frame = NSRect(x: 24, y: y, width: 380, height: 22)
-        addSubview(tray)
+        settings.addSubview(tray)
         y += 30
         login = NSButton(checkboxWithTitle: L("登录时启动 Harbor"),
                          target: self, action: #selector(loginChanged))
         login.state = v.settingsBool("start_at_login", false)
             ? .on : .off
         login.frame = NSRect(x: 24, y: y, width: 380, height: 22)
-        addSubview(login)
+        settings.addSubview(login)
         y += 24
         loginNote = NSTextField(wrappingLabelWithString: "")
         loginNote.font = .systemFont(ofSize: 11)
         loginNote.hbText = "amber"
         loginNote.frame = NSRect(x: 44, y: y, width: 400, height: 30)
-        addSubview(loginNote)
+        settings.addSubview(loginNote)
         y += 36
         let keep = NSButton(checkboxWithTitle:
             L("保持连接（防止休眠断言）"),
             target: self, action: #selector(keepChanged))
         keep.state = v.settingsBool("keep_connected", false) ? .on : .off
         keep.frame = NSRect(x: 24, y: y, width: 380, height: 22)
-        addSubview(keep)
+        settings.addSubview(keep)
         y += 34
 
         // ---- 快捷键（shortcuts_macos 覆盖，随 E2EE 同步到其它 Mac）----
@@ -121,19 +244,19 @@ final class AppearancePanel: NSView {
         sc.font = .systemFont(ofSize: 12, weight: .semibold)
         sc.hbText = "termDim"
         sc.frame = NSRect(x: 24, y: y, width: 200, height: 20)
-        addSubview(sc)
+        settings.addSubview(sc)
         let rstAll = NSButton(title: L("全部恢复默认"), target: self,
                               action: #selector(resetAllShortcuts))
         rstAll.bezelStyle = .rounded
         rstAll.controlSize = .small
         rstAll.frame = NSRect(x: 300, y: y - 2, width: 120, height: 22)
-        addSubview(rstAll)
+        settings.addSubview(rstAll)
         y += 26
         scHint = NSTextField(wrappingLabelWithString: "")
         scHint.font = .systemFont(ofSize: 11)
         scHint.hbText = "amber"
         scHint.frame = NSRect(x: 24, y: y, width: 430, height: 16)
-        addSubview(scHint)
+        settings.addSubview(scHint)
         y += 20
         ShortcutKit.shared.onToast = { [weak scHint] t in
             scHint?.stringValue = t
@@ -144,18 +267,18 @@ final class AppearancePanel: NSView {
             let l = NSTextField(labelWithString: r.label)
             l.font = .systemFont(ofSize: 12)
             l.frame = NSRect(x: 24, y: y + 2, width: 200, height: 20)
-            addSubview(l)
+            settings.addSubview(l)
             let b = ShortcutCapButton(idx: i)
             b.frame = NSRect(x: 230, y: y, width: 150, height: 24)
             b.bezelStyle = .rounded
-            addSubview(b)
+            settings.addSubview(b)
             let rst = NSButton(title: L("恢复默认"), target: self,
                                action: #selector(resetOne(_:)))
             rst.tag = i
             rst.bezelStyle = .rounded
             rst.controlSize = .small
             rst.frame = NSRect(x: 388, y: y, width: 80, height: 24)
-            addSubview(rst)
+            settings.addSubview(rst)
             y += 30
         }
         y += 14
@@ -165,22 +288,22 @@ final class AppearancePanel: NSView {
         bk.font = .systemFont(ofSize: 12, weight: .semibold)
         bk.hbText = "termDim"
         bk.frame = NSRect(x: 24, y: y, width: 200, height: 20)
-        addSubview(bk)
+        settings.addSubview(bk)
         y += 26
         let ex = NSButton(title: L("导出加密备份…"), target: self,
                           action: #selector(exportBackup))
         ex.bezelStyle = .rounded
         ex.frame = NSRect(x: 24, y: y, width: 150, height: 24)
         ex.setAccessibilityIdentifier("bk-export")
-        addSubview(ex)
+        settings.addSubview(ex)
         let im = NSButton(title: L("导入加密备份…"), target: self,
                           action: #selector(importBackup))
         im.bezelStyle = .rounded
         im.frame = NSRect(x: 184, y: y, width: 150, height: 24)
         im.setAccessibilityIdentifier("bk-import")
-        addSubview(im)
+        settings.addSubview(im)
         y += 40
-        frame = NSRect(x: 0, y: 0, width: 480, height: y)
+        settings.frame.size.height = y
     }
     required init?(coder: NSCoder) { nil }
     private var login: NSButton!
@@ -197,7 +320,7 @@ final class AppearancePanel: NSView {
     }
     private func refreshShortcutButtons() { refreshShortcuts() }
     func refreshShortcuts() {
-        for s in subviews.compactMap({ $0 as? ShortcutCapButton }) {
+        for s in settings.subviews.compactMap({ $0 as? ShortcutCapButton }) {
             s.refreshTitle()
         }
     }
@@ -227,9 +350,6 @@ final class AppearancePanel: NSView {
     @objc private func changed(_ s: NSControl) {
         if let p = s as? NSPopUpButton {
             switch p.tag {
-            case 1:
-                let t = TermTheme.all[max(0, p.indexOfSelectedItem)]
-                v.setSetting("theme", t.id)
             case 2:
                 v.setSetting("cursor_style",
                              String(p.indexOfSelectedItem))
@@ -260,16 +380,15 @@ final class AppearancePanel: NSView {
                 if let n = Int(t.stringValue), (1...8).contains(n) {
                     v.setSetting("sftp_concurrency", String(n))
                 }
-            } else if Double(t.stringValue) != nil {
-                if t.stringValue.contains(".") {
-                    v.setSetting("line_height", t.stringValue)
-                } else if let n = Int(t.stringValue), n > 1000 {
+            } else {
+                if let n = Int(t.stringValue), n >= 0 {
                     v.setSetting("scrollback", t.stringValue)
                 } else {
-                    v.setSetting("font_size", t.stringValue)
+                    t.stringValue = v.setting("scrollback") ?? "10000"
                 }
             }
         }
+        refreshPreview()
         onChange?()
     }
 
@@ -288,6 +407,48 @@ final class AppearancePanel: NSView {
                 at: Bundle.main.bundleURL,
                 configuration: cfg) { _, _ in NSApp.terminate(nil) }
         }
+    }
+}
+
+private final class AppearanceSettingsView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+private final class AppearanceThemeButton: NSButton {
+    private let theme: TermTheme
+    override var isFlipped: Bool { false }
+    override var intrinsicContentSize: NSSize { NSSize(width: 136, height: 65) }
+
+    init(theme: TermTheme) {
+        self.theme = theme
+        super.init(frame: .zero)
+        title = theme.name
+        isBordered = false
+        setButtonType(.onOff)
+        setAccessibilityLabel(theme.name)
+        heightAnchor.constraint(equalToConstant: 65).isActive = true
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let outline = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+        Theme.card.color.setFill()
+        outline.fill()
+        (state == .on ? Theme.blue : Theme.line).color.setStroke()
+        outline.stroke()
+        let sample = NSRect(x: 6, y: 24, width: max(0, bounds.width - 12), height: 35)
+        theme.bg.color.setFill()
+        NSBezierPath(roundedRect: sample, xRadius: 5, yRadius: 5).fill()
+        let mono = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        ("demo@host:~$" as NSString).draw(at: NSPoint(x: 12, y: 42),
+                                         withAttributes: [.font: mono, .foregroundColor: theme.cursor.color])
+        ("✔ Tests passed" as NSString).draw(at: NSPoint(x: 12, y: 28),
+                                           withAttributes: [.font: mono, .foregroundColor: theme.dim.color])
+        let title = theme.name + (state == .on ? "  ✓" : "")
+        (title as NSString).draw(in: NSRect(x: 9, y: 4, width: max(0, bounds.width - 18), height: 17),
+                                 withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                                                  .foregroundColor: Theme.text.color])
     }
 }
 

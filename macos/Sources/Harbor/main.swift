@@ -5,7 +5,7 @@ import HarborKit
 // ---------- 侧栏分区（Linux 九区顺序）----------
 struct Section { let id: String; let icon: String; let title: String }
 // 与 linux/src/hb-vault-page.c 同 msgid：同一概念同一翻译源。
-let kSections: [Section] = [
+var kSections: [Section] { [
     .init(id: "hosts",      icon: "server",   title: "Hosts"),
     .init(id: "keychain",   icon: "key",      title: "Keychain"),
     .init(id: "fwd",        icon: "fwd",      title: "Port Forwarding"),
@@ -15,7 +15,7 @@ let kSections: [Section] = [
     .init(id: "shared",     icon: "broadcast", title: L("共享会话")),
     .init(id: "appearance", icon: "palette",  title: L("外观与终端")),
     .init(id: "account",    icon: "user",     title: L("账号与同步")),
-]
+] }
 
 // ---------- 图标渲染：IconPath → tinted NSImage ----------
 func hbIcon(_ name: String, size: CGFloat, tint: NSColor) -> NSImage {

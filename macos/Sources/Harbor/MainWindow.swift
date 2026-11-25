@@ -21,7 +21,7 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     private var notifMonitor: Any?
 
     init() {
-        super.init(contentRect: NSRect(x: 200, y: 200, width: 1100, height: 700),
+        super.init(contentRect: NSRect(x: 200, y: 200, width: 1400, height: 870),
                    styleMask: [.titled, .closable, .miniaturizable,
                                .resizable, .fullSizeContentView],
                    backing: .buffered, defer: false)
@@ -32,34 +32,34 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         delegate = self
         minSize = NSSize(width: 640, height: 420)
 
-        // titlebar row: strip + sidebar toggle + bell
-        let bar = NSView(frame: NSRect(x: 0, y: 662, width: 1100, height: 38))
+        // titlebar row: strip + sidebar toggle + bell（prototype 52px）
+        let bar = NSView(frame: NSRect(x: 0, y: 818, width: 1400, height: 52))
         bar.wantsLayer = true
         bar.layer?.hbBg = "titlebar"
         contentView?.addSubview(bar)
         bar.autoresizingMask = [.width, .minYMargin]
-        strip.frame = NSRect(x: 78, y: 0, width: 902, height: 38)
+        strip.frame = NSRect(x: 78, y: 0, width: 1202, height: 52)
         strip.autoresizingMask = [.width]
         bar.addSubview(strip)
         let side = NSButton()
         side.bezelStyle = .texturedRounded
-        side.image = hbIcon("panel", size: 16, tint: .white)
+        side.image = hbIcon("panel", size: 17, tint: Theme.titlebarText.color)
         side.isBordered = false
-        side.frame = NSRect(x: 992, y: 8, width: 28, height: 22)
+        side.frame = NSRect(x: 1292, y: 12, width: 28, height: 28)
         side.autoresizingMask = [.minXMargin]
         side.target = self; side.action = #selector(toggleSidebar)
         bar.addSubview(side)
         bell.bezelStyle = .texturedRounded
-        bell.image = hbIcon("bell", size: 16, tint: .white)
+        bell.image = hbIcon("bell", size: 17, tint: Theme.titlebarText.color)
         bell.isBordered = false
-        bell.frame = NSRect(x: 1056, y: 8, width: 28, height: 22)
+        bell.frame = NSRect(x: 1356, y: 12, width: 28, height: 28)
         bell.autoresizingMask = [.minXMargin]
         bell.target = self
         bell.action = #selector(toggleNotifs)
         bell.setAccessibilityIdentifier("bell")
         bar.addSubview(bell)
         // 角标钉在铃铛右上内缘（不贴窗口圆角边缘，避免被裁）
-        bellBadge.frame = NSRect(x: 1068, y: 17, width: 16, height: 13)
+        bellBadge.frame = NSRect(x: 1368, y: 24, width: 16, height: 13)
         bellBadge.autoresizingMask = [.minXMargin]
         bellBadge.wantsLayer = true
         bellBadge.layer?.cornerRadius = 6
@@ -72,10 +72,10 @@ final class MainWindow: NSWindow, NSWindowDelegate {
         refreshBellBadge()
 
         // body：Vault/SFTP pinned + 会话 tab 全宽；侧栏属 Vault tab 内部
-        content.frame = NSRect(x: 0, y: 0, width: 1100, height: 662)
+        content.frame = NSRect(x: 0, y: 0, width: 1400, height: 818)
         content.autoresizingMask = [.width, .height]
         content.wantsLayer = true
-        content.layer?.hbBg = "page"
+        content.layer?.hbBg = "content"
         contentView?.addSubview(content)
 
         strip.onSelect = { [weak self] i in self?.select(i) }
@@ -128,15 +128,15 @@ final class MainWindow: NSWindow, NSWindowDelegate {
     }
     func select(_ i: Int) {
         guard i >= 0 && i < tabs.count else { return }
+        if selTab >= 0 && selTab < tabs.count {
+            tabs[selTab].dismissOverlays()
+        }
         selTab = i
         strip.selected = i
         contentCard?.removeFromSuperview()
         let card = tabs[i].view
-        card.frame = content.bounds.insetBy(dx: 8, dy: 8)
+        card.frame = content.bounds
         card.autoresizingMask = [.width, .height]
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 8
-        card.layer?.hbBg = "card"
         content.addSubview(card)
         contentCard = card
         makeFirstResponder(tabs[i].term)

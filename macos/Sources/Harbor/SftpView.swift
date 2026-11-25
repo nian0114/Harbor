@@ -304,13 +304,15 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
     var ctl: ConnCtl?
     var connHostId: String?
     private var connHead: [NSView] = []
-    private var nodes: [NSTextField] = []
-    private var bars: [NSView] = []
     private var logBox: NSStackView?
     private var logScroll: NSScrollView?
-    private var hideLogBtn: NSButton?
+    private var logWrap: NSView?
+    private var hideLogBtn: HBtn?
     private var logHidden = false
-    private var errCard: NSView?
+    private var logTop: NSLayoutConstraint?
+    private var logHeight: NSLayoutConstraint?
+    private var hadError = false
+    private var editBtn: HBtn?
 
     // browse
     private(set) var isLocal = false
@@ -336,6 +338,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
     private var titleL: NSTextField?
     let table = SftpTable()
     private var tableScroll: NSScrollView?
+    private var emptyLbl: NSTextField?
 
     // delete-undo / open
     private var pendDels: [PendDel] = []
@@ -353,6 +356,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
     // ---------- 状态 ----------
     func setState(_ s: State) {
         state = s
+        closeActions()
         selectView.isHidden = s != .select
         connView.isHidden = s != .conn
         browseView.isHidden = s != .browse
@@ -375,23 +379,20 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
 
     // ---------- select ----------
     private func buildSelect() {
+        selectView.wantsLayer = true
+        selectView.layer?.hbBg = "card"
         let head = NSTextField(labelWithString:
             L("选择主机") + " · " + (side == 0 ? L("左栏") : L("右栏")))
         head.font = .systemFont(ofSize: 13.5, weight: .bold)
         head.translatesAutoresizingMaskIntoConstraints = false
         selectView.addSubview(head)
-        let lb = NSButton(title: "  " + L("Local"), target: self,
-                          action: #selector(pickLocal))
-        lb.bezelStyle = .rounded
-        lb.image = hbIcon("monitor", size: 12, tint: Theme.dyn("text"))
-        lb.imagePosition = .imageLeading
+        let lb = HBtn(L("Local"), style: .primary, sm: true, icon: "monitor")
+        lb.target = self
+        lb.action = #selector(pickLocal)
         lb.translatesAutoresizingMaskIntoConstraints = false
         lb.setAccessibilityIdentifier("sftp-local-\(side)")
-        lb.contentTintColor = .white
-        lb.wantsLayer = true
-        lb.layer?.hbBg = "blue"
-        lb.layer?.cornerRadius = 5
         selectView.addSubview(lb)
+        sizeBtn(lb, sm: true)
         selFilter.placeholderString = L("过滤…")
         selFilter.translatesAutoresizingMaskIntoConstraints = false
         selFilter.target = self
@@ -400,47 +401,57 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         selectView.addSubview(selFilter)
         let scr = NSScrollView()
         scr.translatesAutoresizingMaskIntoConstraints = false
-        scr.hasVerticalScroller = true
+        scr.hasVerticalScroller = false
+        scr.scrollerStyle = .overlay
+        scr.drawsBackground = false
         let box = FlippedStack()
         box.orientation = .vertical
-        box.spacing = 2
+        box.spacing = 10
+        box.edgeInsets = NSEdgeInsets(top: 10, left: 14,
+                                      bottom: 10, right: 14)
         box.translatesAutoresizingMaskIntoConstraints = false
         box.setAccessibilityIdentifier("sftp-hostlist-\(side)")
         scr.documentView = box
         hostBox = box
         selectView.addSubview(scr)
+        let hint = NSTextField(labelWithString:
+            L("选择两端后可双栏互传（远端↔远端 / 远端↔本地）· 双击文件即开始传输"))
+        hint.font = .systemFont(ofSize: 11)
+        hint.hbText = "text3"
+        hint.alignment = .center
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        selectView.addSubview(hint)
         NSLayoutConstraint.activate([
             head.topAnchor.constraint(equalTo: selectView.topAnchor,
-                                      constant: 10),
+                                      constant: 12),
             head.leadingAnchor.constraint(equalTo: selectView.leadingAnchor,
-                                          constant: 14),
+                                          constant: 16),
             lb.centerYAnchor.constraint(equalTo: head.centerYAnchor),
             lb.trailingAnchor.constraint(equalTo: selectView.trailingAnchor,
-                                         constant: -14),
+                                         constant: -16),
             selFilter.topAnchor.constraint(equalTo: head.bottomAnchor,
                                            constant: 8),
             selFilter.leadingAnchor.constraint(
-                equalTo: selectView.leadingAnchor, constant: 14),
+                equalTo: selectView.leadingAnchor, constant: 16),
             selFilter.trailingAnchor.constraint(
-                equalTo: selectView.trailingAnchor, constant: -14),
+                equalTo: selectView.trailingAnchor, constant: -16),
             scr.topAnchor.constraint(equalTo: selFilter.bottomAnchor,
                                      constant: 6),
             scr.leadingAnchor.constraint(equalTo: selectView.leadingAnchor),
             scr.trailingAnchor.constraint(equalTo: selectView.trailingAnchor),
-            scr.bottomAnchor.constraint(equalTo: selectView.bottomAnchor),
-            box.leadingAnchor.constraint(equalTo: scr.leadingAnchor,
-                                         constant: 6),
-            box.trailingAnchor.constraint(equalTo: scr.trailingAnchor,
-                                          constant: -6),
-            box.topAnchor.constraint(equalTo: scr.topAnchor, constant: 4),
-            box.widthAnchor.constraint(equalTo: scr.widthAnchor,
-                                       constant: -12),
+            scr.bottomAnchor.constraint(equalTo: hint.topAnchor,
+                                        constant: -8),
+            box.leadingAnchor.constraint(equalTo: scr.leadingAnchor),
+            box.trailingAnchor.constraint(equalTo: scr.trailingAnchor),
+            box.topAnchor.constraint(equalTo: scr.topAnchor),
+            box.widthAnchor.constraint(equalTo: scr.widthAnchor),
+            hint.leadingAnchor.constraint(
+                equalTo: selectView.leadingAnchor, constant: 16),
+            hint.trailingAnchor.constraint(
+                equalTo: selectView.trailingAnchor, constant: -16),
+            hint.bottomAnchor.constraint(
+                equalTo: selectView.bottomAnchor, constant: -16),
         ])
-        let hint = NSTextField(labelWithString:
-            L("选择两端后可双栏互传（远端↔远端 / 远端↔本地）· 双击文件即开始传输"))
-        hint.font = .systemFont(ofSize: 11)
-        hint.textColor = .secondaryLabelColor
-        box.addArrangedSubview(hint)
         rebuildHosts()
     }
     private var hostBox: NSStackView!
@@ -448,7 +459,6 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
     @objc private func rebuildHosts() {
         for b in selHostBtns { b.removeFromSuperview() }
         selHostBtns.removeAll()
-        // 保留 hint（首项）之后的旧按钮由数组移除
         let q = selFilter.stringValue
         for o in Vault.shared.list("host") {
             defer { hb_obj_free(o) }
@@ -462,16 +472,15 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
             if !q.isEmpty && !label.contains(q) && !us.contains(q) {
                 continue
             }
-            let b = NSButton(title: "", target: self,
-                             action: #selector(pickHost(_:)))
-            b.bezelStyle = .regularSquare
-            b.isBordered = false
+            let b = HostItem()
+            b.target = self
+            b.action = #selector(pickHost(_:))
             b.setAccessibilityIdentifier("sftp-host-\(side)")
             let row = NSStackView()
             row.orientation = .horizontal
-            row.spacing = 10
-            row.edgeInsets = NSEdgeInsets(top: 6, left: 8,
-                                        bottom: 6, right: 8)
+            row.spacing = 12
+            row.edgeInsets = NSEdgeInsets(top: 10, left: 12,
+                                        bottom: 10, right: 12)
             let tile = Palette.osTileView(
                 os.isEmpty || os == "auto" ? "generic" : os, size: 30)
             tile.translatesAutoresizingMaskIntoConstraints = false
@@ -484,7 +493,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
             t.font = .systemFont(ofSize: 13, weight: .medium)
             let s = NSTextField(labelWithString: "ssh, \(us)")
             s.font = .systemFont(ofSize: 11)
-            s.textColor = .secondaryLabelColor
+            s.hbText = "text3"
             col.addArrangedSubview(t); col.addArrangedSubview(s)
             row.addArrangedSubview(col)
             row.translatesAutoresizingMaskIntoConstraints = false
@@ -497,7 +506,6 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
                 row.bottomAnchor.constraint(equalTo: b.bottomAnchor),
             ])
             b.identifier = .init(hb_obj_id(o).str)  // 存 host id
-            b.layer?.cornerRadius = 6
             selHostBtns.append(b)
             hostBox.addArrangedSubview(b)
             b.leadingAnchor.constraint(equalTo: hostBox.leadingAnchor)
@@ -511,167 +519,153 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         pick(b.identifier?.rawValue)
     }
 
-    // ---------- conn（对齐 hb_connect_view 精简版） ----------
+    // ---------- conn（prototype sftpConnectPanel） ----------
     private func buildConn() {
         connView.wantsLayer = true
-        connView.layer?.hbBg = "page"
-        // head：os tile + name + "SFTP · SSH addr:port" + 隐藏日志
+        connView.layer?.hbBg = "card"
+        // head：os tile + name + sub + 隐藏日志（居中 max 430）
         let head = NSView()
         head.translatesAutoresizingMaskIntoConstraints = false
         connView.addSubview(head)
         connHead.append(head)
+        let hb = HBtn(L("隐藏日志"), style: .gray, sm: true)
+        hb.target = self
+        hb.action = #selector(toggleLog)
+        hb.translatesAutoresizingMaskIntoConstraints = false
+        hb.setAccessibilityIdentifier("sftp-hidelog-\(side)")
+        hideLogBtn = hb
+        head.addSubview(hb)
+        sizeBtn(hb, sm: true)
         NSLayoutConstraint.activate([
             head.topAnchor.constraint(equalTo: connView.topAnchor,
-                                      constant: 10),
-            head.leadingAnchor.constraint(equalTo: connView.leadingAnchor,
-                                          constant: 14),
-            head.trailingAnchor.constraint(equalTo: connView.trailingAnchor,
-                                           constant: -14),
+                                      constant: 40),
+            head.centerXAnchor.constraint(equalTo: connView.centerXAnchor),
             head.heightAnchor.constraint(equalToConstant: 34),
+            hb.trailingAnchor.constraint(equalTo: head.trailingAnchor),
+            hb.centerYAnchor.constraint(equalTo: head.centerYAnchor),
         ])
-        // 3 节点
-        let nodesRow = NSStackView()
-        nodesRow.orientation = .horizontal
-        nodesRow.spacing = 4
-        nodesRow.translatesAutoresizingMaskIntoConstraints = false
-        connView.addSubview(nodesRow)
-        let nodeLabels = [L("连接"), L("握手"), L("SFTP")]
-        for i in 0..<3 {
-            let n = NSTextField(labelWithString: "○ " + nodeLabels[i])
-            n.font = .systemFont(ofSize: 11)
-            n.textColor = .secondaryLabelColor
-            nodes.append(n)
-            nodesRow.addArrangedSubview(n)
-            if i < 2 {
-                let bar = NSView()
-                bar.wantsLayer = true
-                bar.layer?.hbBg = "line"
-                bar.translatesAutoresizingMaskIntoConstraints = false
-                bar.heightAnchor.constraint(equalToConstant: 2).isActive = true
-                bar.widthAnchor.constraint(greaterThanOrEqualToConstant: 20)
-                    .isActive = true
-                bars.append(bar)
-                nodesRow.addArrangedSubview(bar)
-            }
-        }
-        NSLayoutConstraint.activate([
-            nodesRow.topAnchor.constraint(equalTo: head.bottomAnchor,
-                                          constant: 8),
-            nodesRow.leadingAnchor.constraint(
-                equalTo: connView.leadingAnchor, constant: 16),
-        ])
-        // log
+        pinCenterWidth(head, in: connView)
+        // log：灰底圆角盒（prototype connect-log）
+        let wrap = NSView()
+        wrap.wantsLayer = true
+        wrap.layer?.hbBg = "subtle"
+        wrap.layer?.cornerRadius = 10
+        wrap.translatesAutoresizingMaskIntoConstraints = false
+        connView.addSubview(wrap)
+        logWrap = wrap
         let scr = NSScrollView()
         scr.translatesAutoresizingMaskIntoConstraints = false
-        scr.hasVerticalScroller = true
-        scr.wantsLayer = true
-        scr.layer?.hbBg = "card"
-        scr.layer?.cornerRadius = 7
-        scr.layer?.borderWidth = 1
-        scr.layer?.hbBorder = "line"
-        connView.addSubview(scr)
+        scr.hasVerticalScroller = false
+        scr.drawsBackground = false
+        scr.contentView.drawsBackground = false
+        scr.scrollerStyle = .overlay
+        wrap.addSubview(scr)
         logScroll = scr
         let lb = FlippedStack()
         lb.orientation = .vertical
-        lb.spacing = 3
-        lb.edgeInsets = NSEdgeInsets(top: 8, left: 10,
-                                     bottom: 8, right: 10)
+        lb.alignment = .leading
+        lb.spacing = 6
+        lb.edgeInsets = NSEdgeInsets(top: 16, left: 18,
+                                     bottom: 16, right: 18)
         lb.translatesAutoresizingMaskIntoConstraints = false
         scr.documentView = lb
         logBox = lb
+        let top = wrap.topAnchor.constraint(equalTo: head.bottomAnchor,
+                                            constant: 30)
+        let h = wrap.heightAnchor.constraint(equalToConstant: 200)
+        logTop = top
+        logHeight = h
         NSLayoutConstraint.activate([
-            scr.topAnchor.constraint(equalTo: nodesRow.bottomAnchor,
-                                     constant: 10),
-            scr.leadingAnchor.constraint(
-                equalTo: connView.leadingAnchor, constant: 14),
-            scr.trailingAnchor.constraint(
-                equalTo: connView.trailingAnchor, constant: -14),
+            top, h,
+            wrap.centerXAnchor.constraint(equalTo: connView.centerXAnchor),
+            scr.leadingAnchor.constraint(equalTo: wrap.leadingAnchor),
+            scr.trailingAnchor.constraint(equalTo: wrap.trailingAnchor),
+            scr.topAnchor.constraint(equalTo: wrap.topAnchor),
+            scr.bottomAnchor.constraint(equalTo: wrap.bottomAnchor),
             lb.leadingAnchor.constraint(equalTo: scr.leadingAnchor),
             lb.trailingAnchor.constraint(equalTo: scr.trailingAnchor),
             lb.topAnchor.constraint(equalTo: scr.topAnchor),
             lb.widthAnchor.constraint(equalTo: scr.widthAnchor),
         ])
-        // foot：隐藏日志 | 关闭 | 重新开始
+        pinCenterWidth(wrap, in: connView)
+        // 按钮行：关闭 …（编辑主机）… 重新开始
         let foot = NSView()
         foot.translatesAutoresizingMaskIntoConstraints = false
         connView.addSubview(foot)
-        let hb = NSButton(title: L("隐藏日志"), target: self,
-                          action: #selector(toggleLog))
-        hb.bezelStyle = .rounded
-        hb.font = .systemFont(ofSize: 12)
-        hb.translatesAutoresizingMaskIntoConstraints = false
-        hideLogBtn = hb
-        foot.addSubview(hb)
-        let cb = NSButton(title: L("关闭"), target: self,
-                          action: #selector(connClose))
-        cb.bezelStyle = .rounded
-        cb.font = .systemFont(ofSize: 12)
+        let cb = HBtn(L("关闭"), style: .gray)
+        cb.target = self
+        cb.action = #selector(connClose)
         cb.translatesAutoresizingMaskIntoConstraints = false
         cb.setAccessibilityIdentifier("sftp-close-\(side)")
         foot.addSubview(cb)
-        let rb = NSButton(title: L("重新开始"), target: self,
-                          action: #selector(connRetry))
-        rb.bezelStyle = .rounded
-        rb.font = .systemFont(ofSize: 12)
+        sizeBtn(cb, sm: false)
+        let eb = HBtn(L("编辑主机"), style: .gray)
+        eb.target = self
+        eb.action = #selector(editHost)
+        eb.translatesAutoresizingMaskIntoConstraints = false
+        eb.isHidden = true
+        editBtn = eb
+        foot.addSubview(eb)
+        sizeBtn(eb, sm: false)
+        let rb = HBtn(L("重新开始"), style: .primary)
+        rb.target = self
+        rb.action = #selector(connRetry)
         rb.translatesAutoresizingMaskIntoConstraints = false
         rb.setAccessibilityIdentifier("sftp-retry-\(side)")
         foot.addSubview(rb)
+        sizeBtn(rb, sm: false)
         NSLayoutConstraint.activate([
             foot.topAnchor.constraint(equalTo: scr.bottomAnchor,
-                                      constant: 10),
-            foot.leadingAnchor.constraint(
-                equalTo: connView.leadingAnchor, constant: 14),
-            foot.trailingAnchor.constraint(
-                equalTo: connView.trailingAnchor, constant: -14),
+                                      constant: 18),
+            foot.centerXAnchor.constraint(equalTo: connView.centerXAnchor),
+            foot.heightAnchor.constraint(equalToConstant: 32),
             foot.bottomAnchor.constraint(
                 lessThanOrEqualTo: connView.bottomAnchor, constant: -12),
-            foot.heightAnchor.constraint(equalToConstant: 26),
-            hb.leadingAnchor.constraint(equalTo: foot.leadingAnchor),
-            hb.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
-            cb.trailingAnchor.constraint(equalTo: rb.leadingAnchor,
-                                         constant: -8),
+            cb.leadingAnchor.constraint(equalTo: foot.leadingAnchor),
             cb.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
+            eb.leadingAnchor.constraint(equalTo: cb.trailingAnchor,
+                                        constant: 9),
+            eb.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
             rb.trailingAnchor.constraint(equalTo: foot.trailingAnchor),
             rb.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
         ])
+        pinCenterWidth(foot, in: connView)
+    }
+    /// prototype max-width:430 居中列：宽 430，窄 pane 时随 pane 收缩。
+    private func pinCenterWidth(_ v: NSView, in parent: NSView) {
+        let w = v.widthAnchor.constraint(equalToConstant: 430)
+        w.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            w,
+            v.widthAnchor.constraint(lessThanOrEqualTo: parent.widthAnchor,
+                                     constant: -28),
+        ])
+    }
+    private func sizeBtn(_ b: HBtn, sm: Bool) {
+        b.widthAnchor.constraint(
+            equalToConstant: b.intrinsicContentSize.width + (sm ? 20 : 28))
+            .isActive = true
+        b.heightAnchor.constraint(equalToConstant: sm ? 26 : 32).isActive = true
     }
     private func connReset() {
-        errCard?.removeFromSuperview(); errCard = nil
+        hadError = false
+        editBtn?.isHidden = true
         logBox?.arrangedSubviews.forEach {
             logBox?.removeArrangedSubview($0); $0.removeFromSuperview()
         }
-        for (i, n) in nodes.enumerated() {
-            n.stringValue = "○ " + String(n.stringValue.dropFirst(2))
-            n.textColor = .secondaryLabelColor
-            _ = i
-        }
         logHidden = false
-        logScroll?.isHidden = false
-        hideLogBtn?.title = L("隐藏日志")
+        setLogHidden(false)
     }
-    private func stageNodes(_ idx: Int) {
-        // linux node_of：stage 0-1→node0, 2→node1, 3-4→node2
-        let cur = idx <= 1 ? 0 : (idx == 2 ? 1 : 2)
-        for i in 0..<3 {
-            if i < cur {
-                nodes[i].stringValue = "● " + String(nodes[i].stringValue.dropFirst(2))
-                nodes[i].hbText = "green"
-            } else if i == cur {
-                nodes[i].stringValue = "◐ " + String(nodes[i].stringValue.dropFirst(2))
-                nodes[i].hbText = "blue"
-            }
-        }
-        for i in 0..<2 {
-            let ii = i
-            bars[i].layer?.hbBgResolver = {
-                (ii < cur ? Theme.green : Theme.line).color.cgColor
-            }
-        }
+    private func setLogHidden(_ h: Bool) {
+        logScroll?.isHidden = h
+        logWrap?.isHidden = h
+        logTop?.constant = h ? 0 : 30
+        logHeight?.constant = h ? 0 : 200
+        hideLogBtn?.titleText = h ? L("显示日志") : L("隐藏日志")
     }
     @objc private func toggleLog() {
         logHidden.toggle()
-        logScroll?.isHidden = logHidden
-        hideLogBtn?.title = logHidden ? L("显示日志") : L("隐藏日志")
+        setLogHidden(logHidden)
     }
     @objc private func connClose() {
         teardownConn()
@@ -682,78 +676,10 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         pick(id)
     }
     private func connError(_ title: String, details: String?, code: Int) {
-        errCard?.removeFromSuperview()
-        let card = NSView()
-        card.wantsLayer = true
-        card.layer?.hbBg = "errBg"
-        card.layer?.hbBorder = "errLine"
-        card.layer?.borderWidth = 1
-        card.layer?.cornerRadius = 9
-        card.translatesAutoresizingMaskIntoConstraints = false
-        connView.addSubview(card)
-        let t = NSTextField(labelWithString: title)
-        t.font = .systemFont(ofSize: 13, weight: .bold)
-        t.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(t)
-        var y = t
-        if let d = details, !d.isEmpty {
-            let dl = NSTextField(wrappingLabelWithString: d)
-            dl.font = .systemFont(ofSize: 11.5)
-            dl.textColor = .secondaryLabelColor
-            dl.translatesAutoresizingMaskIntoConstraints = false
-            dl.maximumNumberOfLines = 3
-            card.addSubview(dl)
-            NSLayoutConstraint.activate([
-                dl.topAnchor.constraint(equalTo: y.bottomAnchor,
-                                        constant: 6),
-                dl.leadingAnchor.constraint(equalTo: card.leadingAnchor,
-                                            constant: 14),
-                dl.trailingAnchor.constraint(equalTo: card.trailingAnchor,
-                                             constant: -14),
-            ])
-            y = dl
-        }
-        let fb = NSView()
-        fb.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(fb)
-        let cb = NSButton(title: L("关闭"), target: self,
-                          action: #selector(connClose))
-        cb.bezelStyle = .rounded
-        let eb = NSButton(title: L("编辑主机"), target: self,
-                          action: #selector(editHost))
-        eb.bezelStyle = .rounded
-        let rb = NSButton(title: L("重新开始"), target: self,
-                          action: #selector(connRetry))
-        rb.bezelStyle = .rounded
-        rb.wantsLayer = true
-        rb.layer?.hbBg = "blue"
-        rb.contentTintColor = .white
-        for b in [cb, eb, rb] {
-            b.translatesAutoresizingMaskIntoConstraints = false
-            fb.addSubview(b)
-        }
-        NSLayoutConstraint.activate([
-            t.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
-            t.leadingAnchor.constraint(equalTo: card.leadingAnchor,
-                                       constant: 14),
-            fb.topAnchor.constraint(equalTo: y.bottomAnchor, constant: 10),
-            fb.leadingAnchor.constraint(equalTo: card.leadingAnchor,
-                                        constant: 14),
-            fb.trailingAnchor.constraint(equalTo: card.trailingAnchor,
-                                         constant: -14),
-            fb.bottomAnchor.constraint(equalTo: card.bottomAnchor,
-                                       constant: -12),
-            fb.heightAnchor.constraint(equalToConstant: 26),
-            cb.leadingAnchor.constraint(equalTo: fb.leadingAnchor),
-            eb.leadingAnchor.constraint(equalTo: cb.trailingAnchor,
-                                        constant: 8),
-            rb.trailingAnchor.constraint(equalTo: fb.trailingAnchor),
-            card.centerXAnchor.constraint(equalTo: connView.centerXAnchor),
-            card.widthAnchor.constraint(equalToConstant: 380),
-            card.centerYAnchor.constraint(
-                equalTo: connView.centerYAnchor, constant: 40),
-        ])
-        errCard = card
+        hadError = true
+        editBtn?.isHidden = false
+        appendLog(title.isEmpty ? L("连接失败") : title, err: true)
+        if let d = details, !d.isEmpty { appendLog(d, err: true) }
     }
     @objc private func editHost() {
         guard let id = connHostId else { return }
@@ -762,17 +688,21 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
 
     // ---------- ConnDelegate ----------
     func conn(_ c: ConnCtl, stage idx: Int, line: String, mark: Character) {
+        appendLog(line, err: mark == "e")
+    }
+    private func appendLog(_ line: String, err: Bool) {
         let row = NSStackView()
         row.orientation = .horizontal
         row.spacing = 6
-        let ic = NSImageView(image: hbIcon(mark == "e" ? "x" : "user",
+        let ic = NSImageView(image: hbIcon(err ? "x" : "user",
                             size: 11,
-                            tint: mark == "e" ? Theme.red.color
-                                              : Theme.text.color))
-        let l = NSTextField(labelWithString: line)
-        l.font = .systemFont(ofSize: 11.5)
-        if mark == "e" { l.hbText = "red" }
-        l.lineBreakMode = .byTruncatingTail
+                            tint: err ? Theme.red.color
+                                      : Theme.dyn("text2")))
+        let l = NSTextField(wrappingLabelWithString: line)
+        l.font = .systemFont(ofSize: 12.5)
+        l.hbText = err ? "red" : "text"
+        l.maximumNumberOfLines = 4
+        l.preferredMaxLayoutWidth = 370
         row.addArrangedSubview(ic); row.addArrangedSubview(l)
         logBox?.addArrangedSubview(row)
         if let sv = logScroll {
@@ -780,7 +710,6 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
             sv.documentView?.scroll(
                 NSPoint(x: 0, y: sv.documentView!.bounds.maxY))
         }
-        if idx >= 0 { stageNodes(idx) }
     }
     func connSession(_ c: ConnCtl, _ s: Session) {
         sess = s
@@ -889,7 +818,8 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
     }
     private func setConnHead(name: String, sub: String) {
         let head = connHead[0]
-        head.subviews.forEach { $0.removeFromSuperview() }
+        head.subviews.filter { $0 !== hideLogBtn }
+            .forEach { $0.removeFromSuperview() }
         let tile = Palette.osTileView(osKey, size: 30)
         tile.translatesAutoresizingMaskIntoConstraints = false
         head.addSubview(tile)
@@ -900,8 +830,8 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         let t = NSTextField(labelWithString: name)
         t.font = .systemFont(ofSize: 13, weight: .bold)
         let s = NSTextField(labelWithString: sub)
-        s.font = .systemFont(ofSize: 11)
-        s.textColor = .secondaryLabelColor
+        s.font = .systemFont(ofSize: 12)
+        s.hbText = "text3"
         col.addArrangedSubview(t); col.addArrangedSubview(s)
         col.translatesAutoresizingMaskIntoConstraints = false
         head.addSubview(col)
@@ -909,14 +839,16 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
             tile.leadingAnchor.constraint(equalTo: head.leadingAnchor),
             tile.centerYAnchor.constraint(equalTo: head.centerYAnchor),
             col.leadingAnchor.constraint(equalTo: tile.trailingAnchor,
-                                         constant: 8),
+                                         constant: 12),
             col.centerYAnchor.constraint(equalTo: head.centerYAnchor),
         ])
     }
 
     // ---------- browse 构建 ----------
     private func buildBrowse() {
-        // head：tile + title + Filter + Actions▾
+        browseView.wantsLayer = true
+        browseView.layer?.hbBg = "card"
+        // head：tile + title + Filter + Actions▾（prototype sftp-head）
         let head = NSView()
         head.translatesAutoresizingMaskIntoConstraints = false
         browseView.addSubview(head)
@@ -929,54 +861,32 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         t.translatesAutoresizingMaskIntoConstraints = false
         titleL = t
         head.addSubview(t)
-        let fb = NSButton(title: " " + L("Filter"), target: self,
-                          action: #selector(toggleFilter))
-        fb.bezelStyle = .rounded
-        fb.image = hbIcon("search", size: 12, tint: Theme.dyn("text"))
-        fb.imagePosition = .imageLeading
-        fb.font = .systemFont(ofSize: 11.5)
+        let fb = HBtn(L("Filter"), style: .ghost, sm: true, icon: "search")
+        fb.target = self
+        fb.action = #selector(toggleFilter)
         fb.translatesAutoresizingMaskIntoConstraints = false
         fb.setAccessibilityIdentifier("sftp-filter-\(side)")
         head.addSubview(fb)
-        let mb = NSPopUpButton()
-        mb.pullsDown = true
-        mb.bezelStyle = .rounded
-        mb.font = .systemFont(ofSize: 11.5)
+        sizeBtn(fb, sm: true)
+        let mb = HBtn(L("Actions ▾"), style: .ghost, sm: true)
+        mb.target = self
+        mb.action = #selector(showActions(_:))
         mb.translatesAutoresizingMaskIntoConstraints = false
         mb.setAccessibilityIdentifier("sftp-actions-\(side)")
-        let m = NSMenu()
-        m.addItem(withTitle: L("Actions"), action: nil,
-                  keyEquivalent: "")
-        m.items[0].isEnabled = false
-        for (tt, sel) in [
-            (L("打开"), #selector(actOpen)),
-            (L("复制到对侧栏"), #selector(actCopy)),
-            (L("重命名…"), #selector(actRename)),
-            (L("删除"), #selector(actDelete)),
-            (L("新建文件夹…"), #selector(actMkdir)),
-            (L("修改权限…"), #selector(actChmod)),
-            (L("刷新"), #selector(actRefresh)),
-            (L("全选"), #selector(actSelectAll)),
-            (L("显示隐藏文件"), #selector(actHidden)),
-        ] as [(String, Selector)] {
-            let i = m.addItem(withTitle: tt, action: sel,
-                              keyEquivalent: "")
-            i.target = self
-        }
-        mb.menu = m
         head.addSubview(mb)
+        sizeBtn(mb, sm: true)
         NSLayoutConstraint.activate([
             head.topAnchor.constraint(equalTo: browseView.topAnchor,
-                                      constant: 8),
+                                      constant: 12),
             head.leadingAnchor.constraint(equalTo: browseView.leadingAnchor,
-                                          constant: 14),
+                                          constant: 16),
             head.trailingAnchor.constraint(
-                equalTo: browseView.trailingAnchor, constant: -14),
+                equalTo: browseView.trailingAnchor, constant: -16),
             head.heightAnchor.constraint(equalToConstant: 30),
             tile.leadingAnchor.constraint(equalTo: head.leadingAnchor),
             tile.centerYAnchor.constraint(equalTo: head.centerYAnchor),
             t.leadingAnchor.constraint(equalTo: tile.trailingAnchor,
-                                       constant: 8),
+                                       constant: 10),
             t.centerYAnchor.constraint(equalTo: head.centerYAnchor),
             mb.trailingAnchor.constraint(equalTo: head.trailingAnchor),
             mb.centerYAnchor.constraint(equalTo: head.centerYAnchor),
@@ -1008,43 +918,45 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
             filterEntry.centerYAnchor.constraint(equalTo: fr.centerYAnchor),
         ])
         fr.isHidden = true
-        // nav row：‹ › ↑ + crumbs
+        // nav row：‹ › ↑ + crumbs（prototype navbtn / crumb）
         let nav = NSStackView()
         nav.orientation = .horizontal
-        nav.spacing = 3
+        nav.spacing = 6
         nav.translatesAutoresizingMaskIntoConstraints = false
         browseView.addSubview(nav)
-        func navBtn(_ ic: String, _ sel: Selector, _ id: String) -> NSButton {
-            let b = NSButton(title: "", target: self, action: sel)
-            b.bezelStyle = .rounded
-            b.image = hbIcon(ic, size: 12, tint: Theme.dyn("text"))
+        func navBtn(_ glyph: String, _ sel: Selector, _ id: String) -> NSButton {
+            let b = NavGlyph(glyph)
+            b.target = self
+            b.action = sel
             b.translatesAutoresizingMaskIntoConstraints = false
-            b.widthAnchor.constraint(equalToConstant: 24).isActive = true
+            b.widthAnchor.constraint(equalToConstant: 26).isActive = true
+            b.heightAnchor.constraint(equalToConstant: 24).isActive = true
             b.setAccessibilityIdentifier(id)
             nav.addArrangedSubview(b)
             return b
         }
-        backB = navBtn("back", #selector(goBack), "sftp-back-\(side)")
-        fwdB = navBtn("fwd", #selector(goFwd), "sftp-fwd-\(side)")
-        upB = navBtn("up", #selector(goUp), "sftp-up-\(side)")
+        backB = navBtn("‹", #selector(goBack), "sftp-back-\(side)")
+        fwdB = navBtn("›", #selector(goFwd), "sftp-fwd-\(side)")
+        upB = navBtn("↑", #selector(goUp), "sftp-up-\(side)")
         let cb = NSStackView()
         cb.orientation = .horizontal
-        cb.spacing = 2
+        cb.spacing = 6
         cb.translatesAutoresizingMaskIntoConstraints = false
         crumbsBox = cb
         nav.addArrangedSubview(cb)
         NSLayoutConstraint.activate([
             nav.topAnchor.constraint(equalTo: fr.bottomAnchor, constant: 4),
             nav.leadingAnchor.constraint(equalTo: browseView.leadingAnchor,
-                                         constant: 10),
+                                         constant: 16),
             nav.trailingAnchor.constraint(
-                lessThanOrEqualTo: browseView.trailingAnchor, constant: -10),
-            nav.heightAnchor.constraint(equalToConstant: 24),
+                lessThanOrEqualTo: browseView.trailingAnchor, constant: -16),
+            nav.heightAnchor.constraint(equalToConstant: 26),
         ])
         // table
         let scr = NSScrollView()
         scr.translatesAutoresizingMaskIntoConstraints = false
         scr.hasVerticalScroller = true
+        scr.scrollerStyle = .overlay
         tableScroll = scr
         let cols: [(String, String, CGFloat, Bool)] = [
             ("name", L("Name"), 220, true),
@@ -1066,11 +978,13 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         // name 列随宽度伸展（linux expand=TRUE）
         table.columnAutoresizingStyle =
             .firstColumnOnlyAutoresizingStyle
-        table.headerView = NSTableHeaderView()
+        table.headerView = SftpHeaderView()
         table.dataSource = self
         table.delegate = self
-        table.rowHeight = 22
-        table.intercellSpacing = NSSize(width: 12, height: 0)
+        table.rowHeight = 33
+        table.intercellSpacing = NSSize(width: 28, height: 0)
+        table.selectionHighlightStyle = .none
+        table.backgroundColor = Theme.dyn("card")
         table.allowsMultipleSelection = true
         table.allowsEmptySelection = true
         table.doubleAction = #selector(rowActivated)
@@ -1081,12 +995,20 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         table.setDraggingSourceOperationMask(.copy, forLocal: true)
         scr.documentView = table
         browseView.addSubview(scr)
+        let el = NSTextField(labelWithString: L("空目录 / 无匹配文件"))
+        el.font = .systemFont(ofSize: 12.5)
+        el.hbText = "text3"
+        el.translatesAutoresizingMaskIntoConstraints = false
+        emptyLbl = el
+        scr.addSubview(el)
         NSLayoutConstraint.activate([
-            scr.topAnchor.constraint(equalTo: nav.bottomAnchor, constant: 4),
+            scr.topAnchor.constraint(equalTo: nav.bottomAnchor, constant: 10),
             scr.leadingAnchor.constraint(equalTo: browseView.leadingAnchor),
             scr.trailingAnchor.constraint(
                 equalTo: browseView.trailingAnchor),
             scr.bottomAnchor.constraint(equalTo: browseView.bottomAnchor),
+            el.centerXAnchor.constraint(equalTo: scr.centerXAnchor),
+            el.topAnchor.constraint(equalTo: scr.topAnchor, constant: 40),
         ])
         // ctx 菜单
         let cm = NSMenu()
@@ -1137,6 +1059,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
     /// 销毁重建（debug ~5ms/行）；行数变化通知 + 仅重载可见行即可，
     /// 离屏行滚动到视野时由 viewFor 惰性生成。
     private func reloadVisible() {
+        emptyLbl?.isHidden = !shown.isEmpty
         table.noteNumberOfRowsChanged()
         let r = table.rows(in: table.visibleRect)
         guard r.length > 0, let range = Range(r) else {
@@ -1232,18 +1155,40 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         for (i, c) in SftpKit.crumbs(cwd ?? "/").enumerated() {
             if i > 0 {
                 let sep = NSTextField(labelWithString: "›")
-                sep.textColor = .secondaryLabelColor
+                sep.font = .systemFont(ofSize: 12.5)
+                sep.hbText = "text3"
                 crumbsBox.addArrangedSubview(sep)
             }
-            let b = NSButton(title: c.label, target: self,
-                             action: #selector(crumb(_:)))
-            b.bezelStyle = .inline
-            b.font = .systemFont(ofSize: 11.5)
+            let b = CrumbChip(c.label)
+            b.target = self
+            b.action = #selector(crumb(_:))
             b.setAccessibilityIdentifier("sftp-crumb-\(side)")
             b.identifier = .init(c.path)
+            b.translatesAutoresizingMaskIntoConstraints = false
+            b.widthAnchor.constraint(
+                equalToConstant: b.intrinsicContentSize.width + 20)
+                .isActive = true
+            b.heightAnchor.constraint(equalToConstant: 24).isActive = true
             crumbsBox.addArrangedSubview(b)
         }
-        titleL?.stringValue = isLocal ? L("Local") : hname
+        titleL?.stringValue = isLocal
+            ? "Local · \(cwd ?? NSHomeDirectory())" : hname
+        syncHeadTile()
+    }
+    private func syncHeadTile() {
+        guard let old = headTile, let head = old.superview,
+              let tl = titleL else { return }
+        let tile = Palette.osTileView(isLocal ? "local" : osKey, size: 30)
+        tile.translatesAutoresizingMaskIntoConstraints = false
+        head.addSubview(tile)
+        NSLayoutConstraint.activate([
+            tile.leadingAnchor.constraint(equalTo: head.leadingAnchor),
+            tile.centerYAnchor.constraint(equalTo: head.centerYAnchor),
+            tl.leadingAnchor.constraint(equalTo: tile.trailingAnchor,
+                                        constant: 10),
+        ])
+        old.removeFromSuperview()
+        headTile = tile
     }
     func browseTo(_ path: String, nav: Bool) {
         if nav, let c = cwd { back.append(c); fwd.removeAll() }
@@ -1269,6 +1214,120 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         guard let t = fwd.popLast() else { return }
         if let c = cwd { back.append(c) }
         cwd = t; navSync(); refresh()
+    }
+    // ---------- Actions 下拉（prototype .menu） ----------
+    private var menuPanel: NSView?
+    private var menuMonitor: Any?
+    @objc private func showActions(_ b: NSButton) {
+        closeActions()
+        guard let cv = container.window?.contentView else { return }
+        let hasSel = !selItems().isEmpty
+        let rows: [(String, Selector?, Bool, Bool)] = [
+            (L("打开"), #selector(actOpen), hasSel, false),
+            (L("复制到对侧栏"), #selector(actCopy), hasSel, false),
+            (L("重命名…"), #selector(actRename), hasSel, false),
+            (L("删除"), #selector(actDelete), hasSel, true),
+            ("", nil, false, false),
+            (L("刷新"), #selector(actRefresh), true, false),
+            (L("新建文件夹…"), #selector(actMkdir), true, false),
+            (showHidden ? L("不显示隐藏文件") : L("显示隐藏文件"),
+             #selector(actHidden), true, false),
+            (L("修改权限…"), #selector(actChmod), hasSel, false),
+            (L("全选"), #selector(actSelectAll), true, false),
+            ("", nil, false, false),
+            (L("关闭此栏"), #selector(actClosePane), true, true),
+        ]
+        let panel = NSView()
+        panel.wantsLayer = true
+        panel.layer?.hbBg = "card"
+        panel.layer?.cornerRadius = 10
+        panel.layer?.shadowColor = Theme.RGBA(0x141e37).color.cgColor
+        panel.layer?.shadowOpacity = 0.22
+        panel.layer?.shadowRadius = 20
+        panel.layer?.shadowOffset = NSSize(width: 0, height: -6)
+        let stack = FlippedStack()
+        stack.orientation = .vertical
+        stack.spacing = 0
+        stack.edgeInsets = NSEdgeInsets(top: 6, left: 6,
+                                      bottom: 6, right: 6)
+        panel.addSubview(stack)
+        var h: CGFloat = 12
+        for (i, r) in rows.enumerated() {
+            if r.1 == nil {
+                let sep = NSView()
+                sep.translatesAutoresizingMaskIntoConstraints = false
+                stack.addArrangedSubview(sep)
+                sep.heightAnchor.constraint(equalToConstant: 11).isActive = true
+                sep.leadingAnchor.constraint(
+                    equalTo: stack.leadingAnchor).isActive = true
+                sep.trailingAnchor.constraint(
+                    equalTo: stack.trailingAnchor).isActive = true
+                let ln = NSView()
+                ln.wantsLayer = true
+                ln.layer?.hbBg = "line"
+                ln.translatesAutoresizingMaskIntoConstraints = false
+                sep.addSubview(ln)
+                NSLayoutConstraint.activate([
+                    ln.centerYAnchor.constraint(equalTo: sep.centerYAnchor),
+                    ln.leadingAnchor.constraint(
+                        equalTo: sep.leadingAnchor, constant: 8),
+                    ln.trailingAnchor.constraint(
+                        equalTo: sep.trailingAnchor, constant: -8),
+                    ln.heightAnchor.constraint(equalToConstant: 1),
+                ])
+                h += 11
+                continue
+            }
+            let it = MenuItem(r.0, red: r.3, enabled: r.2)
+            it.fire = { [weak self] in
+                self?.closeActions()
+                if let s = r.1 { self?.perform(s) }
+            }
+            it.setAccessibilityIdentifier("sftp-menuitem-\(side)-\(i)")
+            it.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(it)
+            it.widthAnchor.constraint(equalToConstant: 198).isActive = true
+            it.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            h += 30
+        }
+        panel.frame = NSRect(x: 0, y: 0, width: 210, height: h)
+        stack.frame = panel.bounds
+        stack.autoresizingMask = [.width, .height]
+        let r = b.convert(b.bounds, to: cv)
+        var x = r.maxX - 210
+        x = max(8, min(x, cv.bounds.width - 218))
+        let below = cv.isFlipped ? r.maxY : cv.bounds.height - r.minY
+        let top = max(8, min(below + 4, cv.bounds.height - h - 8))
+        let oy = cv.isFlipped ? top : cv.bounds.height - top - h
+        panel.frame.origin = NSPoint(x: x, y: oy)
+        panel.setAccessibilityIdentifier("sftp-menu-\(side)")
+        cv.addSubview(panel)
+        menuPanel = panel
+        menuMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .keyDown]) {
+            [weak self] ev in
+            guard let self, let p = self.menuPanel else { return ev }
+            if ev.type == .keyDown {
+                if ev.keyCode == 53 { self.closeActions(); return nil }
+                return ev
+            }
+            let pt = p.convert(ev.locationInWindow, from: nil)
+            if !p.bounds.contains(pt) { self.closeActions() }
+            return ev
+        }
+    }
+    func closeActions() {
+        menuPanel?.removeFromSuperview()
+        menuPanel = nil
+        if let m = menuMonitor {
+            NSEvent.removeMonitor(m)
+            menuMonitor = nil
+        }
+    }
+    @objc private func actClosePane() {
+        closeActions()
+        teardownConn()
+        setState(.select)
     }
     @objc private func toggleFilter() {
         let on = filterRow.isHidden
@@ -1337,7 +1396,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
         if let i = rowIcons[k] { return i }
         let i = hbIcon(dir ? "folder" : link ? "link" : "file",
                        size: 13,
-                       tint: dir ? Theme.blue.color : Theme.text.color)
+                       tint: dir ? Theme.dyn("blue") : Theme.dyn("text"))
         rowIcons[k] = i
         return i
     }
@@ -1351,10 +1410,10 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
                  as? NSTextField) ?? NSTextField(labelWithString: "")
         l.identifier = id
         l.stringValue = s
-        l.textColor = dim ? .secondaryLabelColor : .labelColor
-        l.font = mono ? .monospacedSystemFont(ofSize: 11,
+        l.hbText = dim ? "text2" : "text"
+        l.font = mono ? .monospacedSystemFont(ofSize: 11.5,
                                               weight: .regular)
-                      : .systemFont(ofSize: NSFont.systemFontSize)
+                      : .systemFont(ofSize: 12.5)
         return l
     }
     func numberOfRows(in t: NSTableView) -> Int { shown.count }
@@ -1389,6 +1448,14 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
                             dim: true, mono: true)
         default: return nil
         }
+    }
+    func tableView(_ t: NSTableView, rowViewForRow row: Int)
+        -> NSTableRowView? {
+        let id = NSUserInterfaceItemIdentifier("sftp-row")
+        let rv = (t.makeView(withIdentifier: id, owner: self)
+                  as? SftpRowView) ?? SftpRowView()
+        rv.identifier = id
+        return rv
     }
     func tableView(_ t: NSTableView,
                    sortDescriptorsDidChange o: [NSSortDescriptor]) {
@@ -1638,7 +1705,7 @@ final class SftpPane: NSObject, ConnDelegate, NSTableViewDataSource,
              + "hidden=\(showHidden) sel=\(sel.joined(separator: ",")) "
              + "filter='\(filterEntry.stringValue)'"
              + (isFilterFocused ? " foc=filter" : "")
-             + (errCard != nil ? " errcard" : "")
+             + (hadError ? " errcard" : "")
     }
 }
 
@@ -1654,6 +1721,253 @@ extension SftpKit.SortKey {
     }
 }
 
+/// prototype .menu button：左对齐 13px，radius 7 hover，red/disabled 变体。
+private final class MenuItem: NSButton {
+    var fire: (() -> Void)?
+    private var hovered = false
+    private let enabled_: Bool
+    init(_ title: String, red: Bool, enabled: Bool) {
+        enabled_ = enabled
+        super.init(frame: .zero)
+        self.title = ""
+        isBordered = false
+        isEnabled = enabled
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        let l = NSTextField(labelWithString: title)
+        l.font = .systemFont(ofSize: 13)
+        l.hbText = enabled ? (red ? "red" : "text") : "text3"
+        l.lineBreakMode = .byTruncatingTail
+        l.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(l)
+        NSLayoutConstraint.activate([
+            l.leadingAnchor.constraint(equalTo: leadingAnchor,
+                                       constant: 12),
+            l.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor,
+                                        constant: -12),
+            l.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        target = self
+        action = #selector(itemFire)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited,
+                                   .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+        restyle()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    @objc private func itemFire() { fire?() }
+    private func restyle() {
+        layer?.hbBgResolver = { [weak self] in
+            guard let self, self.hovered, self.enabled_ else {
+                return Theme.RGBA(0, 0).color.cgColor
+            }
+            return (Theme.isDark ? Theme.hover : Theme.RGBA(0xeef2f6))
+                .color.cgColor
+        }
+    }
+    override func mouseEntered(with e: NSEvent) {
+        hovered = true; restyle()
+    }
+    override func mouseExited(with e: NSEvent) {
+        hovered = false; restyle()
+    }
+}
+
+/// prototype .select-host-item：radius 10，hover 浅灰底。
+private final class HostItem: NSButton {
+    private var hovered = false
+    init() {
+        super.init(frame: .zero)
+        title = ""
+        isBordered = false
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited,
+                                   .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+        restyle()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    private func restyle() {
+        layer?.hbBgResolver = { [weak self] in
+            guard let self, self.hovered else {
+                return Theme.RGBA(0, 0).color.cgColor
+            }
+            return (Theme.isDark ? Theme.hover : Theme.RGBA(0xe9eef4))
+                .color.cgColor
+        }
+    }
+    override func mouseEntered(with e: NSEvent) {
+        hovered = true; restyle()
+    }
+    override func mouseExited(with e: NSEvent) {
+        hovered = false; restyle()
+    }
+}
+
+/// prototype .navbtn：无底glyph按钮，hover 灰底，禁用半透明。
+private final class NavGlyph: NSButton {
+    private var hovered = false
+    init(_ glyph: String) {
+        super.init(frame: .zero)
+        title = glyph
+        isBordered = false
+        font = .systemFont(ofSize: 15)
+        contentTintColor = Theme.dyn("text2")
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited,
+                                   .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+        restyle()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var isEnabled: Bool {
+        didSet { alphaValue = isEnabled ? 1 : 0.45 }
+    }
+    private func restyle() {
+        layer?.hbBgResolver = { [weak self] in
+            (self?.hovered == true ? Theme.btn : Theme.RGBA(0, 0))
+                .color.cgColor
+        }
+    }
+    override func mouseEntered(with e: NSEvent) {
+        hovered = true; restyle()
+    }
+    override func mouseExited(with e: NSEvent) {
+        hovered = false; restyle()
+    }
+}
+
+/// prototype .crumb：灰底圆角chip + folder 图标，hover 加深。
+private final class CrumbChip: NSButton {
+    private var hovered = false
+    init(_ label: String) {
+        super.init(frame: .zero)
+        isBordered = false
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        let s = NSMutableAttributedString()
+        let att = NSTextAttachment()
+        att.image = hbIcon("folder", size: 12, tint: Theme.dyn("text2"))
+        let m = NSMutableAttributedString(attachment: att)
+        m.addAttribute(.baselineOffset, value: -2,
+                       range: NSRange(location: 0, length: m.length))
+        s.append(m)
+        s.append(NSAttributedString(string: " " + label))
+        s.addAttributes([.font: NSFont.systemFont(ofSize: 12.5),
+                         .foregroundColor: Theme.dyn("text2")],
+                        range: NSRange(location: 0, length: s.length))
+        attributedTitle = s
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited,
+                                   .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+        restyle()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    private func restyle() {
+        layer?.hbBgResolver = { [weak self] in
+            guard let self else { return nil }
+            if Theme.isDark {
+                return (self.hovered ? Theme.btnHover : Theme.chip)
+                    .color.cgColor
+            }
+            return Theme.RGBA(self.hovered ? 0xdde3ea : 0xe7ecf1)
+                .color.cgColor
+        }
+    }
+    override func mouseEntered(with e: NSEvent) {
+        hovered = true; restyle()
+    }
+    override func mouseExited(with e: NSEvent) {
+        hovered = false; restyle()
+    }
+}
+
+/// prototype .filetable tr：hover / selected 底色 + 行尾细分隔线。
+private final class SftpRowView: NSTableRowView {
+    private var hovered = false
+    override var isFlipped: Bool { true }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited,
+                                   .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        hovered = false
+        needsDisplay = true
+    }
+    override func mouseEntered(with e: NSEvent) {
+        hovered = true; needsDisplay = true
+    }
+    override func mouseExited(with e: NSEvent) {
+        hovered = false; needsDisplay = true
+    }
+    override var isSelected: Bool { didSet { needsDisplay = true } }
+    override func drawBackground(in dirtyRect: NSRect) {
+        let c: Theme.RGBA?
+        if isSelected {
+            c = Theme.isDark ? Theme.sel : Theme.RGBA(0xddebfc)
+        } else if hovered {
+            c = Theme.isDark ? Theme.rowHover : Theme.RGBA(0xeef4fb)
+        } else {
+            c = nil
+        }
+        if let c { c.color.setFill(); dirtyRect.fill() }
+        (Theme.isDark ? Theme.rowLine : Theme.RGBA(0xf0f3f6))
+            .color.setFill()
+        NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1)
+            .fill()
+    }
+    override func drawSelection(in dirtyRect: NSRect) {}
+}
+
+/// prototype .filetable th：浅灰底 + 上下描边，12px semibold text2。
+private final class SftpHeaderView: NSTableHeaderView {
+    override var isFlipped: Bool { true }
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 32)
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        (Theme.isDark ? Theme.tableHead : Theme.RGBA(0xf6f8fa))
+            .color.setFill()
+        bounds.fill()
+        Theme.line.color.setFill()
+        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
+        NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1)
+            .fill()
+        guard let tv = tableView else { return }
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: Theme.dyn("text2"),
+        ]
+        for (i, col) in tv.tableColumns.enumerated() {
+            let r = headerRect(ofColumn: i)
+            guard r.intersects(dirtyRect) else { continue }
+            let s = NSAttributedString(string: col.title, attributes: attrs)
+            let sz = s.size()
+            s.draw(at: NSPoint(x: r.minX + 14, y: r.midY - sz.height / 2))
+            if tv.highlightedTableColumn === col {
+                let asc = tv.sortDescriptors.first?.ascending ?? true
+                let g = NSAttributedString(
+                    string: asc ? " ▴" : " ▾",
+                    attributes: [.font: NSFont.systemFont(ofSize: 9),
+                                 .foregroundColor: Theme.dyn("text3")])
+                g.draw(at: NSPoint(x: r.minX + 14 + sz.width + 2,
+                                   y: r.midY - g.size().height / 2))
+            }
+        }
+    }
+}
+
 /// name 列复用 cell（stack：图标 + 截断标签；makeView 池化）。
 private final class NameCell: NSStackView {
     let ic = NSImageView()
@@ -1661,7 +1975,9 @@ private final class NameCell: NSStackView {
     init() {
         super.init(frame: .zero)
         orientation = .horizontal
-        spacing = 6
+        spacing = 8
+        l.font = .systemFont(ofSize: 12.5)
+        l.hbText = "text"
         l.lineBreakMode = .byTruncatingMiddle
         addArrangedSubview(ic)
         addArrangedSubview(l)
@@ -1745,10 +2061,20 @@ final class SftpView: NSView {
             panes.append(p)
             let wrap = NSView()
             wrap.translatesAutoresizingMaskIntoConstraints = false
-            if k == 1 {
-                wrap.wantsLayer = true
-                wrap.layer?.borderWidth = 1
-                wrap.layer?.hbBorder = "line"
+            if k == 0 {
+                let sep = NSView()
+                sep.wantsLayer = true
+                sep.layer?.hbBg = "line"
+                sep.translatesAutoresizingMaskIntoConstraints = false
+                wrap.addSubview(sep)
+                NSLayoutConstraint.activate([
+                    sep.trailingAnchor.constraint(
+                        equalTo: wrap.trailingAnchor),
+                    sep.topAnchor.constraint(equalTo: wrap.topAnchor),
+                    sep.bottomAnchor.constraint(
+                        equalTo: wrap.bottomAnchor),
+                    sep.widthAnchor.constraint(equalToConstant: 1),
+                ])
             }
             p.container.translatesAutoresizingMaskIntoConstraints = false
             wrap.addSubview(p.container)
@@ -2425,6 +2751,7 @@ final class SftpView: NSView {
             }
         }
     }
+    func closeMenus() { for p in panes { p.closeActions() } }
     /// dispose 对齐：未完成删除立即执行；RUN xfer 取消。
     func teardown() {
         for p in panes { p.teardownConn() }

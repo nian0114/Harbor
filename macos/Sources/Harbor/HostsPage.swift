@@ -1,6 +1,7 @@
 import AppKit
 import CHarbor
 import HarborKit
+import ObjectiveC
 
 /// 主机库：vault "host" 对象 ↔ HostRec。
 final class HostStore {
@@ -73,51 +74,261 @@ final class HostStore {
     deinit { objs.values.forEach { hb_obj_free($0) } }
 }
 
-/// OS → 卡片图标/底色（与 Linux os-tile 对应）。
+/// OS → 卡片图标/底色（prototype os-ico 五类）。
 func osTile(_ os: String) -> (icon: String, bg: Theme.RGBA) {
     switch os {
     case "ubuntu": return ("ubuntu", Theme.RGBA(0xe95420))
-    case "debian": return ("asterisk", Theme.RGBA(0xa81d33))
-    case "centos", "fedora", "rhel": return ("asterisk", Theme.RGBA(0x5b7ecb))
-    case "arch": return ("asterisk", Theme.RGBA(0x1793d1))
-    case "alpine": return ("asterisk", Theme.RGBA(0x0d597f))
-    case "macos", "darwin", "apple": return ("monitor", Theme.RGBA(0x555a63))
-    case "windows", "rdp": return ("win", Theme.RGBA(0x2f7cf6))
-    case "vnc": return ("monitor", Theme.RGBA(0x2f7cf6))
-    case "local": return ("terminal", Theme.RGBA(0x38404e))
-    // 未知/未探测 OS → 通用 server 灰砖
-    default: return ("server", Theme.RGBA(0x38404e))
+    case "local": return ("terminal", Theme.RGBA(0x3b4559))
+    case "vnc": return ("monitor", Theme.RGBA(0x3f8cff))
+    case "windows", "rdp": return ("win", Theme.RGBA(0x0f6cbd))
+    default: return ("asterisk", Theme.amber)
     }
 }
 
-/// 主机页（对齐 linux hb-hosts-view + prototype）：
-/// 顶栏搜索(⌘K)+连接；新建+导入导出；标签 chip 行；主机·N + 排序 + 卡片/列表。
+// MARK: - 通用小件（prototype .btn / .tag）
+
+/// prototype .btn：gray/primary/ghost/danger + sm，hover 换底。
+final class HBtn: NSButton {
+    enum Style { case gray, primary, ghost, danger }
+    var style: Style = .gray { didSet { restyle() } }
+    var sm = false { didSet { restyle() } }
+    var icon: String? { didSet { restyle() } }
+    var titleText = "" { didSet { restyle() } }
+    private var hovered = false
+
+    convenience init(_ title: String, style: Style = .gray,
+                     sm: Bool = false, icon: String? = nil) {
+        self.init(frame: .zero)
+        self.style = style; self.sm = sm
+        self.icon = icon; titleText = title
+        isBordered = false
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited,
+                                   .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+        restyle()
+    }
+    override func mouseEntered(with e: NSEvent) { hovered = true; restyle() }
+    override func mouseExited(with e: NSEvent) { hovered = false; restyle() }
+    private func restyle() {
+        let fg: NSColor
+        switch style {
+        case .primary: fg = .white
+        case .danger: fg = Theme.dyn("red")
+        default: fg = Theme.dyn("text")
+        }
+        layer?.hbBgResolver = { [weak self] in
+            guard let self else { return nil }
+            switch self.style {
+            case .primary:
+                return (self.hovered ? Theme.primaryHover : Theme.blue)
+                    .color.cgColor
+            case .danger: return Theme.dangerBg.color.cgColor
+            case .ghost:
+                return (self.hovered ? Theme.btn : Theme.RGBA(0, 0))
+                    .color.cgColor
+            case .gray:
+                return (self.hovered ? Theme.btnHover : Theme.btn)
+                    .color.cgColor
+            }
+        }
+        let font = NSFont.systemFont(ofSize: sm ? 12 : 13, weight: .medium)
+        let s = NSMutableAttributedString()
+        if let icon {
+            let att = NSTextAttachment()
+            att.image = hbIcon(icon, size: sm ? 12 : 13, tint: fg)
+            let m = NSMutableAttributedString(attachment: att)
+            m.addAttribute(.baselineOffset, value: -2,
+                           range: NSRange(location: 0, length: m.length))
+            s.append(m)
+            s.append(NSAttributedString(string: " "))
+        }
+        s.append(NSAttributedString(string: titleText))
+        s.addAttributes([.font: font, .foregroundColor: fg],
+                        range: NSRange(location: 0, length: s.length))
+        attributedTitle = s
+    }
+}
+
+/// prototype .tag：bluePill / greenPill 小标签。
+func hbTagLabel(_ t: String, green: Bool = false) -> NSTextField {
+    let l = NSTextField(labelWithString: t)
+    l.font = .systemFont(ofSize: 10.5, weight: .semibold)
+    l.hbText = green ? "greenPillFg" : "bluePillFg"
+    l.alignment = .center
+    l.wantsLayer = true
+    l.layer?.cornerRadius = 6
+    l.layer?.hbBg = green ? "greenPillBg" : "bluePillBg"
+    l.frame.size = NSSize(width: l.intrinsicContentSize.width + 14,
+                          height: 18)
+    return l
+}
+
+private var kHbTapKey: UInt8 = 0
+extension NSButton {
+    /// 闭包点击（表格行内按钮用）。
+    var onTap: (() -> Void)? {
+        get { objc_getAssociatedObject(self, &kHbTapKey) as? () -> Void }
+        set {
+            objc_setAssociatedObject(self, &kHbTapKey, newValue,
+                                     .OBJC_ASSOCIATION_RETAIN)
+            if newValue != nil {
+                target = self; action = #selector(hbTapFire)
+            }
+        }
+    }
+    @objc fileprivate func hbTapFire() { onTap?() }
+}
+
+/// prototype .sortsel：白底描边下拉。
+final class SortSel: NSView {
+    var items: [String] = [] { didSet { refresh() } }
+    var selected = 0 { didSet { refresh() } }
+    var onPick: ((Int) -> Void)?
+    private let label = NSTextField(labelWithString: "")
+    private var hovered = false
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.borderWidth = 1
+        layer?.hbBorder = "line"
+        layer?.hbBgResolver = { [weak self] in
+            (self?.hovered == true ? Theme.subtle : Theme.card)
+                .color.cgColor
+        }
+        label.font = .systemFont(ofSize: 12.5)
+        label.hbText = "text2"
+        label.frame = NSRect(x: 10, y: 7, width: frame.width - 32,
+                             height: 16)
+        label.autoresizingMask = [.width]
+        label.lineBreakMode = .byTruncatingTail
+        addSubview(label)
+        let cv = NSImageView(frame: NSRect(x: frame.width - 22, y: 9,
+                                           width: 12, height: 12))
+        cv.autoresizingMask = [.minXMargin]
+        cv.image = hbIcon("chevron-d", size: 12, tint: Theme.dyn("text3"))
+        addSubview(cv)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited,
+                                   .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    private func refresh() {
+        label.stringValue = items.indices.contains(selected)
+            ? items[selected] : ""
+    }
+    override func mouseEntered(with e: NSEvent) { hovered = true }
+    override func mouseExited(with e: NSEvent) { hovered = false }
+    override func mouseDown(with e: NSEvent) {
+        let m = NSMenu()
+        for (i, t) in items.enumerated() {
+            let it = m.addItem(withTitle: t, action: #selector(pick(_:)),
+                               keyEquivalent: "")
+            it.target = self; it.tag = i
+            it.state = i == selected ? .on : .off
+        }
+        m.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: self)
+    }
+    @objc private func pick(_ s: NSMenuItem) {
+        selected = s.tag; onPick?(s.tag)
+    }
+}
+
+/// prototype .table th：tableHead 底 + 12 semibold text2。
+final class TableHeadCell: NSTableHeaderCell {
+    override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
+        Theme.dyn("tableHead").setFill()
+        cellFrame.fill()
+        Theme.dyn("line").setFill()
+        NSRect(x: cellFrame.minX, y: cellFrame.minY,
+               width: cellFrame.width, height: 1).fill()
+        let s = NSAttributedString(string: stringValue, attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: Theme.dyn("text2"),
+        ])
+        let sz = s.size()
+        s.draw(at: NSPoint(x: cellFrame.minX + 14,
+                           y: cellFrame.midY - sz.height / 2))
+    }
+}
+
+class TableHeaderView: NSTableHeaderView {
+    override func draw(_ dirtyRect: NSRect) {
+        Theme.dyn("tableHead").setFill()
+        bounds.fill()
+        guard let tv = tableView else { return }
+        for (i, c) in tv.tableColumns.enumerated() {
+            c.headerCell.draw(withFrame: headerRect(ofColumn: i), in: self)
+        }
+    }
+}
+
+/// prototype .rowlink：hover #f6f9fc，行底细线，无系统选中高亮。
+final class HostRowView: NSTableRowView {
+    private var hovered = false { didSet { needsDisplay = true } }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited,
+                                   .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func mouseEntered(with e: NSEvent) { hovered = true }
+    override func mouseExited(with e: NSEvent) { hovered = false }
+    override func drawBackground(in dirtyRect: NSRect) {
+        if hovered {
+            Theme.dyn("rowHover").setFill()
+            dirtyRect.fill()
+        }
+    }
+    override func drawSeparator(in dirtyRect: NSRect) {
+        Theme.dyn("rowLine").setFill()
+        NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width,
+               height: 1).fill()
+    }
+    override func drawSelection(in dirtyRect: NSRect) {}
+}
+
+// MARK: - 主机页
+
+/// 主机页（对齐 prototype hostsView）：
+/// quickbar(搜索+⌘K+Connect)；toolbar(New host▾/Serial/排序/视图)；
+/// 分组 chips；Hosts·N + 卡片网格/表格；400px 详情抽屉。
 final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
                        NSCollectionViewDataSource,
-                       NSCollectionViewDelegateFlowLayout {
+                       NSCollectionViewDelegateFlowLayout,
+                       NSTextFieldDelegate {
     let store = HostStore()
     private var filtered: [HostRec] = []
     private var query = ""
-    private var tagFilter = ""
+    private var chipFilter = ""          // ""=全部 "__tun__"=SSH 隧道 其余=分组
+    private var chipIds: [String] = []
     private var cardMode = true
-    private var sortKey = "name"       // name|group|last
-    private var expandedGroups: Set<String> = []
-    private var rows: [(kind: Int, host: HostRec?)] = []  // kind 0=组头 1=host
-    private var keyMon: Any?
+    private var sortKey = "name"         // name|last|proto
 
     var onConnect: ((HostRec) -> Void)?
     var onQuick: ((String) -> Void)?
-    var onSftp: ((String) -> Void)?          // M3：host_id → SFTP tab
+    var onSftp: ((String) -> Void)?
 
-    private let search = NSSearchField()
-    private let connBtn = NSButton()
+    private let quickBar = NSView()
+    private let search = NSTextField()
     private let chipsRow = NSStackView()
     private let countL = NSTextField(labelWithString: "")
     private let table = NSTableView()
     private let listScroll = NSScrollView()
     private var grid: NSCollectionView!
     private let gridScroll = NSScrollView()
-    private var drawer: NSView?
+    private var sortSel: SortSel!
+    private var modeBtns: [NSButton] = []
+    private var emptyView: NSView!
+    private var scrim: NSView?
+    private var drawer: HostDrawer?
     private var drawerHost: HostRec?
 
     override init(frame: NSRect) {
@@ -126,162 +337,274 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
         reload()
     }
     required init?(coder: NSCoder) { fatalError() }
-    deinit { if let m = keyMon { NSEvent.removeMonitor(m) } }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        if keyMon == nil, window != nil {
-            keyMon = NSEvent.addLocalMonitorForEvents(
-                matching: .keyDown) { [weak self] e in
-                if e.modifierFlags.contains(.command),
-                   e.charactersIgnoringModifiers == "k",
-                   let self, self.window != nil {
-                    self.window?.makeFirstResponder(self.search)
-                    return nil
-                }
-                return e
-            }
-        }
-    }
-
-    private func primaryBtn(_ t: String, _ a: Selector,
-                            _ aid: String) -> NSButton {
-        let b = NSButton(title: t, target: self, action: a)
-        b.isBordered = false
-        b.wantsLayer = true
-        b.layer?.cornerRadius = 6
-        b.layer?.hbBg = "blue"
-        b.attributedTitle = NSAttributedString(
-            string: t, attributes: [.foregroundColor: NSColor.white,
-                                    .font: NSFont.systemFont(
-                                        ofSize: 12, weight: .medium)])
-        b.setAccessibilityIdentifier(aid)
-        return b
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        sizeGrid()
+        sizeColumns()
     }
 
     private func build() {
         wantsLayer = true
-        layer?.hbBg = "page"
-        let W = frame.width
+        layer?.hbBg = "content"
+        let W = frame.width, H = frame.height
 
-        // ── 行1：搜索 + ⌘K + 连接 ──
-        let bar1 = NSView(frame: NSRect(x: 0, y: frame.height - 44,
-                                        width: W, height: 44))
-        bar1.autoresizingMask = [.width, .minYMargin]
-        addSubview(bar1)
-        search.placeholderString = "Find a host or ssh user@hostname…"
-        search.frame = NSRect(x: 12, y: 9, width: W - 160, height: 26)
+        // ── quickbar：搜索 + ⌘K + Connect ──
+        quickBar.frame = NSRect(x: 18, y: H - 54, width: W - 36, height: 40)
+        quickBar.autoresizingMask = [.width, .minYMargin]
+        quickBar.wantsLayer = true
+        quickBar.layer?.cornerRadius = 10
+        quickBar.layer?.borderWidth = 1
+        quickBar.layer?.hbBorder = "line"
+        quickBar.layer?.hbBg = "subtle"
+        addSubview(quickBar)
+        let qw = quickBar.frame.width
+        let si = NSImageView(frame: NSRect(x: 14, y: 12, width: 16,
+                                           height: 16))
+        si.image = hbIcon("search", size: 16, tint: Theme.dyn("text3"))
+        quickBar.addSubview(si)
+        search.frame = NSRect(x: 38, y: 10, width: qw - 38 - 142, height: 20)
         search.autoresizingMask = [.width]
-        search.target = self; search.action = #selector(searchChanged)
+        search.isBordered = false
+        search.drawsBackground = false
+        search.focusRingType = .none
+        search.font = .systemFont(ofSize: 13.5)
+        search.placeholderString = "Find a host or ssh user@hostname…"
+        search.delegate = self
+        search.target = self; search.action = #selector(connectSel)
         search.setAccessibilityIdentifier("hosts-search")
-        bar1.addSubview(search)
-        let kk = NSTextField(labelWithString: "⌘K")
-        kk.textColor = .tertiaryLabelColor
-        kk.font = .systemFont(ofSize: 11)
-        // 贴在搜索框右内缘（搜索 maxX = W-148，留 6pt 边距）
-        kk.frame = NSRect(x: W - 184, y: 14, width: 30, height: 16)
+        quickBar.addSubview(search)
+        let kk = NSButton(title: "⌘K", target: self,
+                          action: #selector(openPalette))
+        kk.isBordered = false
+        kk.wantsLayer = true
+        kk.layer?.cornerRadius = 5
+        kk.layer?.borderWidth = 1
+        kk.layer?.hbBorder = "line"
+        kk.layer?.hbBg = "card"
+        kk.attributedTitle = NSAttributedString(
+            string: "⌘K", attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: Theme.dyn("text3")])
+        kk.frame = NSRect(x: qw - 134, y: 9, width: 36, height: 22)
         kk.autoresizingMask = [.minXMargin]
-        bar1.addSubview(kk)
-        let cb = primaryBtn("Connect", #selector(connectSel), "hosts-connect")
-        cb.frame = NSRect(x: W - 108, y: 8, width: 96, height: 28)
+        quickBar.addSubview(kk)
+        let cb = HBtn("Connect", sm: true)
+        cb.target = self; cb.action = #selector(connectSel)
+        cb.frame = NSRect(x: qw - 90, y: 6, width: 82, height: 28)
         cb.autoresizingMask = [.minXMargin]
-        bar1.addSubview(cb)
+        cb.setAccessibilityIdentifier("hosts-connect")
+        quickBar.addSubview(cb)
 
-        // ── 行2：新建主机 + ▾导入导出 ··· 排序 + 卡片/列表 ──
-        let bar2 = NSView(frame: NSRect(x: 0, y: frame.height - 80,
-                                        width: W, height: 36))
+        // ── toolbar：New host▾ · Serial ··· 排序 + 视图 ──
+        let bar2 = NSView(frame: NSRect(x: 18, y: H - 98,
+                                        width: W - 36, height: 32))
         bar2.autoresizingMask = [.width, .minYMargin]
         addSubview(bar2)
-        let nb = primaryBtn("New host", #selector(newHost), "hosts-new")
-        nb.frame = NSRect(x: 12, y: 6, width: 92, height: 26)
+        let tw = bar2.frame.width
+        let nb = HBtn("New host", style: .primary, icon: "plus")
+        nb.target = self; nb.action = #selector(newHost)
+        nb.frame = NSRect(x: 0, y: 1, width: 110, height: 30)
+        nb.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        nb.setAccessibilityIdentifier("hosts-new")
         bar2.addSubview(nb)
-        let imp = NSPopUpButton(frame: NSRect(x: 108, y: 6, width: 32, height: 26),
-                                pullsDown: true)
-        imp.bezelStyle = .rounded
-        imp.addItem(withTitle: "▾")
-        imp.addItem(withTitle: L("从 ~/.ssh/config 导入…"))
-        imp.addItem(withTitle: L("导入 JSON…"))
-        imp.addItem(withTitle: L("导出 JSON…"))
-        imp.target = self; imp.action = #selector(importExport(_:))
+        let imp = HBtn("▾", style: .primary)
+        imp.target = self; imp.action = #selector(importMenu(_:))
+        imp.frame = NSRect(x: 110, y: 1, width: 30, height: 30)
+        imp.layer?.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
         imp.setAccessibilityIdentifier("hosts-import")
         bar2.addSubview(imp)
-        let sort = NSPopUpButton(frame: NSRect(x: W - 176, y: 6,
-                                             width: 100, height: 26),
-                                 pullsDown: false)
-        sort.addItems(withTitles: [L("按名称"), L("按分组"), L("按最近连接")])
-        sort.target = self; sort.action = #selector(sortChanged(_:))
-        sort.autoresizingMask = [.minXMargin]
-        sort.setAccessibilityIdentifier("hosts-sort")
-        bar2.addSubview(sort)
-        let seg = NSSegmentedControl(
-            images: [hbIcon("grid", size: 13, tint: Theme.dyn("text")),
-                     hbIcon("list", size: 13, tint: Theme.dyn("text"))],
-            trackingMode: .selectOne, target: self,
-            action: #selector(toggleMode(_:)))
-        seg.selectedSegment = 0
-        seg.frame = NSRect(x: W - 68, y: 6, width: 56, height: 26)
-        seg.autoresizingMask = [.minXMargin]
-        seg.setAccessibilityIdentifier("hosts-mode")
-        bar2.addSubview(seg)
+        let divider = NSView(frame: NSRect(x: 110, y: 5, width: 1,
+                                           height: 22))
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor =
+            NSColor.black.withAlphaComponent(0.12).cgColor
+        bar2.addSubview(divider)
+        let serial = HBtn("Serial", style: .ghost, icon: "plug")
+        serial.target = self; serial.action = #selector(serialInfo)
+        serial.frame = NSRect(x: 148, y: 1, width: 88, height: 30)
+        bar2.addSubview(serial)
+        sortSel = SortSel(frame: NSRect(x: tw - 184, y: 1,
+                                        width: 112, height: 30))
+        sortSel.autoresizingMask = [.minXMargin]
+        sortSel.items = [L("按名称"), L("按最近连接"), L("按协议")]
+        sortSel.onPick = { [weak self] i in
+            self?.sortKey = ["name", "last", "proto"][i]
+            self?.refilter()
+        }
+        sortSel.setAccessibilityIdentifier("hosts-sort")
+        bar2.addSubview(sortSel)
+        for i in 0..<2 {
+            let b = NSButton(title: "", target: self,
+                             action: #selector(modeHit(_:)))
+            b.tag = i
+            b.isBordered = false
+            b.wantsLayer = true
+            b.layer?.cornerRadius = 7
+            b.frame = NSRect(x: tw - 66 + CGFloat(i) * 34, y: 1,
+                             width: 32, height: 30)
+            b.autoresizingMask = [.minXMargin]
+            b.setAccessibilityIdentifier(i == 0 ? "hosts-mode"
+                                                : "hosts-mode-list")
+            bar2.addSubview(b)
+            modeBtns.append(b)
+        }
+        refreshModeBtns()
 
-        // ── 行3：标签 chips ──
+        // ── 分组 chips ──
         chipsRow.orientation = .horizontal
-        chipsRow.spacing = 6
-        chipsRow.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 0)
-        chipsRow.frame = NSRect(x: 0, y: frame.height - 114,
-                                width: W, height: 28)
+        chipsRow.spacing = 7
+        chipsRow.frame = NSRect(x: 18, y: H - 132, width: W - 36, height: 26)
         chipsRow.autoresizingMask = [.width, .minYMargin]
         addSubview(chipsRow)
 
-        // ── 行4：主机 · N ──
-        countL.font = .boldSystemFont(ofSize: 11)
-        countL.frame = NSRect(x: 12, y: frame.height - 140,
-                              width: 300, height: 20)
+        // ── Hosts · N ──
+        countL.font = .boldSystemFont(ofSize: 13)
+        countL.frame = NSRect(x: 20, y: H - 160, width: 300, height: 18)
         countL.autoresizingMask = [.minYMargin]
         addSubview(countL)
 
-        // ── 内容：卡片网格 + 列表 ──
-        let cy = frame.height - 148
+        // ── 卡片网格 ──
+        let cy = H - 168
         let lay = NSCollectionViewFlowLayout()
-        lay.itemSize = NSSize(width: 244, height: 62)
-        lay.minimumInteritemSpacing = 10
-        lay.minimumLineSpacing = 10
-        lay.sectionInset = NSEdgeInsets(top: 4, left: 12,
-                                        bottom: 12, right: 12)
-        grid = NSCollectionView(frame: NSRect(x: 0, y: 0, width: W, height: cy))
+        lay.minimumInteritemSpacing = 12
+        lay.minimumLineSpacing = 12
+        lay.sectionInset = NSEdgeInsets(top: 4, left: 18,
+                                        bottom: 20, right: 18)
+        grid = NSCollectionView(frame: NSRect(x: 0, y: 0, width: W,
+                                              height: cy))
         grid.collectionViewLayout = lay
         grid.isSelectable = true
         grid.backgroundColors = [.clear]
         grid.register(HostCardItem.self,
                       forItemWithIdentifier: .init("card"))
         grid.dataSource = self; grid.delegate = self
+        let dbl = NSClickGestureRecognizer(target: self,
+                                           action: #selector(gridDbl(_:)))
+        dbl.numberOfClicksRequired = 2
+        grid.addGestureRecognizer(dbl)
         gridScroll.documentView = grid
         gridScroll.hasVerticalScroller = true
         gridScroll.drawsBackground = false
         gridScroll.frame = NSRect(x: 0, y: 0, width: W, height: cy)
         gridScroll.autoresizingMask = [.width, .height]
         addSubview(gridScroll)
+        sizeGrid()
 
-        listScroll.documentView = table
-        listScroll.hasVerticalScroller = true
-        listScroll.frame = NSRect(x: 0, y: 0, width: W, height: cy)
+        // ── 表格 ──
+        listScroll.frame = NSRect(x: 18, y: 8, width: W - 36,
+                                  height: H - 184)
         listScroll.autoresizingMask = [.width, .height]
+        listScroll.hasVerticalScroller = true
+        listScroll.drawsBackground = false
+        listScroll.wantsLayer = true
+        listScroll.layer?.cornerRadius = 10
+        listScroll.layer?.masksToBounds = true
+        listScroll.layer?.hbBg = "card"
         addSubview(listScroll)
-        for (cid, title) in [("name", L("名称")), ("info", L("协议 · 用户")),
-                             ("group", L("分组")), ("tags", L("标签"))] {
+        for (cid, title) in [("name", L("名称")), ("user", L("用户")),
+                             ("port", L("端口")), ("proto", L("协议")),
+                             ("group", L("分组")), ("go", "")] {
             let c = NSTableColumn(identifier: .init(cid))
             c.title = title
-            c.width = cid == "name" ? 240 : (cid == "tags" ? 200 : 140)
+            c.headerCell = TableHeadCell(textCell: title)
+            c.resizingMask = []
             table.addTableColumn(c)
         }
+        table.frame = listScroll.bounds
+        table.autoresizingMask = [.width, .height]
         table.dataSource = self; table.delegate = self
-        table.rowHeight = 34
+        table.rowHeight = 40
+        table.intercellSpacing = .zero
+        table.headerView = TableHeaderView(frame: NSRect(x: 0, y: 0,
+                                                         width: W - 36,
+                                                         height: 34))
+        table.backgroundColor = .clear
+        table.selectionHighlightStyle = .none
+        table.gridStyleMask = []
+        table.style = .plain
         table.doubleAction = #selector(doubleClick)
         table.target = self
-        table.registerForDraggedTypes([.string])
         table.menu = ctxMenu()
         table.setAccessibilityIdentifier("hosts-table")
+        listScroll.documentView = table
         listScroll.isHidden = true
+        sizeColumns()
+
+        buildEmpty()
+    }
+
+    private func buildEmpty() {
+        let e = NSView(frame: NSRect(x: 0, y: 0, width: frame.width,
+                                     height: frame.height - 168))
+        e.autoresizingMask = [.width, .height]
+        let cx = e.frame.width / 2
+        let cy = e.frame.height / 2
+        let ico = NSView(frame: NSRect(x: cx - 29, y: cy + 34,
+                                       width: 58, height: 58))
+        ico.autoresizingMask = [.minXMargin, .maxXMargin,
+                                .minYMargin, .maxYMargin]
+        ico.wantsLayer = true
+        ico.layer?.cornerRadius = 14
+        ico.layer?.hbBg = "chip"
+        let iv = NSImageView(frame: NSRect(x: 17, y: 17, width: 24,
+                                           height: 24))
+        iv.image = hbIcon("search", size: 24, tint: Theme.dyn("text2"))
+        ico.addSubview(iv)
+        e.addSubview(ico)
+        let t = NSTextField(labelWithString: L("没有匹配的主机"))
+        t.font = .boldSystemFont(ofSize: 15)
+        t.sizeToFit()
+        t.frame.origin = NSPoint(x: cx - t.frame.width / 2, y: cy + 4)
+        t.autoresizingMask = [.minXMargin, .maxXMargin,
+                              .minYMargin, .maxYMargin]
+        e.addSubview(t)
+        let s = NSTextField(labelWithString:
+            L("换个关键词或分组试试，也可以直接新建一台。"))
+        s.font = .systemFont(ofSize: 12.5)
+        s.hbText = "text3"
+        s.sizeToFit()
+        s.frame.origin = NSPoint(x: cx - s.frame.width / 2, y: cy - 22)
+        s.autoresizingMask = [.minXMargin, .maxXMargin,
+                              .minYMargin, .maxYMargin]
+        e.addSubview(s)
+        let b1 = HBtn(L("清除筛选"), sm: true)
+        b1.target = self; b1.action = #selector(clearFilters)
+        b1.frame = NSRect(x: cx - 92, y: cy - 66, width: 88, height: 28)
+        b1.autoresizingMask = [.minXMargin, .maxXMargin,
+                               .minYMargin, .maxYMargin]
+        e.addSubview(b1)
+        let b2 = HBtn("New host", style: .primary, sm: true)
+        b2.target = self; b2.action = #selector(newHost)
+        b2.frame = NSRect(x: cx + 4, y: cy - 66, width: 88, height: 28)
+        b2.autoresizingMask = [.minXMargin, .maxXMargin,
+                               .minYMargin, .maxYMargin]
+        e.addSubview(b2)
+        addSubview(e)
+        emptyView = e
+        e.isHidden = true
+    }
+
+    private func sizeGrid() {
+        guard let lay = grid?.collectionViewLayout
+            as? NSCollectionViewFlowLayout else { return }
+        // 预留竖向滚动条 15px：按 clip 实测宽会在滚动条显隐间来回改列数
+        let usable = frame.width - 36 - 15
+        let cols = max(1, Int((usable + 12) / 312))
+        // -1：整除时 flow layout 的浮点余量会把 N 列挤成 N-1 列
+        let w = (usable - CGFloat(cols - 1) * 12) / CGFloat(cols) - 1
+        let size = NSSize(width: w, height: 64)
+        if lay.itemSize != size { lay.itemSize = size }
+    }
+    private func sizeColumns() {
+        let tw = frame.width - 36 - 15
+        let name = max(180, tw * 0.34)
+        let mid = max(70, (tw - name - 86) / 4)
+        let widths: [CGFloat] = [name, mid, mid, mid, mid, 86]
+        for (i, c) in table.tableColumns.enumerated()
+            where i < widths.count {
+            c.width = widths[i]
+        }
     }
 
     func reload() {
@@ -305,12 +628,12 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
             showDrawer(filtered[i])
             return true
         }
-        guard let ri = rows.firstIndex(where: { $0.host?.id == id })
+        guard let ri = filtered.firstIndex(where: { $0.id == id })
         else { return false }
         table.selectRowIndexes(IndexSet(integer: ri),
                                byExtendingSelection: false)
         table.scrollRowToVisible(ri)
-        if let h = rows[ri].host { showDrawer(h) }
+        showDrawer(filtered[ri])
         return true
     }
     /// dev hook：拖到分组（与 acceptDrop 同一路径）
@@ -343,67 +666,96 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
     }
 
     private func refilter() {
-        var hs = store.hosts.filter {
-            $0.match(query) &&
-            (tagFilter.isEmpty || $0.tags.contains(tagFilter))
+        var hs = store.hosts.filter { h in
+            guard h.match(query) else { return false }
+            if chipFilter.isEmpty { return true }
+            if chipFilter == "__tun__" {
+                return !h.via.isEmpty || h.tunnel == "ssh"
+            }
+            return h.group == chipFilter
         }
         switch sortKey {
-        case "group": hs.sort { ($0.group, $0.label) < ($1.group, $1.label) }
         case "last": hs.sort { $0.lastConnected > $1.lastConnected }
+        case "proto": hs.sort {
+            ($0.proto, $0.label) < ($1.proto, $1.label) }
         default: hs.sort {
             $0.label.localizedCompare($1.label) == .orderedAscending }
         }
         filtered = hs
-        countL.stringValue = L("主机") + " · \(hs.count)"
+        countL.stringValue = "Hosts · \(hs.count)"
         rebuildChips()
-        // 列表行（分组头）
-        rows = []
-        var lastGroup: String?
-        for h in hs {
-            if !h.group.isEmpty, h.group != lastGroup {
-                rows.append((0, h)); lastGroup = h.group
-            } else if h.group.isEmpty { lastGroup = nil }
-            rows.append((1, h))
-        }
         table.reloadData()
         grid.reloadData()
+        let empty = hs.isEmpty
+        emptyView.isHidden = !empty
+        gridScroll.isHidden = !cardMode || empty
+        listScroll.isHidden = cardMode || empty
     }
 
-    // MARK: chips
+    // MARK: chips（全部 + 分组 + SSH 隧道）
     private func rebuildChips() {
         chipsRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        var tags: [String] = []
-        for h in store.hosts {
-            for t in h.tags where !tags.contains(t) { tags.append(t) }
+        var groups: [String] = []
+        for h in store.hosts where !h.group.isEmpty
+            && !groups.contains(h.group) { groups.append(h.group) }
+        chipIds = [""] + groups + ["__tun__"]
+        let titles = [L("全部")] + groups + [L("SSH 隧道")]
+        for (i, t) in titles.enumerated() {
+            mkChip(t, idx: i, on: chipFilter == chipIds[i])
         }
-        mkChip(L("全部"), on: tagFilter.isEmpty)
-        for t in tags { mkChip(t, on: tagFilter == t) }
     }
-    private func mkChip(_ t: String, on: Bool) {
+    private func mkChip(_ t: String, idx: Int, on: Bool) {
         let b = NSButton(title: t, target: self,
                          action: #selector(chipHit(_:)))
+        b.tag = idx
         b.isBordered = false
         b.wantsLayer = true
-        b.layer?.cornerRadius = 10
+        b.layer?.cornerRadius = 13
+        b.layer?.borderWidth = 1
         b.layer?.backgroundColor =
-            (on ? Theme.blue.color : Theme.chip.color).cgColor
+            (on ? Theme.blue.color : Theme.card.color).cgColor
+        b.layer?.borderColor =
+            (on ? Theme.blue.color : Theme.line.color).cgColor
+        let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         b.attributedTitle = NSAttributedString(
             string: t, attributes: [
-                .foregroundColor: on ? NSColor.white
-                                     : Theme.text.color,
-                .font: NSFont.systemFont(ofSize: 11)])
+                .foregroundColor: on ? NSColor.white : Theme.dyn("text2"),
+                .font: font])
         b.setAccessibilityIdentifier("chip-\(t)")
-        b.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        b.translatesAutoresizingMaskIntoConstraints = false
+        let w = (t as NSString).size(withAttributes: [.font: font]).width
+        b.widthAnchor.constraint(equalToConstant: w + 24).isActive = true
+        b.heightAnchor.constraint(equalToConstant: 26).isActive = true
         chipsRow.addArrangedSubview(b)
     }
     @objc private func chipHit(_ s: NSButton) {
-        tagFilter = s.title == L("全部") ? "" : s.title
+        guard chipIds.indices.contains(s.tag) else { return }
+        chipFilter = chipIds[s.tag]
+        refilter()
+    }
+    @objc private func clearFilters() {
+        query = ""; search.stringValue = ""
+        chipFilter = ""
         refilter()
     }
 
     // MARK: actions
-    @objc private func searchChanged() {
+    func controlTextDidChange(_ n: Notification) {
         query = search.stringValue; refilter()
+    }
+    func controlTextDidBeginEditing(_ n: Notification) {
+        quickBar.layer?.borderColor = Theme.blue.color.cgColor
+        quickBar.layer?.shadowColor = Theme.blue.color.cgColor
+        quickBar.layer?.shadowOpacity = 0.15
+        quickBar.layer?.shadowRadius = 3
+        quickBar.layer?.shadowOffset = .zero
+    }
+    func controlTextDidEndEditing(_ n: Notification) {
+        quickBar.layer?.borderColor = Theme.line.color.cgColor
+        quickBar.layer?.shadowOpacity = 0
+    }
+    @objc private func openPalette() {
+        (window as? MainWindow)?.openPalette()
     }
     @objc private func connectSel() {
         // 搜索框形如 user@host[:port] → 快速连接；否则连选中的
@@ -411,21 +763,32 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
         if s.contains("@") { onQuick?(s); return }
         if let h = selHost() { onConnect?(h) }
     }
-    @objc private func toggleMode(_ s: NSSegmentedControl) {
-        devMode(list: s.selectedSegment == 1)
+    @objc private func serialInfo() {
+        NotifyCenter.shared.post(kind: "info",
+                                 title: L("串口终端为 P2 功能（FR-14）"),
+                                 body: "", tabIndex: nil)
     }
+    @objc private func modeHit(_ s: NSButton) { devMode(list: s.tag == 1) }
     func devMode(list: Bool) {
         cardMode = !list
-        gridScroll.isHidden = !cardMode
-        listScroll.isHidden = cardMode
+        refreshModeBtns()
+        gridScroll.isHidden = !cardMode || filtered.isEmpty
+        listScroll.isHidden = cardMode || filtered.isEmpty
+        if !list { sizeGrid() } else { sizeColumns() }
     }
-    @objc private func sortChanged(_ s: NSPopUpButton) {
-        sortKey = ["name", "group", "last"][max(0, s.indexOfSelectedItem)]
-        refilter()
+    private func refreshModeBtns() {
+        for (i, b) in modeBtns.enumerated() {
+            let on = (i == 0) == cardMode
+            b.layer?.backgroundColor =
+                (on ? Theme.btn : Theme.RGBA(0, 0)).color.cgColor
+            b.image = hbIcon(i == 0 ? "grid" : "list", size: 14,
+                             tint: on ? Theme.dyn("blue")
+                                      : Theme.dyn("text2"))
+        }
     }
     func tableViewSelectionDidChange(_ n: Notification) {
-        if let h = selHost() { showDrawer(h) }
-        else { drawer?.removeFromSuperview(); drawer = nil }
+        let r = table.selectedRow
+        if r >= 0, r < filtered.count { showDrawer(filtered[r]) }
     }
     func collectionView(_ c: NSCollectionView,
                         didSelectItemsAt idx: Set<IndexPath>) {
@@ -434,9 +797,14 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
     }
     @objc private func doubleClick() {
         let r = table.clickedRow
-        guard r >= 0, r < rows.count, rows[r].kind == 1,
-              let h = rows[r].host else { return }
-        onConnect?(h)
+        guard r >= 0, r < filtered.count else { return }
+        onConnect?(filtered[r])
+    }
+    @objc private func gridDbl(_ g: NSClickGestureRecognizer) {
+        let p = g.location(in: grid)
+        guard let ip = grid.indexPathForItem(at: p),
+              ip.item < filtered.count else { return }
+        onConnect?(filtered[ip.item])
     }
     @objc private func newHost() { editHost(nil) }
 
@@ -455,14 +823,15 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
         return m
     }
     private func selHost() -> HostRec? {
+        if let h = drawerHost { return h }
         if cardMode {
             guard let i = grid.selectionIndexes.first,
                   i < filtered.count else { return nil }
             return filtered[i]
         }
         let r = table.clickedRow >= 0 ? table.clickedRow : table.selectedRow
-        guard r >= 0, r < rows.count, rows[r].kind == 1 else { return nil }
-        return rows[r].host
+        guard r >= 0, r < filtered.count else { return nil }
+        return filtered[r]
     }
     @objc private func ctxConnect() { selHost().map { onConnect?($0) } }
     @objc private func ctxSftp() { selHost().map { onSftp?($0.id) } }
@@ -476,6 +845,7 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
     }
     @objc private func ctxDel() {
         guard let h = selHost() else { return }
+        closeDrawer()
         Vault.shared.delete(h.id)
         reload()
         let a = NSAlert()
@@ -491,15 +861,21 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
     }
 
     // MARK: 导入导出
-    @objc private func importExport(_ s: NSPopUpButton) {
-        defer { s.selectItem(at: 0) }
-        switch s.indexOfSelectedItem {
-        case 1: importSSHConfig()
-        case 2: importJSON()
-        case 3: exportJSON()
-        default: break
-        }
+    @objc private func importMenu(_ s: NSButton) {
+        let m = NSMenu()
+        m.addItem(withTitle: L("从 ~/.ssh/config 导入…"),
+                  action: #selector(importSSHMenu), keyEquivalent: "")
+        m.addItem(withTitle: L("导入 JSON…"),
+                  action: #selector(importJSONMenu), keyEquivalent: "")
+        m.addItem(withTitle: L("导出 JSON…"),
+                  action: #selector(exportJSONMenu), keyEquivalent: "")
+        m.items.forEach { $0.target = self }
+        m.popUp(positioning: nil,
+                at: NSPoint(x: 0, y: s.bounds.height + 4), in: s)
     }
+    @objc private func importSSHMenu() { importSSHConfig() }
+    @objc private func importJSONMenu() { importJSON() }
+    @objc private func exportJSONMenu() { exportJSON() }
     func importSSHConfig(path: String? = nil) {
         var p = path
         if p == nil {
@@ -553,68 +929,70 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
     }
 
     // MARK: table（列表模式）
-    func numberOfRows(in t: NSTableView) -> Int { rows.count }
+    func numberOfRows(in t: NSTableView) -> Int { filtered.count }
+    func tableView(_ t: NSTableView, rowViewForRow row: Int)
+        -> NSTableRowView? { HostRowView() }
     func tableView(_ t: NSTableView, viewFor c: NSTableColumn?,
                    row: Int) -> NSView? {
-        let e = rows[row]
-        if e.kind == 0 {
-            guard c?.identifier.rawValue == "name" else { return NSView() }
-            let v = NSTextField(labelWithString: "▸ \(e.host?.group ?? "")")
-            v.font = .boldSystemFont(ofSize: 11)
-            return v
+        guard row < filtered.count, let c else { return nil }
+        let h = filtered[row]
+        let cw = c.width
+        func plain(_ s: String, mono: Bool = false,
+                   dim: Bool = false) -> NSTextField {
+            let l = NSTextField(labelWithString: s)
+            l.font = mono ? .monospacedSystemFont(ofSize: 12.5,
+                                                  weight: .regular)
+                          : .systemFont(ofSize: 13)
+            if dim { l.hbText = "text3" }
+            l.frame = NSRect(x: 14, y: 11, width: cw - 28, height: 18)
+            l.lineBreakMode = .byTruncatingTail
+            return l
         }
-        guard let h = e.host, let c else { return nil }
         switch c.identifier.rawValue {
         case "name":
-            let v = NSTableCellView()
-            let iv = NSImageView(frame: NSRect(x: 4, y: 7,
-                                               width: 22, height: 22))
-            let t = osTile(h.os)
-            iv.wantsLayer = true
-            iv.layer?.cornerRadius = 6
-            iv.layer?.backgroundColor = t.bg.color.cgColor
-            iv.image = hbIcon(t.icon, size: 13, tint: .white)
-            v.addSubview(iv)
+            let v = NSView(frame: NSRect(x: 0, y: 0, width: cw,
+                                         height: 40))
+            let tile = NSView(frame: NSRect(x: 14, y: 9, width: 22,
+                                            height: 22))
+            tile.wantsLayer = true
+            tile.layer?.cornerRadius = 6
+            let ot = osTile(h.os)
+            tile.layer?.backgroundColor = ot.bg.color.cgColor
+            let iv = NSImageView(frame: NSRect(x: 5, y: 5, width: 12,
+                                               height: 12))
+            iv.image = hbIcon(ot.icon, size: 12, tint: .white)
+            tile.addSubview(iv)
+            v.addSubview(tile)
             let tf = NSTextField(labelWithString: h.label)
-            tf.frame = NSRect(x: 32, y: 8, width: 200, height: 18)
+            tf.font = .systemFont(ofSize: 13, weight: .semibold)
+            tf.frame = NSRect(x: 44, y: 11, width: cw - 58, height: 18)
+            tf.lineBreakMode = .byTruncatingTail
             v.addSubview(tf)
             return v
-        case "info":
-            return NSTextField(
-                labelWithString: "\(h.proto), \(h.user.isEmpty ? "—" : h.user)")
+        case "user":
+            return plain(h.user.isEmpty ? "—" : h.user,
+                         dim: h.user.isEmpty)
+        case "port":
+            return plain(h.port > 0 ? "\(h.port)" : "—", mono: true)
+        case "proto":
+            return plain(h.proto.uppercased())
         case "group":
-            return NSTextField(labelWithString: h.group)
+            if h.group.isEmpty { return plain("—", dim: true) }
+            let tag = hbTagLabel(h.group)
+            tag.frame.origin = NSPoint(x: 14, y: 11)
+            let wrap = NSView(frame: NSRect(x: 0, y: 0, width: cw,
+                                            height: 40))
+            wrap.addSubview(tag)
+            return wrap
         default:
-            return NSTextField(labelWithString: h.tags.joined(separator: ", "))
+            let wrap = NSView(frame: NSRect(x: 0, y: 0, width: cw,
+                                            height: 40))
+            let b = HBtn(L("连接"), sm: true)
+            b.frame = NSRect(x: 7, y: 7, width: 64, height: 26)
+            b.onTap = { [weak self] in self?.onConnect?(h) }
+            wrap.addSubview(b)
+            return wrap
         }
-    }
-    func tableView(_ t: NSTableView, heightOfRow row: Int) -> CGFloat {
-        rows[row].kind == 0 ? 22 : 34
-    }
-    func tableView(_ t: NSTableView, writeRowsWith idx: IndexSet,
-                   to pboard: NSPasteboard) -> Bool {
-        guard let r = idx.first, r < rows.count, rows[r].kind == 1,
-              let h = rows[r].host else { return false }
-        pboard.declareTypes([.string], owner: nil)
-        pboard.setString(h.id, forType: .string)
-        return true
-    }
-    func tableView(_ t: NSTableView, validateDrop info: NSDraggingInfo,
-                   proposedRow row: Int,
-                   proposedDropOperation op: NSTableView.DropOperation)
-        -> NSDragOperation {
-        guard row < rows.count, rows[row].kind == 0,
-              op == .on else { return [] }
-        return .move
-    }
-    func tableView(_ t: NSTableView, acceptDrop info: NSDraggingInfo,
-                   row: Int, dropOperation op: NSTableView.DropOperation)
-        -> Bool {
-        guard row < rows.count, rows[row].kind == 0,
-              let grp = rows[row].host?.group,
-              let sid = info.draggingPasteboard.string(forType: .string)
-        else { return false }
-        return devSetGroup(id: sid, group: grp)
     }
 
     // MARK: collection（卡片网格）
@@ -625,58 +1003,66 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
     func collectionView(_ c: NSCollectionView, itemForRepresentedObjectAt
                         p: IndexPath) -> NSCollectionViewItem {
         let it = c.makeItem(withIdentifier: .init("card"), for: p)
-        (it as? HostCardItem)?.host = filtered[p.item]
+        if let ci = it as? HostCardItem {
+            ci.host = filtered[p.item]
+            ci.onGo = { [weak self] h in self?.onConnect?(h) }
+        }
         return it
     }
 
-    // MARK: 详情抽屉
+    // MARK: 详情抽屉（400px + scrim，右滑入；覆盖整窗，对齐 prototype）
     private func showDrawer(_ h: HostRec) {
-        drawer?.removeFromSuperview()
-        let w: CGFloat = 240
-        let d = NSView(frame: NSRect(x: bounds.width - w, y: 0,
-                                     width: w, height: bounds.height - 148))
+        closeDrawer()
+        guard let cv = window?.contentView else { return }
+        drawerHost = h
+        let sc = NSView(frame: cv.bounds)
+        sc.autoresizingMask = [.width, .height]
+        sc.wantsLayer = true
+        sc.layer?.backgroundColor =
+            Theme.RGBA(0x0f1626, 0.32).color.cgColor
+        let tap = NSClickGestureRecognizer(target: self,
+                                           action: #selector(closeDrawer))
+        sc.addGestureRecognizer(tap)
+        cv.addSubview(sc)
+        scrim = sc
+        let d = HostDrawer(host: h, store: store,
+                           frame: NSRect(x: cv.bounds.width, y: 0,
+                                         width: 400, height: cv.bounds.height))
         d.autoresizingMask = [.minXMargin, .height]
-        d.wantsLayer = true; d.layer?.hbBg = "card"
-        addSubview(d)
-        drawer = d; drawerHost = h
-        var y = d.bounds.height - 30
-        func row(_ k: String, _ val: String) {
-            let l = NSTextField(labelWithString: "\(k): \(val)")
-            l.frame = NSRect(x: 12, y: y - 18, width: w - 24, height: 18)
-            l.lineBreakMode = .byTruncatingTail
-            d.addSubview(l); y -= 22
+        d.onClose = { [weak self] in self?.closeDrawer() }
+        d.onConnect = { [weak self] hh in
+            self?.closeDrawer(); self?.onConnect?(hh)
         }
-        let ttl = NSTextField(labelWithString: h.label)
-        ttl.font = .boldSystemFont(ofSize: 14)
-        ttl.frame = NSRect(x: 12, y: y - 20, width: w - 24, height: 20)
-        d.addSubview(ttl); y -= 30
-        row(L("地址"), "\(h.user.isEmpty ? "" : h.user + "@")\(h.address):\(h.port)")
-        row(L("认证"), h.auth); row(L("分组"), h.group)
-        row(L("系统"), h.os.isEmpty ? "—" : h.os)
-        row(L("标签"), h.tags.joined(separator: ", "))
-        row(L("跳板"), "\(h.jumps.count)")
-        if h.lastConnected > 0 {
-            row(L("最近连接"), Date(timeIntervalSince1970:
-                TimeInterval(h.lastConnected) / 1000).description)
+        d.onEdit = { [weak self] hh in self?.editHost(hh) }
+        d.onDup = { [weak self] hh in
+            guard let self else { return }
+            var c = hh; c.id = ""; c.name += L(" 副本")
+            _ = self.store.apply(c)
+            self.closeDrawer(); self.reload()
         }
-        let eb = NSButton(title: L("编辑"), target: self,
-                          action: #selector(ctxEdit))
-        eb.bezelStyle = .rounded
-        eb.frame = NSRect(x: 12, y: y - 28, width: 80, height: 24)
-        eb.setAccessibilityIdentifier("drawer-edit")
-        d.addSubview(eb)
-        let cb = NSButton(title: "Connect", target: self,
-                          action: #selector(ctxConnect))
-        cb.bezelStyle = .rounded
-        cb.frame = NSRect(x: 100, y: y - 28, width: 60, height: 24)
-        cb.setAccessibilityIdentifier("drawer-connect")
-        d.addSubview(cb)
-        let sb = NSButton(title: "SFTP", target: self,
-                          action: #selector(ctxSftp))
-        sb.bezelStyle = .rounded
-        sb.frame = NSRect(x: 166, y: y - 28, width: 60, height: 24)
-        sb.setAccessibilityIdentifier("drawer-sftp")
-        d.addSubview(sb)
+        d.onSftp = { [weak self] hh in self?.onSftp?(hh.id) }
+        d.onDel = { [weak self] hh in
+            guard let self else { return }
+            self.drawerHost = hh
+            self.ctxDel()
+        }
+        cv.addSubview(d)
+        drawer = d
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.22
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            d.animator().setFrameOrigin(
+                NSPoint(x: cv.bounds.width - 400, y: 0))
+        }
+    }
+    @objc func closeDrawer() {
+        scrim?.removeFromSuperview(); scrim = nil
+        drawer?.removeFromSuperview(); drawer = nil
+        drawerHost = nil
+    }
+    override func removeFromSuperview() {
+        closeDrawer()
+        super.removeFromSuperview()
     }
 
     // MARK: 新建/编辑表单
@@ -702,10 +1088,20 @@ final class HostsPage: NSView, NSTableViewDataSource, NSTableViewDelegate,
     }
 }
 
+// MARK: - 主机卡片
+
+/// 命中穿透的装饰视图：点击落到父卡片上。
+final class PassView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// 主机卡片（NSCollectionViewItem，复用）。
 final class HostCardItem: NSCollectionViewItem {
     var host: HostRec? {
         didSet { (view as? HostCard)?.host = host }
+    }
+    var onGo: ((HostRec) -> Void)? {
+        didSet { (view as? HostCard)?.onGo = onGo }
     }
     override func loadView() { view = HostCard() }
     override var isSelected: Bool {
@@ -713,83 +1109,308 @@ final class HostCardItem: NSCollectionViewItem {
     }
 }
 
+/// prototype .host-card：38px os-ico + 名称(内联 tag) + 副行 + card-go。
 final class HostCard: NSView {
-    var selected = false {
-        didSet { updateBg() }
-    }
-    var host: HostRec? {
-        didSet { fill() }
-    }
-    private let tile = NSView()
+    var selected = false { didSet { updateStyle() } }
+    var host: HostRec? { didSet { fill() } }
+    var onGo: ((HostRec) -> Void)?
+    private let tile = PassView()
     private let tileImg = NSImageView()
     private let nameL = NSTextField(labelWithString: "")
     private let subL = NSTextField(labelWithString: "")
-    private let tagRow = NSStackView()
+    private var tags: [NSTextField] = []
+    private let go = PassView()
+    private let goImg = NSImageView()
     private var hovered = false
+    private var goHover = false
+
+    override var isFlipped: Bool { true }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = 10
         layer?.borderWidth = 1
-        layer?.hbBorder = "line"
-        updateBg()
+        layer?.hbBg = "card"
+        layer?.shadowColor = Theme.RGBA(0x19233c).color.cgColor
+        updateStyle()
         tile.wantsLayer = true
-        tile.layer?.cornerRadius = 8
-        tile.frame = NSRect(x: 12, y: 13, width: 36, height: 36)
-        tileImg.frame = NSRect(x: 9, y: 9, width: 18, height: 18)
+        tile.layer?.cornerRadius = 10
+        tile.frame = NSRect(x: 15, y: 13, width: 38, height: 38)
+        tileImg.frame = NSRect(x: 9, y: 9, width: 20, height: 20)
         tile.addSubview(tileImg)
         addSubview(tile)
-        nameL.font = .systemFont(ofSize: 13, weight: .medium)
-        nameL.frame = NSRect(x: 58, y: 32, width: 174, height: 18)
+        nameL.font = .systemFont(ofSize: 13.5, weight: .semibold)
         nameL.lineBreakMode = .byTruncatingTail
         addSubview(nameL)
-        subL.font = .systemFont(ofSize: 11)
-        subL.textColor = .secondaryLabelColor
-        subL.frame = NSRect(x: 58, y: 15, width: 174, height: 15)
+        subL.font = .systemFont(ofSize: 12)
+        subL.hbText = "text3"
         subL.lineBreakMode = .byTruncatingTail
         addSubview(subL)
-        tagRow.orientation = .horizontal; tagRow.spacing = 4
-        tagRow.frame = NSRect(x: 58, y: 2, width: 174, height: 14)
-        addSubview(tagRow)
-        let ta = NSTrackingArea(rect: .zero,
-            options: [.mouseEnteredAndExited, .activeAlways,
-                      .inVisibleRect],
-            owner: self, userInfo: nil)
-        addTrackingArea(ta)
+        go.wantsLayer = true
+        go.layer?.cornerRadius = 8
+        goImg.frame = NSRect(x: 8.5, y: 8.5, width: 13, height: 13)
+        go.addSubview(goImg)
+        addSubview(go)
+        updateGo()
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved,
+                                   .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil))
+        layoutCard()
     }
     required init?(coder: NSCoder) { fatalError() }
-    override func mouseEntered(with e: NSEvent) { hovered = true; updateBg() }
-    override func mouseExited(with e: NSEvent) { hovered = false; updateBg() }
-    private func updateBg() {
-        layer?.hbBgResolver = { [weak self] in
-            (self?.selected == true ? Theme.sel
-                : (self?.hovered == true ? Theme.hover : Theme.card))
-                .color.cgColor
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layoutCard()
+    }
+    private func layoutCard() {
+        let w = bounds.width
+        go.frame = NSRect(x: w - 45, y: 17, width: 30, height: 30)
+        let textW = max(40, w - 65 - 55)
+        nameL.frame = NSRect(x: 65, y: 14, width: textW, height: 18)
+        subL.frame = NSRect(x: 65, y: 34, width: textW, height: 16)
+        layoutTags()
+    }
+    private func layoutTags() {
+        let nameW = (nameL.stringValue as NSString).size(
+            withAttributes: [.font: nameL.font!]).width
+        var x = 65 + min(nameW, nameL.frame.width) + 7
+        for t in tags {
+            t.isHidden = x + t.frame.width > go.frame.minX - 8
+            t.frame.origin = NSPoint(x: x, y: 14)
+            x += t.frame.width + 7
         }
+    }
+    override func mouseEntered(with e: NSEvent) {
+        hovered = true; updateStyle()
+        mouseMoved(with: e)
+    }
+    override func mouseExited(with e: NSEvent) {
+        hovered = false; updateStyle()
+        if goHover { goHover = false; updateGo() }
+    }
+    override func mouseMoved(with e: NSEvent) {
+        let p = convert(e.locationInWindow, from: nil)
+        let g = go.frame.contains(p)
+        if g != goHover { goHover = g; updateGo() }
+    }
+    override func mouseDown(with e: NSEvent) {
+        let p = convert(e.locationInWindow, from: nil)
+        if go.frame.contains(p), let h = host {
+            onGo?(h); return
+        }
+        super.mouseDown(with: e)
+    }
+    private func updateStyle() {
+        let hot = hovered || selected
         layer?.hbBorderResolver = { [weak self] in
-            (self?.selected == true ? Theme.blue : Theme.line)
-                .color.cgColor
+            (self?.hovered == true || self?.selected == true
+                ? Theme.cardHover : Theme.RGBA(0, 0)).color.cgColor
         }
+        layer?.shadowOpacity = hot ? 0.09 : 0.05
+        layer?.shadowRadius = hot ? 14 : 2
+        layer?.shadowOffset = CGSize(width: 0, height: hot ? 4 : 1)
+    }
+    private func updateGo() {
+        go.layer?.backgroundColor =
+            (goHover ? Theme.blue : Theme.chip).color.cgColor
+        goImg.image = hbIcon("plug", size: 13,
+                             tint: goHover ? .white
+                                           : Theme.dyn("text3"))
     }
     private func fill() {
         guard let h = host else { return }
         let t = osTile(h.os)
         tile.layer?.backgroundColor = t.bg.color.cgColor
-        tileImg.image = hbIcon(t.icon, size: 18, tint: .white)
+        tileImg.image = hbIcon(t.icon, size: 20, tint: .white)
         nameL.stringValue = h.label
         var sub = "\(h.proto), \(h.user.isEmpty ? "—" : h.user)"
         if !h.group.isEmpty { sub += " · \(h.group)" }
         subL.stringValue = sub
-        tagRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for tg in h.tags.prefix(3) {
-            let c = NSTextField(labelWithString: tg)
-            c.font = .systemFont(ofSize: 9)
-            c.hbText = "blue"
-            c.wantsLayer = true
-            c.layer?.cornerRadius = 4
-            c.layer?.hbBg = "chip"
-            tagRow.addArrangedSubview(c)
+        tags.forEach { $0.removeFromSuperview() }
+        tags = []
+        if !h.via.isEmpty || h.tunnel == "ssh" {
+            let tg = hbTagLabel(L("SSH 隧道"), green: true)
+            addSubview(tg); tags.append(tg)
         }
+        if h.proto == "local" {
+            let tg = hbTagLabel(L("本地"))
+            addSubview(tg); tags.append(tg)
+        }
+        layoutCard()
     }
+}
+
+// MARK: - 详情抽屉
+
+/// prototype .modal.drawer：400px 全高，头部 os-ico+标题+×，
+/// dr-row 键值行，底部 连接/编辑/复制/SFTP/删除。
+final class HostDrawer: NSView {
+    var onClose: (() -> Void)?
+    var onConnect: ((HostRec) -> Void)?
+    var onEdit: ((HostRec) -> Void)?
+    var onDup: ((HostRec) -> Void)?
+    var onSftp: ((HostRec) -> Void)?
+    var onDel: ((HostRec) -> Void)?
+    private let host: HostRec
+
+    override var isFlipped: Bool { true }
+
+    init(host: HostRec, store: HostStore, frame: NSRect) {
+        self.host = host
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.hbBg = "card"
+        layer?.cornerRadius = 14
+        layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.18
+        layer?.shadowRadius = 24
+        layer?.shadowOffset = CGSize(width: -6, height: 0)
+        let W = frame.width, H = frame.height
+
+        // head
+        let tile = NSView(frame: NSRect(x: 18, y: 16, width: 32, height: 32))
+        tile.wantsLayer = true
+        tile.layer?.cornerRadius = 9
+        let ot = osTile(host.os)
+        tile.layer?.backgroundColor = ot.bg.color.cgColor
+        let iv = NSImageView(frame: NSRect(x: 8, y: 8, width: 16, height: 16))
+        iv.image = hbIcon(ot.icon, size: 16, tint: .white)
+        tile.addSubview(iv)
+        addSubview(tile)
+        let ttl = NSTextField(labelWithString: host.label)
+        ttl.font = .boldSystemFont(ofSize: 15)
+        ttl.frame = NSRect(x: 60, y: 22, width: W - 110, height: 20)
+        ttl.lineBreakMode = .byTruncatingTail
+        addSubview(ttl)
+        let x = NSButton(title: "", target: self, action: #selector(hitClose))
+        x.isBordered = false
+        x.image = hbIcon("x", size: 13, tint: Theme.dyn("text2"))
+        x.frame = NSRect(x: W - 42, y: 19, width: 26, height: 26)
+        x.autoresizingMask = [.minXMargin]
+        addSubview(x)
+        sep(62)
+
+        // tags
+        var tx: CGFloat = 18
+        func addTag(_ t: String, green: Bool = false) {
+            let tg = hbTagLabel(t, green: green)
+            tg.frame.origin = NSPoint(x: tx, y: 76)
+            addSubview(tg)
+            tx += tg.frame.width + 6
+        }
+        if !host.via.isEmpty || host.tunnel == "ssh" {
+            addTag(L("SSH 隧道"), green: true)
+        }
+        if !host.group.isEmpty { addTag(host.group) }
+        if host.proto == "local" { addTag(L("本地")) }
+        addTag(L("E2EE 已同步"))
+
+        // rows
+        var y: CGFloat = 108
+        func row(_ k: String, _ v: String) {
+            let kl = NSTextField(labelWithString: k)
+            kl.font = .systemFont(ofSize: 12.5)
+            kl.hbText = "text3"
+            kl.frame = NSRect(x: 18, y: y + 9, width: 104, height: 16)
+            addSubview(kl)
+            let vl = NSTextField(labelWithString: v)
+            vl.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            vl.alignment = .right
+            vl.lineBreakMode = .byTruncatingMiddle
+            vl.frame = NSRect(x: 130, y: y + 9, width: W - 148, height: 16)
+            vl.autoresizingMask = [.width]
+            addSubview(vl)
+            let s = NSView(frame: NSRect(x: 18, y: y + 33,
+                                         width: W - 36, height: 1))
+            s.autoresizingMask = [.width]
+            s.wantsLayer = true
+            s.layer?.hbBg = "hover"
+            addSubview(s)
+            y += 34
+        }
+        row(L("协议"), host.proto.uppercased())
+        row(L("地址"), host.address.isEmpty ? host.label : host.address)
+        row(L("端口"), host.port > 0 ? "\(host.port)" : "—")
+        row(L("用户名"), host.user.isEmpty ? "—" : host.user)
+        row(L("认证"), host.auth)
+        row(L("分组"), host.group.isEmpty ? L("未分组") : host.group)
+        var jump = L("直连")
+        if !host.via.isEmpty,
+           let via = store.hosts.first(where: { $0.id == host.via }) {
+            jump = "\(via.user.isEmpty ? "" : via.user + "@")\(via.label)"
+        } else if !host.jumps.isEmpty {
+            jump = String(format: L("%ld 个跳板"), host.jumps.count)
+        }
+        row(L("跳板 / 隧道"), jump)
+        if host.lastConnected > 0 {
+            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"
+            row(L("最近连接"), f.string(from: Date(
+                timeIntervalSince1970:
+                    TimeInterval(host.lastConnected) / 1000)))
+        } else {
+            row(L("最近连接"), L("尚未连接"))
+        }
+
+        // hintbox（ssh）
+        if host.proto == "ssh" || host.proto.isEmpty {
+            let hb = NSView(frame: NSRect(x: 18, y: y + 10,
+                                          width: W - 36, height: 52))
+            hb.autoresizingMask = [.width]
+            hb.wantsLayer = true
+            hb.layer?.cornerRadius = 9
+            hb.layer?.borderWidth = 1
+            hb.layer?.hbBg = "hintBlueBg"
+            hb.layer?.hbBorder = "hintBlueLine"
+            let hl = NSTextField(wrappingLabelWithString:
+                L("凭据变更 5s 内同步到其它设备；主机指纹详见 Known Hosts。"))
+            hl.font = .systemFont(ofSize: 12)
+            hl.hbText = "hintBlueFg"
+            hl.frame = NSRect(x: 13, y: 8, width: W - 62, height: 36)
+            hl.autoresizingMask = [.width]
+            hb.addSubview(hl)
+            addSubview(hb)
+        }
+
+        // foot
+        let fs = NSView(frame: NSRect(x: 0, y: H - 61, width: W, height: 1))
+        fs.autoresizingMask = [.width, .minYMargin]
+        fs.wantsLayer = true
+        fs.layer?.hbBg = "line"
+        addSubview(fs)
+        func foot(_ b: NSButton, _ x: CGFloat, _ w: CGFloat,
+                  _ aid: String, _ act: Selector) {
+            b.target = self; b.action = act
+            b.frame = NSRect(x: x, y: H - 47, width: w, height: 32)
+            b.autoresizingMask = [.minYMargin]
+            b.setAccessibilityIdentifier(aid)
+            addSubview(b)
+        }
+        foot(HBtn(L("连接"), style: .primary, icon: "plug"),
+             18, 88, "drawer-connect", #selector(hitConnect))
+        foot(HBtn(L("编辑")), 114, 64, "drawer-edit", #selector(hitEdit))
+        foot(HBtn(L("复制")), 186, 64, "drawer-dup", #selector(hitDup))
+        foot(HBtn("SFTP"), 258, 64, "drawer-sftp", #selector(hitSftp))
+        let del = HBtn("", style: .danger, icon: "trash")
+        foot(del, W - 54, 36, "drawer-del", #selector(hitDel))
+        del.autoresizingMask = [.minXMargin, .minYMargin]
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    private func sep(_ y: CGFloat) {
+        let s = NSView(frame: NSRect(x: 0, y: y,
+                                     width: bounds.width, height: 1))
+        s.autoresizingMask = [.width]
+        s.wantsLayer = true
+        s.layer?.hbBg = "line"
+        addSubview(s)
+    }
+    @objc private func hitClose() { onClose?() }
+    @objc private func hitConnect() { onConnect?(host) }
+    @objc private func hitEdit() { onEdit?(host) }
+    @objc private func hitDup() { onDup?(host) }
+    @objc private func hitSftp() { onSftp?(host) }
+    @objc private func hitDel() { onDel?(host) }
 }

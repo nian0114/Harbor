@@ -2,57 +2,152 @@ import AppKit
 import HarborKit
 import CHarbor
 
-/// 凭据页：密钥生成/导入/导出公钥/密码凭据/级联删除（FR-02 无 TouchID/FIDO）。
+/// 凭据页 —— 对齐 prototype keychainView：工具栏（New key 分裂键 +
+/// Certificate/Touch ID/FIDO2 ghost + 搜索），白卡片表格 = 名称 |
+/// 类型 | 指纹 | 生物识别 pill | 被引用 | 行内 复制公钥/编辑/删除；
+/// 表下 hintbox（FR-11）。密钥生成/导入/密码凭据/级联删除（FR-02）。
 final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private var items: [(id: String, kind: String, name: String,
                          meta: String, fp: String, bits: Int,
-                         created: String, usedBy: Int)] = []
-    private let table = NSTableView()
+                         created: String, usedBy: Int, bio: Bool)] = []
+    private var shown: [(id: String, kind: String, name: String,
+                         meta: String, fp: String, bits: Int,
+                         created: String, usedBy: Int, bio: Bool)] = []
+    private let card = VTableCard()
+    private var search: VField!
+    private var searchMinimumX: CGFloat = 18
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        let bar = NSView(frame: NSRect(x: 0, y: frame.height - 40,
-                                       width: frame.width, height: 40))
-        bar.autoresizingMask = [.width, .minYMargin]
-        addSubview(bar)
-        var x: CGFloat = 8
-        func btn(_ t: String, _ a: Selector, _ id: String) {
-            let b = NSButton(title: t, target: self, action: a)
-            b.bezelStyle = .rounded
-            let w = max(96, b.fittingSize.width + 18)
-            b.frame = NSRect(x: x, y: 8, width: w, height: 24)
-            b.setAccessibilityIdentifier(id)
-            bar.addSubview(b); x += w + 8
-        }
-        btn(L("+ 生成密钥"), #selector(genKey), "kc-gen")
-        btn(L("导入私钥"), #selector(importKeyBtn), "kc-import")
-        btn(L("+ 密码凭据"), #selector(newCred), "kc-cred")
-        btn(L("导出公钥…"), #selector(exportPub), "kc-export")
-        btn(L("编辑…"), #selector(editKey), "kc-edit")
-        btn(L("删除"), #selector(del), "kc-delete")
-        let scroll = NSScrollView(frame: NSRect(
-            x: 0, y: 0, width: frame.width, height: frame.height - 40))
-        scroll.autoresizingMask = [.width, .height]
-        scroll.documentView = table
+    override init(frame f: NSRect) {
+        super.init(frame: f)
+        wantsLayer = true
+        layer?.hbBg = "content"
+        buildBar()
+        let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.frame = NSRect(x: 0, y: 0, width: f.width,
+                              height: f.height - 56)
+        scroll.autoresizingMask = [.width, .height]
+        let box = VFlippedStack()
+        box.orientation = .vertical
+        box.spacing = 14
+        box.alignment = .centerX
+        box.edgeInsets = NSEdgeInsets(top: 4, left: 18,
+                                      bottom: 20, right: 18)
+        box.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = box
+        box.widthAnchor.constraint(
+            equalTo: scroll.contentView.widthAnchor).isActive = true
         addSubview(scroll)
-        for (i, t) in [L("名称"), L("类型"), L("位数"),
-                       L("指纹/描述"), L("创建"), L("使用者")].enumerated() {
+        card.translatesAutoresizingMaskIntoConstraints = false
+        box.addArrangedSubview(card)
+        card.widthAnchor.constraint(
+            equalTo: box.widthAnchor, constant: -36).isActive = true
+        let hint = vHintBox(L("私钥经 Secure Enclave / Android Keystore 包装加密存储，同步走端到端加密（FR-11），服务端零明文。"))
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        box.addArrangedSubview(hint)
+        hint.widthAnchor.constraint(
+            equalTo: box.widthAnchor, constant: -36).isActive = true
+        for (i, t) in [L("名称"), L("类型"), L("指纹"),
+                       L("生物识别"), L("被引用"), ("")].enumerated() {
             let c = NSTableColumn(identifier: .init("c\(i)"))
-            c.title = t; c.width = [170, 90, 60, 260, 90, 80][i]
-            table.addTableColumn(c)
+            c.title = t
+            c.headerCell = TableHeadCell(textCell: t)
+            c.resizingMask = []
+            if i == 0 || i == 2 {
+                c.minWidth = 160
+            } else {
+                c.width = [0, 110, 0, 110, 90, 96][i]
+                c.minWidth = c.width
+                c.maxWidth = c.width
+            }
+            card.table.addTableColumn(c)
         }
-        table.headerView = NSTableHeaderView()
-        table.dataSource = self; table.delegate = self
-        table.setAccessibilityIdentifier("kc-table")
+        card.table.dataSource = self
+        card.table.delegate = self
+        card.table.setAccessibilityIdentifier("kc-table")
         reload()
+        card.sizeColumns = { [weak self] width in
+            guard let cols = self?.card.table.tableColumns else { return }
+            let flex = max(320, width - 406)
+            cols[0].width = max(160, floor(flex * 0.42))
+            cols[2].width = flex - cols[0].width
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        let width = min(220, max(24, bounds.width - searchMinimumX - 18))
+        search.frame = NSRect(x: bounds.width - width - 18,
+                              y: bounds.height - 45, width: width, height: 34)
+    }
+
+    private func buildBar() {
+        let split = VSplit(L("新建密钥"), icon: "plus")
+        split.entries = [
+            VMenuEntry(L("生成新密钥")) { [weak self] in
+                self?.genKey()
+            },
+            VMenuEntry(L("导入私钥…")) { [weak self] in
+                self?.importKeyBtn()
+            },
+            VMenuEntry(L("导出全部公钥")) { [weak self] in
+                self?.exportAllPub()
+            },
+            VMenuEntry(L("密码凭据")) { [weak self] in
+                self?.newCred()
+            },
+        ]
+        split.size()
+        split.frame.origin = NSPoint(x: 18, y: bounds.height - 45)
+        split.autoresizingMask = [.minYMargin]
+        split.main.setAccessibilityIdentifier("kc-gen")
+        split.dd.setAccessibilityIdentifier("kc-menu")
+        addSubview(split)
+        var x = 18 + split.frame.width + 8
+        for (t, ic, msg) in [
+            (L("Certificate"), "cert", L("证书导入（P1）")),
+            (L("Touch ID"), "fingerprint",
+             L("Touch ID / 生物识别解锁已在 macOS 生效")),
+            (L("FIDO2"), "fido", L("FIDO2 安全密钥（P1，libfido2）")),
+        ] {
+            let b = HBtn(t, style: .ghost, icon: ic)
+            b.sizeToFit()
+            b.frame = NSRect(x: x, y: bounds.height - 45,
+                             width: b.intrinsicContentSize.width + 28,
+                             height: 33)
+            b.autoresizingMask = [.minYMargin]
+            b.onTap = { [weak self] in
+                self?.showToast(SftpToast(text: msg))
+            }
+            addSubview(b)
+            x += b.frame.width + 8
+        }
+        searchMinimumX = x
+        search = VField(placeholder: L("搜索密钥…"), width: 220)
+        search.frame.origin = NSPoint(x: bounds.width - 238,
+                                      y: bounds.height - 45)
+        search.autoresizingMask = [.minXMargin, .minYMargin]
+        search.onChange = { [weak self] in self?.applyFilter() }
+        search.entry.setAccessibilityIdentifier("kc-search")
+        addSubview(search)
+    }
+    private func showToast(_ t: SftpToast) {
+        t.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(t)
+        NSLayoutConstraint.activate([
+            t.centerXAnchor.constraint(equalTo: centerXAnchor),
+            t.bottomAnchor.constraint(equalTo: bottomAnchor,
+                                      constant: -14),
+        ])
+    }
+
     func devSelect(id: String) -> Bool {
-        guard let i = items.firstIndex(where: { $0.id == id })
+        guard let i = shown.firstIndex(where: { $0.id == id })
         else { return false }
-        table.selectRowIndexes(IndexSet(integer: i),
-                               byExtendingSelection: false)
+        card.table.selectRowIndexes(IndexSet(integer: i),
+                                    byExtendingSelection: false)
         return true
     }
 
@@ -73,16 +168,27 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
                           hb_obj_get_str(o, "fingerprint").str,
                           Int(hb_obj_get_int(o, "bits", 0)),
                           hb_obj_get_str(o, "created").str,
-                          ref[id] ?? 0))
+                          ref[id] ?? 0,
+                          hb_obj_get_bool(o, "confirm", false)))
             hb_obj_free(o)
         }
         for o in Vault.shared.list("cred") {
             items.append((hb_obj_id(o).str, "cred",
                           hb_obj_get_str(o, "name").str, L("密码"), "",
-                          0, hb_obj_get_str(o, "created").str, 0))
+                          0, hb_obj_get_str(o, "created").str, 0,
+                          false))
             hb_obj_free(o)
         }
-        table.reloadData()
+        applyFilter()
+    }
+    private func applyFilter() {
+        let q = search?.stringValue.trimmingCharacters(
+            in: .whitespaces).lowercased() ?? ""
+        shown = q.isEmpty ? items : items.filter {
+            "\($0.name) \($0.meta) \($0.fp)".lowercased().contains(q)
+        }
+        card.table.reloadData()
+        card.setRows(shown.count, emptyText: L("无匹配密钥"))
     }
 
     // MARK: 生成
@@ -125,10 +231,10 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     // MARK: 编辑（名称/确认签名）
-    @objc private func editKey() {
-        let r = table.selectedRow
-        guard r >= 0, r < items.count, items[r].kind == "key",
-              let o = Vault.shared.get(items[r].id) else { return }
+    private func editKey(id: String) {
+        guard let it = items.first(where: { $0.id == id }),
+              it.kind == "key",
+              let o = Vault.shared.get(id) else { return }
         let a = NSAlert()
         a.messageText = L("编辑密钥")
         a.addButton(withTitle: L("保存")); a.addButton(withTitle: L("取消"))
@@ -198,31 +304,33 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         reload()
     }
 
-    // MARK: 导出公钥
-    @objc private func exportPub() {
-        let r = table.selectedRow
-        guard r >= 0, r < items.count, items[r].kind == "key",
-              let o = Vault.shared.get(items[r].id) else { return }
-        let it = items[r]
+    // MARK: 公钥
+    private func copyPub(id: String) {
+        guard let o = Vault.shared.get(id) else { return }
         defer { hb_obj_free(o) }
         let pub = hb_obj_get_str(o, "public").str
         guard !pub.isEmpty else { NSSound.beep(); return }
-        let a = NSAlert()
-        a.messageText = L("导出公钥…")
-        a.addButton(withTitle: L("复制到剪贴板"))
-        a.addButton(withTitle: L("保存到文件…"))
-        a.addButton(withTitle: L("取消"))
-        let r2 = a.runModal()
-        if r2 == .alertFirstButtonReturn {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(pub, forType: .string)
-        } else if r2 == .alertSecondButtonReturn {
-            let sp = NSSavePanel()
-            sp.nameFieldStringValue = it.name + ".pub"
-            if sp.runModal() == .OK, let u = sp.url {
-                try? pub.write(to: u, atomically: true,
-                               encoding: .utf8)
-            }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(pub, forType: .string)
+        showToast(SftpToast(text: L("公钥已复制")))
+    }
+    private func exportAllPub() {
+        var lines: [String] = []
+        for it in items where it.kind == "key" {
+            guard let o = Vault.shared.get(it.id) else { continue }
+            let pub = hb_obj_get_str(o, "public").str
+            hb_obj_free(o)
+            if !pub.isEmpty { lines.append("# \(it.name)\n\(pub)") }
+        }
+        guard !lines.isEmpty else { NSSound.beep(); return }
+        let sp = NSSavePanel()
+        sp.nameFieldStringValue = "harbor_pubkeys.txt"
+        sp.begin { [weak self] resp in
+            guard resp == .OK, let u = sp.url else { return }
+            try? lines.joined(separator: "\n").write(
+                to: u, atomically: true, encoding: .utf8)
+            self?.showToast(SftpToast(
+                text: L("公钥已导出（私钥永不导出）")))
         }
     }
 
@@ -256,10 +364,8 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     // MARK: 删除（级联）
-    @objc private func del() {
-        let r = table.selectedRow
-        guard r >= 0, r < items.count else { return }
-        let it = items[r]
+    private func del(id: String) {
+        guard let it = items.first(where: { $0.id == id }) else { return }
         // 引用计数：多少 host.key_id == it.id
         let refs = it.kind == "key" ? Vault.shared.list("host").filter {
             let k = hb_obj_get_str($0, "key_id").str == it.id
@@ -284,30 +390,72 @@ final class KeychainPage: NSView, NSTableViewDataSource, NSTableViewDelegate {
         }
     }
 
-    func numberOfRows(in t: NSTableView) -> Int { items.count }
+    func numberOfRows(in t: NSTableView) -> Int { shown.count }
+    func tableView(_ t: NSTableView, rowViewForRow row: Int)
+        -> NSTableRowView? { VTableRowView() }
     func tableView(_ t: NSTableView, viewFor c: NSTableColumn?,
                    row: Int) -> NSView? {
-        let it = items[row]
+        let it = shown[row]
         let col = c?.identifier.rawValue ?? ""
-        let txt: String
         switch col {
-        case "c0": txt = it.name
-        case "c1": txt = it.meta
-        case "c2": txt = it.bits > 0 ? "\(it.bits)" : "—"
+        case "c0":
+            let s = NSStackView()
+            s.orientation = .horizontal
+            s.spacing = 7
+            let iv = NSImageView()
+            iv.image = hbIcon("key", size: 13, tint: Theme.dyn("text2"))
+            iv.translatesAutoresizingMaskIntoConstraints = false
+            iv.widthAnchor.constraint(equalToConstant: 13).isActive = true
+            iv.heightAnchor.constraint(equalToConstant: 13).isActive = true
+            s.addArrangedSubview(iv)
+            s.addArrangedSubview(vLabel(it.name, bold: true))
+            return s
+        case "c1":
+            return vLabel(it.bits > 0
+                ? "\(it.meta) \(it.bits)" : it.meta)
+        case "c2":
+            return vLabel(it.fp.isEmpty
+                ? (it.kind == "cred" ? "••••••" : "—") : it.fp,
+                mono: true, dim: true)
+        case "c3":
+            let wrap = NSView()
+            let p = it.bio ? VPill(L("Touch ID"), kind: .on)
+                : VPill(L("关闭"), kind: .off, dot: false)
+            p.translatesAutoresizingMaskIntoConstraints = false
+            wrap.addSubview(p)
+            NSLayoutConstraint.activate([
+                p.leadingAnchor.constraint(
+                    equalTo: wrap.leadingAnchor),
+                p.centerYAnchor.constraint(
+                    equalTo: wrap.centerYAnchor),
+            ])
+            return wrap
         case "c4":
-            let ts = TimeInterval(it.created) ?? 0
-            txt = ts > 0 ? DateFormatter.localizedString(
-                from: Date(timeIntervalSince1970: ts),
-                dateStyle: .short, timeStyle: .none) : "—"
-        case "c5": txt = it.usedBy > 0
-            ? String(format: L("%d 台主机"), it.usedBy) : "—"
+            return vLabel(it.usedBy > 0
+                ? String(format: L("%d 台主机"), it.usedBy) : "—")
         default:
-            txt = it.fp.isEmpty
-                ? (it.kind == "cred" ? "••••••" : "") : it.fp
+            let s = NSStackView()
+            s.orientation = .horizontal
+            s.spacing = 4
+            if it.kind == "key" {
+                let cb = VIconBtn(icon: "link")
+                cb.toolTip = L("复制公钥")
+                cb.onTap = { [weak self] in self?.copyPub(id: it.id) }
+                cb.setAccessibilityIdentifier("kc-copy-\(it.id)")
+                s.addArrangedSubview(cb)
+                let eb = VIconBtn(icon: "wand")
+                eb.toolTip = L("编辑")
+                eb.onTap = { [weak self] in self?.editKey(id: it.id) }
+                eb.setAccessibilityIdentifier("kc-edit-\(it.id)")
+                s.addArrangedSubview(eb)
+            }
+            let db = VIconBtn(icon: "trash", kind: .del)
+            db.toolTip = L("删除密钥")
+            db.onTap = { [weak self] in self?.del(id: it.id) }
+            db.setAccessibilityIdentifier("kc-del-\(it.id)")
+            s.addArrangedSubview(db)
+            return s
         }
-        let v = NSTextField(labelWithString: txt)
-        v.lineBreakMode = .byTruncatingMiddle
-        return v
     }
 }
 

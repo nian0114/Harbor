@@ -24,6 +24,8 @@ final class ConnCtl {
     private var hname = "", huser = ""
     /// FR-12 share meta host（对齐 hb-ssh-page 的 hname）。
     var shareHost: String { hname }
+    /// term-toolbar 标题用的 ssh 用户名（对齐 prototype tt-title）。
+    var sshUser: String { huser }
     private(set) var sess: Session?
     weak var delegate: ConnDelegate?
     weak var window: NSWindow?
