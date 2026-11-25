@@ -6,6 +6,7 @@
 *.a
 /.cache/
 /.shots/
+/docs/dev/
 /.pkg-deb/
 /.pkg-appimage/
 /po/harbor.pot
