@@ -1,6 +1,7 @@
 #if DEBUG
 import Foundation
 import AppKit
+import ScreenCaptureKit
 import CHarbor
 import HarborKit
 
@@ -14,6 +15,21 @@ final class DevServer {
     private let offMainSafe: Set<String> = [
         "postkey", "quit-reply",
     ]
+    private static let capturePanelOverrides: Void = {
+        for (original, replacement) in [
+            ("runModal", "hb_captureRunModal"),
+            ("beginWithCompletionHandler:", "hb_captureBeginWithCompletionHandler:"),
+            ("beginSheetModalForWindow:completionHandler:", "hb_captureBeginSheetModalForWindow:completionHandler:"),
+        ] {
+            if let a = class_getInstanceMethod(NSSavePanel.self, NSSelectorFromString(original)),
+               let b = class_getInstanceMethod(NSSavePanel.self, NSSelectorFromString(replacement)) {
+                method_exchangeImplementations(a, b)
+            }
+        }
+    }()
+    private var screenShotState = "idle"
+    private var trackedMenu: NSMenu?
+    private var menuObservers: [NSObjectProtocol] = []
     weak var win: MainWindow?
     let path: String
 
@@ -40,7 +56,18 @@ final class DevServer {
 
     init?(win: MainWindow?) {
         self.win = win
+        if ProcessInfo.processInfo.environment["HARBOR_CAPTURE_PANEL_DIR"] != nil {
+            _ = Self.capturePanelOverrides
+        }
         path = Vault.shared.dataDir.appendingPathComponent("dev.sock").path
+        menuObservers.append(NotificationCenter.default.addObserver(
+            forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { [weak self] n in
+                self?.trackedMenu = n.object as? NSMenu
+            })
+        menuObservers.append(NotificationCenter.default.addObserver(
+            forName: NSMenu.didEndTrackingNotification, object: nil, queue: nil) { [weak self] n in
+                if self?.trackedMenu === (n.object as? NSMenu) { self?.trackedMenu = nil }
+            })
         unlink(path)
         fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
@@ -69,7 +96,10 @@ final class DevServer {
         s.resume()
         src = s
     }
-    deinit { src?.cancel(); if fd >= 0 { close(fd) }; unlink(path) }
+    deinit {
+        for observer in menuObservers { NotificationCenter.default.removeObserver(observer) }
+        src?.cancel(); if fd >= 0 { close(fd) }; unlink(path)
+    }
 
     private func accept() {
         var c: Int32
@@ -146,6 +176,36 @@ final class DevServer {
                             arg == "1" || arg == "true" || arg == "quit")
             return "OK"
         case "snapshot": return cmdSnapshot(arg)
+        case "snapshot-ui": return cmdSnapshotUI(arg)
+        case "snapshot-screen": return cmdSnapshotScreen(arg)
+        case "snapshot-screen-notification": return cmdSnapshotScreen(arg, notifications: true)
+        case "snapshot-screen-state": return screenShotState
+        case "ui-info": return cmdUIInfo(arg)
+        case "ui-windows":
+            let items: [[String: Any]] = NSApp.windows.map { window in
+                ["class": String(describing: type(of: window)), "visible": window.isVisible,
+                 "modal": window === NSApp.modalWindow, "sheet": window.isSheet,
+                 "number": window.windowNumber, "frame": NSStringFromRect(window.frame)]
+            }
+            let data = (try? JSONSerialization.data(withJSONObject: items)) ?? Data()
+            return String(data: data, encoding: .utf8) ?? "[]"
+        case "ui-click": return cmdUIClick(arg)
+        case "ui-panel-directory":
+            let panels = [NSApp.modalWindow, win?.attachedSheet].compactMap { $0 }
+                + NSApp.windows
+            guard let panel = panels.compactMap({ $0 as? NSSavePanel }).first(where: { $0.isVisible }),
+                  FileManager.default.fileExists(atPath: arg) else { return "ERR no visible file panel or directory" }
+            panel.directoryURL = URL(fileURLWithPath: arg, isDirectory: true)
+            return "OK"
+        case "ui-panel-path":
+            guard let panel = NSApp.windows.compactMap({ $0 as? NSSavePanel }).first(where: { $0.isVisible })
+            else { return "ERR no visible file panel" }
+            return "OK " + (panel.directoryURL?.resolvingSymlinksInPath().path ?? "")
+        case "ui-menu": return cmdUIMenu(arg)
+        case "ui-menu-info":
+            let items = trackedMenu?.items.map { ["title": $0.title, "enabled": $0.isEnabled] as [String: Any] } ?? []
+            let data = (try? JSONSerialization.data(withJSONObject: items)) ?? Data()
+            return String(data: data, encoding: .utf8) ?? "[]"
         case "type":    return cmdType(arg)
         case "key":     return cmdKey(arg)
         case "ime-mark":   return cmdIme(arg, commit: false)
@@ -617,6 +677,170 @@ final class DevServer {
         return (i == 0 || i == 1) ? v?.panes[i] : nil
     }
 
+    // Generic UI capture drivers: DEBUG only, gated by HARBOR_DEV_ACTIONS.
+    // Match real visible views and invoke their normal event/action handlers.
+    private func captureViews(_ selector: String) -> [NSView] {
+        var matches: [NSView] = []
+        var visited = Set<ObjectIdentifier>()
+        let parts = selector.split(separator: "=", maxSplits: 1).map(String.init)
+        let kind = parts.count == 2 ? parts[0] : "id"
+        let value = parts.count == 2 ? parts[1] : selector
+        func walk(_ view: NSView) {
+            guard !view.isHiddenOrHasHiddenAncestor,
+                  visited.insert(ObjectIdentifier(view)).inserted else { return }
+            let id = view.accessibilityIdentifier()
+            let rawLabel = (view as? NSButton)?.attributedTitle.string
+                ?? (view as? NSTextField)?.stringValue ?? ""
+            let label = rawLabel.replacingOccurrences(of: "\u{fffc}", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if (kind == "id" && id == value)
+                || (kind == "class" && String(describing: type(of: view)) == value)
+                || (kind == "text" && label == value)
+                || (kind == "window" && view === view.window?.contentView
+                    && view.window.map { String(describing: type(of: $0)) == value } == true) { matches.append(view) }
+            for child in view.subviews { walk(child) }
+            if let scroll = view as? NSScrollView, let doc = scroll.documentView { walk(doc) }
+        }
+        var windows = NSApp.orderedWindows
+        for window in NSApp.windows where !windows.contains(where: { $0 === window }) { windows.append(window) }
+        if let modal = NSApp.modalWindow, !windows.contains(where: { $0 === modal }) { windows.insert(modal, at: 0) }
+        if let w = win, !windows.contains(where: { $0 === w }) { windows.append(w) }
+        if let sheet = win?.attachedSheet { windows.insert(sheet, at: 0) }
+        for window in windows where window.isVisible {
+            if let root = window.contentView { walk(root) }
+        }
+        return matches
+    }
+    private func cmdUIInfo(_ selector: String) -> String {
+        let info: [[String: Any]] = captureViews(selector).map { view in
+            ["id": view.accessibilityIdentifier(),
+             "class": String(describing: type(of: view)),
+             "text": (view as? NSButton)?.attributedTitle.string
+                ?? (view as? NSTextField)?.stringValue ?? "",
+             "window": view.window?.windowNumber ?? 0,
+             "frame": NSStringFromRect(view.convert(view.bounds, to: nil))]
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: info)) ?? Data()
+        return String(data: data, encoding: .utf8) ?? "[]"
+    }
+    private func cmdUIClick(_ selector: String) -> String {
+        guard let view = captureViews(selector).first, let window = view.window
+        else { return "ERR no visible view" }
+        if let control = view as? NSControl, !control.isEnabled { return "ERR disabled" }
+        // Opening NSMenu enters a tracking loop. Reply before dispatch so the
+        // next socket command can inspect/select the menu in that runloop mode.
+        DispatchQueue.main.async {
+            if let button = view as? NSButton { button.performClick(nil); return }
+            if let control = view as? NSControl, control.action != nil {
+                control.sendAction(control.action, to: control.target); return
+            }
+            let point = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+            if let event = NSEvent.mouseEvent(with: .leftMouseDown, location: point,
+                    modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                    clickCount: 1, pressure: 1) { view.mouseDown(with: event) }
+        }
+        return "OK"
+    }
+    private func cmdUIMenu(_ label: String) -> String {
+        guard let menu = trackedMenu else { return "ERR no tracking menu" }
+        let index = menu.items.firstIndex { $0.title == label }
+            ?? Int(label).flatMap { menu.items.indices.contains($0) ? $0 : nil }
+        guard let index, menu.items[index].isEnabled,
+              !menu.items[index].isSeparatorItem else { return "ERR no enabled menu item" }
+        menu.cancelTrackingWithoutAnimation()
+        DispatchQueue.main.async { menu.performActionForItem(at: index) }
+        return "OK"
+    }
+    private func cmdSnapshotScreen(_ path: String, notifications: Bool = false) -> String {
+        guard #available(macOS 14.0, *) else { return "ERR macOS 14 required" }
+        guard let window = win, !path.isEmpty else { return "ERR no window" }
+        guard CGPreflightScreenCaptureAccess() else {
+            _ = CGRequestScreenCaptureAccess()
+            return "ERR screen-recording-permission-required"
+        }
+        guard let info = (CGWindowListCopyWindowInfo(.optionIncludingWindow,
+                CGWindowID(window.windowNumber)) as? [[String: Any]])?.first,
+              let bounds = info[kCGWindowBounds as String] as? [String: Any],
+              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+        else { return "ERR window bounds unavailable" }
+        let windowIDs = Set(NSApp.windows.filter { $0.isVisible }.map { CGWindowID(truncatingIfNeeded: $0.windowNumber) })
+        screenShotState = "pending: shareable content"
+        // Work off the main queue: NSMenu tracking does not drain that queue.
+        // Completion returns through the existing all-modes socket dispatcher.
+        Task.detached { [weak self] in
+            let result: String
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                self?.runOnMain { [weak self] in self?.screenShotState = "pending: capture image" }
+                guard let display = content.displays.first(where: { $0.frame.intersects(rect) })
+                else { throw NSError(domain: "HarborCapture", code: 1) }
+                var windows = content.windows.filter { windowIDs.contains($0.windowID) }
+                if notifications {
+                    let banners = content.windows.filter {
+                        $0.owningApplication?.bundleIdentifier == "com.apple.notificationcenterui"
+                            && $0.isOnScreen && $0.frame.intersects(rect)
+                    }
+                    guard !banners.isEmpty else {
+                        throw NSError(domain: "HarborCapture", code: 3, userInfo: [
+                            NSLocalizedDescriptionKey: "notification-banner-not-visible-in-Harbor-window"])
+                    }
+                    windows += banners
+                }
+                let filter = SCContentFilter(display: display, including: windows)
+                let config = SCStreamConfiguration()
+                config.width = Int(rect.width); config.height = Int(rect.height)
+                config.sourceRect = rect.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
+                config.showsCursor = false; config.capturesAudio = false
+                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                let bitmap = NSBitmapImageRep(cgImage: image)
+                guard let png = bitmap.representation(using: .png, properties: [:])
+                else { throw NSError(domain: "HarborCapture", code: 2) }
+                try png.write(to: URL(fileURLWithPath: path))
+                result = "OK captured isolated Harbor windows"
+            } catch { result = "ERR screen capture: \(error.localizedDescription)" }
+            self?.runOnMain { [weak self] in self?.screenShotState = result }
+        }
+        return "OK pending"
+    }
+
+    private func cmdSnapshotUI(_ path: String) -> String {
+        guard let window = win, let main = window.contentView?.superview ?? window.contentView,
+              !path.isEmpty,
+              let canvas = NSBitmapImageRep(bitmapDataPlanes: nil,
+                pixelsWide: Int(window.frame.width), pixelsHigh: Int(window.frame.height),
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: canvas)
+        else { return "ERR snapshot-ui canvas" }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.imageInterpolation = .high
+        func paint(_ view: NSView, _ frame: NSRect) {
+            view.layoutSubtreeIfNeeded()
+            if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: rep)
+                rep.draw(in: frame)
+            }
+        }
+        paint(main, NSRect(origin: .zero, size: window.frame.size))
+        var windows = Array(NSApp.orderedWindows.reversed())
+        if let sheet = window.attachedSheet,
+           !windows.contains(where: { $0 === sheet }) { windows.append(sheet) }
+        var count = 0
+        for child in windows where child !== window && child.isVisible {
+            guard let view = child.contentView?.superview ?? child.contentView else { continue }
+            let frame = child.frame.offsetBy(dx: -window.frame.minX, dy: -window.frame.minY)
+            guard frame.intersects(NSRect(origin: .zero, size: window.frame.size)) else { continue }
+            paint(view, frame); count += 1
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        guard let png = canvas.representation(using: .png, properties: [:]) else { return "ERR png" }
+        do { try png.write(to: URL(fileURLWithPath: path)) }
+        catch { return "ERR write" }
+        return "OK overlays=\(count)"
+    }
+
     private func cmdSnapshot(_ arg: String) -> String {
         // 整窗（含标题栏/标签条）：渲染 frame 视图而不是 contentView
         guard let v = win?.contentView?.superview ?? win?.contentView
@@ -818,6 +1042,10 @@ final class DevServer {
               let win else { return "ERR" }
         var f = win.frame
         f.size = NSSize(width: w, height: h)
+        if let area = win.screen?.visibleFrame {
+            f.origin.x = max(area.minX, min(f.minX, area.maxX-f.width))
+            f.origin.y = max(area.minY, min(f.minY, area.maxY-f.height))
+        }
         win.setFrame(f, display: true)
         return "OK"
     }
@@ -878,6 +1106,9 @@ final class DevServer {
             "winVisible": win.isVisible,
             "occlusion": win.occlusionState.rawValue,
             "appActive": NSApp.isActive,
+            "pid": ProcessInfo.processInfo.processIdentifier,
+            "bundleIdentifier": Bundle.main.bundleIdentifier ?? "",
+            "bundlePath": Bundle.main.bundleURL.path,
         ]
         let d = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data()
         return "OK " + (String(data: d, encoding: .utf8) ?? "{}")
@@ -1598,5 +1829,29 @@ extension DevServer {
     }
 }
 
+// Capture-only initial directory: configure the real native panel before its
+// XPC browser opens. Normal DEBUG runs and all release builds are unaffected.
+private extension NSSavePanel {
+    func hb_captureDirectory() {
+        if let path = ProcessInfo.processInfo.environment["HARBOR_CAPTURE_PANEL_DIR"] {
+            directoryURL = URL(fileURLWithPath: path, isDirectory: true)
+        }
+    }
+    @objc dynamic func hb_captureRunModal() -> NSApplication.ModalResponse {
+        hb_captureDirectory()
+        return hb_captureRunModal()
+    }
+    @objc(hb_captureBeginWithCompletionHandler:)
+    dynamic func hb_captureBegin(_ completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        hb_captureDirectory()
+        hb_captureBegin(completion)
+    }
+    @objc(hb_captureBeginSheetModalForWindow:completionHandler:)
+    dynamic func hb_captureBeginSheet(_ window: NSWindow,
+                                      _ completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        hb_captureDirectory()
+        hb_captureBeginSheet(window, completion)
+    }
+}
 #endif
 
